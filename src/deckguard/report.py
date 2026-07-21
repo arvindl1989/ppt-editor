@@ -1,0 +1,185 @@
+"""Rendering: inspect/audit/fix reports as JSON, Markdown, or CSV."""
+
+from __future__ import annotations
+
+import csv
+import dataclasses
+import io
+import json
+from datetime import datetime, timezone
+
+SEVERITY_ICON = {"critical": "🔴", "major": "🟠", "minor": "🟡"}
+
+
+def _clean(value):
+    """Recursively convert dataclasses/sets to JSON-safe plain structures,
+    dropping the live python-pptx/lxml object references (`obj`, `target`)."""
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        out = {}
+        for f in dataclasses.fields(value):
+            if f.name in ("obj", "target"):
+                continue
+            out[f.name] = _clean(getattr(value, f.name))
+        return out
+    if isinstance(value, (list, tuple)):
+        return [_clean(v) for v in value]
+    if isinstance(value, set):
+        return sorted(_clean(v) for v in value)
+    if isinstance(value, dict):
+        return {k: _clean(v) for k, v in value.items()}
+    return value
+
+
+def to_json(value) -> str:
+    return json.dumps(_clean(value), indent=2, default=str)
+
+
+# --------------------------------------------------------------------------
+# inspect
+# --------------------------------------------------------------------------
+
+
+def inventory_to_dict(inventory) -> dict:
+    return _clean(inventory)
+
+
+def render_inventory_md(inventory, deck_name: str) -> str:
+    lines = [f"# Inventory — {deck_name}", ""]
+    lines.append(f"- Slide size: {inventory.aspect_ratio} ({inventory.slide_width_emu}x{inventory.slide_height_emu} EMU)")
+    lines.append(f"- Slides: {len(inventory.slides)}")
+    lines.append("")
+    for slide in inventory.slides:
+        lines.append(f"## Slide {slide.index} — layout: {slide.layout_name} (master: {slide.master_name})")
+        for shape in slide.shapes:
+            lines.append(f"- **{shape.name}** ({shape.shape_type}) @ ({shape.left_in}, {shape.top_in}) in, "
+                          f"{shape.width_in}x{shape.height_in} in")
+            if shape.fill and shape.fill.type not in ("inherited", "none", None):
+                colors = ", ".join(f"#{c.hex}" for c in shape.fill.colors if c.hex)
+                lines.append(f"  - fill: {shape.fill.type} {colors}")
+            if shape.line and shape.line.color and shape.line.color.hex:
+                lines.append(f"  - line: #{shape.line.color.hex}")
+            if shape.effects:
+                lines.append(f"  - effects: {', '.join(sorted(shape.effects))}")
+            if shape.image:
+                lines.append(f"  - image: {shape.image.filename} phash={shape.image.phash}")
+            for para in shape.paragraphs:
+                for run in para.runs:
+                    if not run.text.strip():
+                        continue
+                    color = f"#{run.color.hex}" if run.color and run.color.hex else "-"
+                    fx = f" effects={sorted(run.effects)}" if run.effects else ""
+                    lines.append(
+                        f"  - text {run.text!r}: font={run.font_raw!r} bold={run.bold} "
+                        f"size={run.size_pt}pt color={color} align={para.alignment}{fx}"
+                    )
+        lines.append("")
+    return "\n".join(lines)
+
+
+# --------------------------------------------------------------------------
+# audit
+# --------------------------------------------------------------------------
+
+
+def audit_summary_dict(deck_name: str, violations, summary: dict) -> dict:
+    return {
+        "deck": deck_name,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "summary": summary,
+        "violations": [_violation_dict(v) for v in violations],
+    }
+
+
+def _violation_dict(v) -> dict:
+    d = _clean(v)
+    return d
+
+
+def render_audit_md(deck_name: str, violations, summary: dict) -> str:
+    lines = [f"# Audit report — {deck_name}", ""]
+    lines.append(
+        f"**{summary['total']} violations** — "
+        f"{summary['critical']} critical, {summary['major']} major, {summary['minor']} minor "
+        f"({summary['auto_fixable']} auto-fixable)"
+    )
+    lines.append("")
+    if not violations:
+        lines.append("No violations found.")
+        return "\n".join(lines)
+
+    lines.append("| Slide | Severity | Rule | Element | Shape | Message | Auto-fixable | Source |")
+    lines.append("|---|---|---|---|---|---|---|---|")
+    for v in violations:
+        icon = SEVERITY_ICON.get(v.severity, "")
+        lines.append(
+            f"| {v.slide_index} | {icon} {v.severity} | {v.rule} | {v.element} | "
+            f"{v.shape_name or ''} | {v.message} | {'yes' if v.auto_fixable else 'no'} | {v.source} |"
+        )
+    return "\n".join(lines)
+
+
+def render_audit_csv(violations) -> str:
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["slide_index", "severity", "rule", "element", "shape_id", "shape_name", "message", "auto_fixable", "source"])
+    for v in violations:
+        writer.writerow([v.slide_index, v.severity, v.rule, v.element, v.shape_id, v.shape_name, v.message, v.auto_fixable, v.source])
+    return buf.getvalue()
+
+
+def render_batch_summary_csv(rows: list[dict]) -> str:
+    """rows: [{deck, slides, critical, major, minor, total, pct_auto_fixable}, ...]"""
+    buf = io.StringIO()
+    fieldnames = ["deck", "slides", "critical", "major", "minor", "total", "pct_auto_fixable"]
+    writer = csv.DictWriter(buf, fieldnames=fieldnames)
+    writer.writeheader()
+    for row in rows:
+        writer.writerow(row)
+    return buf.getvalue()
+
+
+# --------------------------------------------------------------------------
+# fix
+# --------------------------------------------------------------------------
+
+
+def fix_report_to_dict(report) -> dict:
+    return {
+        "source": report.source_path,
+        "output": report.output_path,
+        "dry_run": report.dry_run,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "summary": report.summary,
+        "changes": [c.to_dict() for c in report.changes],
+        "manual_review": [_violation_dict(v) for v in report.manual_review],
+    }
+
+
+def render_fix_md(report) -> str:
+    lines = [f"# Fix report — {report.source_path}", ""]
+    mode = "DRY RUN (no file written)" if report.dry_run else f"Output: `{report.output_path}`"
+    lines.append(mode)
+    lines.append("")
+    lines.append(f"**{len(report.changes)} changes applied**, **{len(report.manual_review)} need manual review**")
+    lines.append("")
+
+    if report.changes:
+        lines.append("## Changes")
+        lines.append("| Scope | Slide | Shape | Rule | Field | Old | New | Location |")
+        lines.append("|---|---|---|---|---|---|---|---|")
+        for c in report.changes:
+            lines.append(
+                f"| {c.scope} | {c.slide_index or ''} | {c.shape_name or ''} | {c.rule} | {c.field} | "
+                f"{c.old} | {c.new} | {c.location or ''} |"
+            )
+        lines.append("")
+
+    if report.manual_review:
+        lines.append("## Manual review required")
+        lines.append("| Slide | Severity | Rule | Shape | Message |")
+        lines.append("|---|---|---|---|---|")
+        for v in report.manual_review:
+            icon = SEVERITY_ICON.get(v.severity, "")
+            lines.append(f"| {v.slide_index} | {icon} {v.severity} | {v.rule} | {v.shape_name or ''} | {v.message} |")
+
+    return "\n".join(lines)

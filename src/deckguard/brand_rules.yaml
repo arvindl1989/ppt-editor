@@ -1,0 +1,86 @@
+# brand_rules.yaml — KONE brand configuration for deckguard
+
+brand:
+  name: "KONE"
+
+colors:
+  approved:
+    # Primary
+    - "#1450F5"   # KONE Blue
+    - "#FFFFFF"   # White
+    - "#141414"   # Black
+    # Accent
+    - "#FF5F28"   # Red
+    - "#FFA023"   # Orange
+    - "#1ED273"   # Green
+    # Secondary
+    - "#F3EEE6"
+    - "#FFE141"
+    - "#D2F5FF"
+    - "#FFCDD7"
+    - "#AAE1C8"
+    # KONE Blue tints
+    - "#4373F7"   # 80%
+    - "#7296F9"   # 60%
+    - "#A1B9FB"   # 40%
+    - "#D0DCFD"   # 20%
+    # Black tints
+    - "#434343"   # 80%
+    - "#727272"   # 60%
+    - "#A1A1A1"   # 40%
+    - "#D0D0D0"   # 20%
+
+  remap:
+    "#005EB8": "#1450F5"   # old KONE Blue -> new KONE Blue
+    "#000000": "#141414"   # pure black -> brand black
+    # Grow this list empirically: run `deckguard inspect` on legacy decks
+    # and add mappings for old-blue tints and other legacy colors found.
+
+  tolerance: 0   # RGB distance tolerance; raise to ~10 if near-miss colors appear
+
+fonts:
+  approved:
+    - "Inter"             # Regular & Semi Bold weights
+    - "Inter Semi Bold"
+    - "KONE Information"  # numbers, small labels, sub-headers ONLY
+  remap:
+    "Calibri": "Inter"
+    "Arial": "Inter"
+    "Segoe UI": "Inter"
+  min_body_size_pt: 12    # placeholder — flag as configurable
+  min_title_size_pt: 24   # placeholder — flag as configurable
+
+typography_rules:
+  alignment:
+    default: "left"
+    exceptions: ["pagination", "footnote", "navigation"]
+    # Heuristic for exception detection: small text near slide edges,
+    # numeric-only content for pagination. Prefer false positives with
+    # low severity over silent misses.
+  all_caps:
+    forbidden_fonts: ["Inter", "Inter Semi Bold"]   # never all-caps...
+    allowed_words: ["KONE"]                          # ...except the word KONE
+    required_fonts: ["KONE Information"]             # ALWAYS all-caps
+  text_colors:
+    "Inter": ["#141414", "#FFFFFF"]
+    "Inter Semi Bold": ["#141414", "#FFFFFF"]
+    "KONE Information": ["#1450F5", "#141414", "#FFFFFF"]  # blue preferred
+  text_effects:
+    forbidden: ["shadow", "glow", "reflection", "outline", "3d"]
+  role_restrictions:
+    "KONE Information":
+      max_size_pt: 18
+      forbidden_roles: ["heading", "body"]
+      allowed_roles: ["sub_header", "page_number", "section_label", "product_name"]
+
+logo:
+  new_logo_path: "assets/kone_logo.png"
+  old_logo_hashes: []          # populate via `deckguard hash-logo`
+  min_clear_space_px: 20
+
+layout:
+  slide_size: "16:9"
+  forbidden_elements: ["wordart", "3d_effects"]
+
+audit:
+  fail_on: ["critical"]
