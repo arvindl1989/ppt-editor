@@ -1,13 +1,17 @@
 """Deterministic fix engine.
 
-Runs in two passes:
+Runs in two stages:
 
 1. Deck-wide: theme color remap, theme font remap, and explicit font
    overrides on master/layout placeholders. These correct every
    downstream shape that inherits from them in one operation.
-2. Per-violation: re-audits the (now theme-corrected) deck and applies
-   every remaining `auto_fixable` violation directly via the live
-   object each `Violation.target` record points at.
+2. Per-violation, to a fixpoint: re-audits the (now theme-corrected) deck
+   and applies every `auto_fixable` violation directly via the live
+   object each `Violation.target` record points at, then repeats until a
+   pass makes no further changes. Looping matters because fixing one
+   thing on a run (e.g. its font) can newly unlock another check on that
+   same run (e.g. that font's allowed text colors) — a single pass would
+   otherwise leave mechanically-resolvable cases in "manual review".
 
 Never touches the input file — callers pass a `Presentation` already
 loaded from a copy, and `--dry-run` simply skips the final `prs.save()`.
@@ -283,24 +287,30 @@ def fix_deck(prs, config: dict, source_path: str, output_path: Optional[str], dr
 
     changes += _remap_explicit_fonts_in_masters_and_layouts(prs, font_remap)
 
-    # Re-audit now that theme/master/layout-level corrections are applied,
-    # so scheme-typed colors and inherited fonts that are now fixed don't
-    # show up as remaining violations.
-    inventory = build_inventory(prs)
-    violations = sort_violations(audit_deck(inventory, config))
+    # Apply auto-fixable violations to a fixpoint. Fixing one violation can
+    # mechanically unlock another check on the very same run — e.g. renaming
+    # an off-brand font from Arial to Inter means Inter's text-color rule
+    # now applies to that run for the first time, and its existing color may
+    # no longer be allowed. That's not ambiguous, just sequential, so a
+    # single pass would wrongly leave it for "manual review" when it's
+    # actually fully resolvable. Loop until a pass makes no further changes;
+    # capped defensively since each pass only ever unlocks checks that were
+    # previously gated on a now-fixed field, so this converges in a couple
+    # of iterations for any real rule set.
+    for _ in range(5):
+        inventory = build_inventory(prs)
+        violations = sort_violations(audit_deck(inventory, config))
+        pass_changes = []
+        for v in violations:
+            if not v.auto_fixable:
+                continue
+            change = _apply_violation(v, config)
+            if change:
+                pass_changes.append(change)
+        changes += pass_changes
+        if not pass_changes:
+            break
 
-    for v in violations:
-        if not v.auto_fixable:
-            continue
-        change = _apply_violation(v, config)
-        if change:
-            changes.append(change)
-
-    # Re-audit once more post-fix: a single violation's fix can incidentally
-    # resolve another (e.g. correcting a run's color for its font's
-    # text-color rule also clears the general unapproved-color flag on that
-    # same color), so re-detecting rather than reusing the pre-fix list is
-    # what keeps "still needs manual review" accurate.
     # Anything still detected here needs a human either way: genuinely
     # unfixable violations, or (defensively) anything a fix attempt didn't
     # actually clear.

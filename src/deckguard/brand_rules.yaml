@@ -80,8 +80,8 @@ typography_rules:
     allowed_words: ["KONE"]                          # ...except the word KONE
     required_fonts: ["KONE Information"]             # ALWAYS all-caps
   text_colors:
-    "Inter": ["#141414", "#FFFFFF"]
-    "Inter Semi Bold": ["#141414", "#FFFFFF"]
+    "Inter": ["#141414"]              # black only
+    "Inter Semi Bold": ["#141414"]    # black only
     "KONE Information": ["#1450F5", "#141414", "#FFFFFF"]  # blue preferred
   text_effects:
     forbidden: ["shadow", "glow", "reflection", "outline", "3d"]
