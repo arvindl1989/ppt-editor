@@ -234,3 +234,32 @@ def test_fix_sets_explicit_color_for_legibility_when_run_has_no_color_at_all():
     fix_deck(prs, CONFIG, source_path="in.pptx", output_path=None, dry_run=True)
 
     assert str(run.font.color.rgb) == "FFFFFF"
+
+
+def test_fix_converts_a_grey_scheme_tint_panel_fill_to_literal_f3eee6():
+    """Regression test for a real bug report: a deck's big content panel
+    used <a:schemeClr val="bg1"><a:lumMod val="85000"/></a:schemeClr> --
+    a theme-relative tint, not a literal color -- which resolved to grey
+    (#D9D9D9) but was never fixed, because legacy_color's auto-fix used
+    to unconditionally skip any non-literal-RGB color to avoid guessing.
+    That skip doesn't apply here: colors.approved keeps white (bg1)
+    correct everywhere else it's used un-tinted, so the theme can't be
+    globally remapped -- this specific tinted shape needs its own fix,
+    and unlisted_panel_fallback's target is fully deterministic, not a guess."""
+    from lxml import etree
+
+    prs = new_deck()
+    slide = add_slide(prs)
+    box = add_rectangle(slide, name="Panel", left_in=1, top_in=1, width_in=3, height_in=2)
+
+    A_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
+    spPr = box._element.spPr
+    solid_fill = etree.SubElement(spPr, f"{{{A_NS}}}solidFill")
+    scheme_clr = etree.SubElement(solid_fill, f"{{{A_NS}}}schemeClr")
+    scheme_clr.set("val", "bg1")
+    etree.SubElement(scheme_clr, f"{{{A_NS}}}lumMod").set("val", "85000")
+
+    report = fix_deck(prs, CONFIG, source_path="in.pptx", output_path=None, dry_run=True)
+
+    assert any(c.rule == "legacy_color" and c.shape_name == "Panel" for c in report.changes)
+    assert str(box.fill.fore_color.rgb) == "F3EEE6"

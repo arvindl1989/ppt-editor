@@ -473,3 +473,45 @@ def test_text_contrast_not_checked_without_a_resolved_shape_background():
     # white isn't the fallback list's first choice, but it IS an allowed
     # color for Inter (black or white) -- so no text_color violation either
     assert by_rule(violations_for(prs), "text_color") == []
+
+
+def test_unlisted_grey_panel_fill_defaults_to_secondary_off_white():
+    """Regression test for a real bug report: a deck's big content panel
+    used a literal grey (#D9D9D9) that was never in colors.remap -- it
+    just sat flagged as unapproved forever, never actually turning into
+    the off-white the brand wants for grey panels."""
+    prs = new_deck()
+    slide = add_slide(prs)
+    add_rectangle(slide, name="Panel", fill_hex="D9D9D9", left_in=1, top_in=1, width_in=3, height_in=2)
+
+    viol = by_rule(violations_for(prs), "legacy_color")
+    panel_viol = [v for v in viol if v.shape_name == "Panel"]
+    assert len(panel_viol) == 1
+    assert panel_viol[0].details["target"] == "#F3EEE6"
+    assert panel_viol[0].auto_fixable is True
+    assert by_rule(violations_for(prs), "unapproved_color") == []
+
+
+def test_unlisted_non_grey_panel_fill_defaults_to_kone_blue():
+    prs = new_deck()
+    slide = add_slide(prs)
+    add_rectangle(slide, name="Panel", fill_hex="9B59B6", left_in=1, top_in=1, width_in=3, height_in=2)  # a purple
+
+    viol = by_rule(violations_for(prs), "legacy_color")
+    panel_viol = [v for v in viol if v.shape_name == "Panel"]
+    assert len(panel_viol) == 1
+    assert panel_viol[0].details["target"] == "#1450F5"
+
+
+def test_unlisted_panel_fallback_does_not_apply_to_text():
+    """Scoped to fill/line only -- an unlisted text color must still fall
+    through to the ordinary unapproved_color/text_color path, not get
+    silently recolored to blue or cream."""
+    prs = new_deck()
+    slide = add_slide(prs)
+    set_run(body_run(slide), text="Body copy", font="Inter", color_hex="9B59B6")
+
+    assert by_rule(violations_for(prs), "legacy_color") == []
+    matches = [v for v in violations_for(prs) if v.rule == "text_color"]
+    assert len(matches) == 1
+    assert matches[0].details["target"] == "#141414"

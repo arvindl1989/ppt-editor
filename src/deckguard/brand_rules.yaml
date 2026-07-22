@@ -89,6 +89,20 @@ colors:
 
   tolerance: 0   # RGB distance tolerance; raise to ~10 if near-miss colors appear
 
+  # Deterministic fallback for panel/background fills (and lines) that
+  # match nothing above -- not approved, not a known legacy color, not a
+  # near-miss. Rather than sit flagged as "unapproved" forever (every new
+  # deck brings its own never-before-seen grey/off-brand panel color, and
+  # a growing enumerated list of exact hexes doesn't generalize), any
+  # such color gets a deterministic default: neutral greys (R/G/B all
+  # close together) -> the secondary off-white; anything else -> KONE
+  # Blue. Text is intentionally excluded -- it has its own separate
+  # legibility rules (text_color/text_contrast).
+  unlisted_panel_fallback:
+    grey_target: "#F3EEE6"
+    default_target: "#1450F5"
+    grey_max_channel_spread: 20   # max(R,G,B)-min(R,G,B) <= this counts as "grey"
+
   # Separate from `remap` above: fixes literal fills on shapes that live on
   # a slide LAYOUT (not any slide itself), e.g. a full-panel background
   # rectangle behind a picture/content placeholder that every slide using

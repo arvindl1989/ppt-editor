@@ -137,6 +137,41 @@ def _color_violations(
                 )
                 return violations
 
+    # Panel/background colors with no brand-guideline match at all (not
+    # approved, not a known legacy color, not a near-miss) still get a
+    # deterministic answer rather than sitting flagged forever: neutral
+    # greys default to the secondary off-white, anything else defaults to
+    # KONE Blue. Scoped to fill/line -- text has its own separate
+    # legibility rules (text_color/text_contrast) and shouldn't be
+    # silently recolored by a panel-oriented fallback.
+    fallback_cfg = colors_cfg.get("unlisted_panel_fallback", {}) or {}
+    if fallback_cfg and element in ("fill", "line", "gradient stop"):
+        grey_target = fallback_cfg.get("grey_target")
+        default_target = fallback_cfg.get("default_target")
+        spread = fallback_cfg.get("grey_max_channel_spread", 20)
+        rgb = colors_mod.hex_to_rgb(hexval)
+        fallback_hex = grey_target if colors_mod.is_greyish(rgb, spread) else default_target
+        if fallback_hex:
+            fallback_norm = colors_mod.normalize_hex(fallback_hex)
+            violations.append(
+                Violation(
+                    slide_index=slide_idx,
+                    shape_id=shape.shape_id,
+                    shape_name=shape.name,
+                    element=element,
+                    rule="legacy_color",
+                    message=(
+                        f"color #{hexval} isn't in the brand guideline -- defaulting to #{fallback_norm} "
+                        f"({'grey' if fallback_hex == grey_target else 'unlisted panel color'})"
+                    ),
+                    severity="major",
+                    auto_fixable=True,
+                    details={**base_details, "current": f"#{hexval}", "target": f"#{fallback_norm}"},
+                    target=target,
+                )
+            )
+            return violations
+
     violations.append(
         Violation(
             slide_index=slide_idx,

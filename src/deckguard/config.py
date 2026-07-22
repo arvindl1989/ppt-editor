@@ -97,6 +97,23 @@ def validate_config(config: dict, base_dir: str | Path = ".") -> list[str]:
     if not isinstance(layout_panel_min_area, (int, float)) or layout_panel_min_area < 0:
         errors.append("colors.layout_panel_min_area_sq_in must be a non-negative number")
 
+    fallback_cfg = colors_cfg.get("unlisted_panel_fallback", {}) or {}
+    if fallback_cfg:
+        for key in ("grey_target", "default_target"):
+            val = fallback_cfg.get(key)
+            if not val:
+                continue
+            try:
+                norm = colors_mod.normalize_hex(val)
+            except ValueError as exc:
+                errors.append(f"colors.unlisted_panel_fallback.{key}: {exc}")
+                continue
+            if norm not in approved_norm:
+                errors.append(f"colors.unlisted_panel_fallback.{key} '{val}' is not in colors.approved")
+        spread = fallback_cfg.get("grey_max_channel_spread", 20)
+        if not isinstance(spread, (int, float)) or spread < 0:
+            errors.append("colors.unlisted_panel_fallback.grey_max_channel_spread must be a non-negative number")
+
     fonts_cfg = config.get("fonts", {}) or {}
     fonts_approved = set(fonts_cfg.get("approved", []) or [])
     if not fonts_approved:

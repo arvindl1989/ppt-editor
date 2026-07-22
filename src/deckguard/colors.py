@@ -86,6 +86,14 @@ def rgb_distance(a: tuple[int, int, int], b: tuple[int, int, int]) -> float:
     return sum((x - y) ** 2 for x, y in zip(a, b)) ** 0.5
 
 
+def is_greyish(rgb: tuple[int, int, int], max_channel_spread: float = 20) -> bool:
+    """True if `rgb` reads as a neutral grey rather than a saturated hue --
+    its R/G/B channels are all close together (max-min <= threshold).
+    Pure greys score 0; the KONE Blue family and other brand accents
+    score well over 100."""
+    return (max(rgb) - min(rgb)) <= max_channel_spread
+
+
 def relative_luminance(rgb: tuple[int, int, int]) -> float:
     """WCAG relative luminance (0=black, 1=white), gamma-corrected per channel."""
 

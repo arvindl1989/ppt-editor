@@ -89,3 +89,16 @@ def test_expected_contrast_text_hex_matches_general_branding_examples():
     assert colors_mod.expected_contrast_text_hex("FFCDD7", "141414", "FFFFFF") == "141414"
     assert colors_mod.expected_contrast_text_hex("141414", "141414", "FFFFFF") == "FFFFFF"
     assert colors_mod.expected_contrast_text_hex("FFFFFF", "141414", "FFFFFF") == "141414"
+
+
+def test_is_greyish_true_for_neutral_tones():
+    assert colors_mod.is_greyish((217, 217, 217)) is True  # #D9D9D9, a real panel color found in production
+    assert colors_mod.is_greyish((0, 0, 0)) is True
+    assert colors_mod.is_greyish((255, 255, 255)) is True
+    assert colors_mod.is_greyish((59, 66, 69)) is True  # #3B4245, close-to-neutral dark charcoal
+
+
+def test_is_greyish_false_for_saturated_brand_colors():
+    assert colors_mod.is_greyish((20, 80, 245)) is False  # KONE Blue
+    assert colors_mod.is_greyish((255, 95, 40)) is False  # KONE Red
+    assert colors_mod.is_greyish((0, 113, 185)) is False  # #0071B9

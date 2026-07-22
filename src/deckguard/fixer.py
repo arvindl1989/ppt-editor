@@ -223,11 +223,17 @@ def _apply_violation(v: Violation, config: dict) -> Optional[Change]:
             color_fmt = target.obj.font.color
         else:
             return None
-        if color_fmt.type != MSO_COLOR_TYPE.RGB:
-            # Scheme-typed color that survived the theme-level pass (e.g. a
-            # different theme not covered, or an out-of-range tint) — leave
-            # it for manual review rather than silently converting it to a
-            # hardcoded literal.
+        # Scheme-typed colors are normally left for manual review rather
+        # than silently converted to a hardcoded literal (e.g. a
+        # different theme not covered, or an out-of-range tint) --
+        # except for legacy_color specifically. Unlike near_miss_color (a
+        # fuzzy tolerance match), legacy_color is always an exact,
+        # fully-confident target -- either a colors.remap hit or the
+        # deterministic unlisted_panel_fallback -- so converting a
+        # schemeClr+lumMod/lumOff tint (e.g. bg1 at 85% luminance, which
+        # is how a "grey panel" is often actually built) to the literal
+        # target is correct, not a guess.
+        if color_fmt.type != MSO_COLOR_TYPE.RGB and v.rule != "legacy_color":
             return None
         color_fmt.rgb = RGBColor.from_string(new_hex)
         return Change(
