@@ -109,6 +109,22 @@ def upload_form(error: str | None = None) -> str:
     <button type="submit" class="secondary" formaction="/audit">Audit only</button>
   </div>
 </form>
+</div>
+<div class="card">
+<h2 style="margin-top:0;font-size:1.05rem;">Make an old deck look like a reference deck</h2>
+<p style="color:var(--ink-muted);font-size:0.88rem;margin:0 0 1rem;">
+  Upload a deck that isn't on-brand yet, plus a deck that already is. Colors
+  and fonts that changed between them are proposed as new brand rules
+  (high-confidence ones applied automatically); the old deck's own text is
+  never touched, only its styling.
+</p>
+<form method="post" action="/learn" enctype="multipart/form-data">
+  <label style="display:block;font-size:0.82rem;color:var(--ink-muted);margin-bottom:0.3rem;">Old deck (to be fixed)</label>
+  <input type="file" name="old_file" accept=".pptx" required style="margin-bottom:1rem;">
+  <label style="display:block;font-size:0.82rem;color:var(--ink-muted);margin-bottom:0.3rem;">Reference deck (already on-brand)</label>
+  <input type="file" name="new_file" accept=".pptx" required style="margin-bottom:1rem;">
+  <button type="submit" class="primary">Learn &amp; transform</button>
+</form>
 </div>"""
 
 
@@ -195,5 +211,92 @@ def fix_result_page(deck_name: str, fix_summary: dict, changes: list[dict], manu
 <div class="table-wrap"><table>
 <thead><tr><th>Slide</th><th>Severity</th><th>Rule</th><th>Shape</th><th>Message</th><th>Fix?</th></tr></thead>
 <tbody>{_violation_rows(manual_review)}</tbody>
+</table></div></div>"""
+    return body
+
+
+def _color_proposal_rows(proposals: list[dict]) -> str:
+    if not proposals:
+        return '<tr><td colspan="6" class="empty">No color differences found.</td></tr>'
+    rows = []
+    for p in proposals:
+        conf_color = "#1ED273" if p["confidence"] == "high" else "#FFA023"
+        rows.append(
+            f"<tr><td><span class='sev' style='background:{conf_color}'></span>{_esc(p['confidence'])}</td>"
+            f"<td>{_esc(p['role'])}</td>"
+            f"<td><span style='display:inline-block;width:14px;height:14px;border-radius:4px;"
+            f"background:#{_esc(p['old_hex'])};vertical-align:-2px;margin-right:0.3em;'></span><code>#{_esc(p['old_hex'])}</code></td>"
+            f"<td><span style='display:inline-block;width:14px;height:14px;border-radius:4px;"
+            f"background:#{_esc(p['new_hex'])};vertical-align:-2px;margin-right:0.3em;'></span><code>#{_esc(p['new_hex'])}</code></td>"
+            f"<td>{_esc(p['old_count'])}</td><td>{_esc(p['new_count'])}</td></tr>"
+        )
+    return "".join(rows)
+
+
+def _font_proposal_rows(proposals: list[dict]) -> str:
+    if not proposals:
+        return '<tr><td colspan="5" class="empty">No font differences found.</td></tr>'
+    rows = []
+    for p in proposals:
+        conf_color = "#1ED273" if p["confidence"] == "high" else "#FFA023"
+        old_label = p["old_font"] + (" (bold)" if p["old_bold"] else "")
+        new_label = p["new_font"] + (" (bold)" if p["new_bold"] else "")
+        rows.append(
+            f"<tr><td><span class='sev' style='background:{conf_color}'></span>{_esc(p['confidence'])}</td>"
+            f"<td>{_esc(old_label)}</td><td>{_esc(new_label)}</td>"
+            f"<td>{_esc(p['old_count'])}</td><td>{_esc(p['new_count'])}</td></tr>"
+        )
+    return "".join(rows)
+
+
+def learn_result_page(
+    old_name: str,
+    new_name: str,
+    result_dict: dict,
+    fix_summary: dict,
+    applied_count: int,
+    download_links: dict,
+) -> str:
+    color_proposals = result_dict["color_proposals"]
+    font_proposals = result_dict["font_proposals"]
+    n_high = sum(1 for p in color_proposals + font_proposals if p["confidence"] == "high")
+    n_low = sum(1 for p in color_proposals + font_proposals if p["confidence"] == "low")
+
+    stats = f"""<div class="stat-row">
+  <div class="stat"><b style="color:#1ED273">{n_high}</b><span>high-confidence</span></div>
+  <div class="stat"><b style="color:#FFA023">{n_low}</b><span>low-confidence</span></div>
+  <div class="stat"><b style="color:#1ED273">{fix_summary['changes_applied']}</b><span>changes applied</span></div>
+  <div class="stat"><b>{fix_summary['manual_review_required']}</b><span>need review</span></div>
+</div>"""
+
+    dl = (
+        f'<a class="dl" href="{download_links["pptx"]}">Download transformed .pptx</a>'
+        f'<a class="dl secondary" href="{download_links["yaml"]}">Updated brand_rules.yaml</a>'
+        f'<a class="dl secondary" href="{download_links["json"]}">Full proposal (JSON)</a>'
+        f'<a class="dl secondary" href="/">Try another pair</a>'
+    )
+
+    low_note = ""
+    if n_low:
+        low_note = (
+            f'<p style="color:var(--ink-muted);font-size:0.85rem;margin-top:0.75rem;">'
+            f"{n_low} low-confidence difference(s) were <b>not</b> applied automatically — "
+            f"review them below and re-run with the CLI's <code>--min-confidence low</code> if they're correct.</p>"
+        )
+
+    body = f"""<div class="card"><h2 style="margin-top:0;font-size:1.05rem;">Learned — {_esc(old_name)} → {_esc(new_name)}</h2>
+{stats}
+{dl}
+{low_note}
+</div>
+<div class="card"><h3 style="margin-top:0;font-size:0.95rem;">Color differences</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Confidence</th><th>Role</th><th>Old</th><th>New</th><th>Old count</th><th>New count</th></tr></thead>
+<tbody>{_color_proposal_rows(color_proposals)}</tbody>
+</table></div></div>
+<div class="card"><h3 style="margin-top:0;font-size:0.95rem;">Font differences</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Confidence</th><th>Old</th><th>New</th><th>Old count</th><th>New count</th></tr></thead>
+<tbody>{_font_proposal_rows(font_proposals)}</tbody>
 </table></div></div>"""
     return body

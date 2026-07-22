@@ -2,6 +2,7 @@ python-pptx>=0.6.23
 Pillow>=10.0
 imagehash>=4.3
 PyYAML>=6.0
+ruamel.yaml>=0.18
 click>=8.1
 rich>=13.0
 fastapi>=0.110

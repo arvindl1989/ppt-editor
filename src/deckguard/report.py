@@ -183,3 +183,61 @@ def render_fix_md(report) -> str:
             lines.append(f"| {v.slide_index} | {icon} {v.severity} | {v.rule} | {v.shape_name or ''} | {v.message} |")
 
     return "\n".join(lines)
+
+
+# --------------------------------------------------------------------------
+# learn
+# --------------------------------------------------------------------------
+
+CONFIDENCE_ICON = {"high": "✅", "low": "❓"}
+
+
+def learn_result_to_dict(result) -> dict:
+    return _clean(result)
+
+
+def render_learn_md(result, old_name: str, new_name: str) -> str:
+    lines = [f"# Learned brand differences — {old_name} → {new_name}", ""]
+    n_high = sum(1 for p in result.color_proposals + result.font_proposals if p.confidence == "high")
+    n_low = sum(1 for p in result.color_proposals + result.font_proposals if p.confidence == "low")
+    lines.append(f"**{n_high} high-confidence**, **{n_low} low-confidence** proposals; "
+                 f"{len(result.unmatched_old_colors)} unmatched color(s), "
+                 f"{len(result.unmatched_old_fonts)} unmatched font(s)")
+    lines.append("")
+
+    if result.color_proposals:
+        lines.append("## Color proposals")
+        lines.append("| | Role | Old | New | Old count | New count |")
+        lines.append("|---|---|---|---|---|---|")
+        for p in result.color_proposals:
+            icon = CONFIDENCE_ICON.get(p.confidence, "")
+            lines.append(f"| {icon} {p.confidence} | {p.role} | #{p.old_hex} | #{p.new_hex} | {p.old_count} | {p.new_count} |")
+        lines.append("")
+
+    if result.font_proposals:
+        lines.append("## Font proposals")
+        lines.append("| | Old | New | Old count | New count |")
+        lines.append("|---|---|---|---|---|")
+        for p in result.font_proposals:
+            icon = CONFIDENCE_ICON.get(p.confidence, "")
+            old_label = f"{p.old_font}" + (" (bold)" if p.old_bold else "")
+            new_label = f"{p.new_font}" + (" (bold)" if p.new_bold else "")
+            lines.append(f"| {icon} {p.confidence} | {old_label} | {new_label} | {p.old_count} | {p.new_count} |")
+        lines.append("")
+
+    if result.unmatched_old_colors:
+        lines.append("## Unmatched colors (in old deck, no confident match in new deck)")
+        lines.append("| Role | Hex | Count |")
+        lines.append("|---|---|---|")
+        for role, hexval, count in result.unmatched_old_colors:
+            lines.append(f"| {role} | #{hexval} | {count} |")
+        lines.append("")
+
+    if result.unmatched_old_fonts:
+        lines.append("## Unmatched fonts")
+        lines.append("| Font | Bold | Count |")
+        lines.append("|---|---|---|")
+        for name, bold, count in result.unmatched_old_fonts:
+            lines.append(f"| {name} | {bold} | {count} |")
+
+    return "\n".join(lines)

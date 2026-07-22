@@ -125,6 +125,7 @@ merges on brand compliance.
 | `audit <deck\|folder>` | Reports violations (slide, element, rule, severity, auto-fixable). Folder mode writes a per-deck report plus a `summary.csv`. |
 | `hash-logo <image>` | Prints an image's perceptual hash, for `logo.old_logo_hashes`. |
 | `validate-rules [rules.yaml]` | Checks a brand config for syntax and semantic errors (hex format, remap targets in the approved list, logo file exists, etc). |
+| `learn <old> <new>` | Compares an off-brand deck against an already-on-brand reference deck and proposes `colors.remap`/`fonts.remap` additions — see below. |
 | `migrate <deck> --template <potx>` | Phase 3 stub — prints "not yet implemented". |
 
 Every command takes `--rules path/to/brand_rules.yaml` (defaults to the
@@ -202,6 +203,39 @@ case is flagged but never rewritten (a case transform is a content edit
 that can silently mangle acronyms), and an unapproved color with no
 configured remap target has no deterministic "correct" replacement to
 apply. Those always land in `manual_review`, never in `changes`.
+
+## Learning brand rules from an example deck
+
+`deckguard learn <old.pptx> <new.pptx>` compares an off-brand deck
+against an already-on-brand reference deck and proposes
+`colors.remap`/`fonts.remap` additions — the same workflow used by hand
+throughout this project's development, now a repeatable feature. It
+reasons only about *usage*, not shape identity or layout: a color/font
+that disappears from the old deck while a new one appears at a similar
+count is proposed as its replacement, scored by how closely those counts
+correlate.
+
+```bash
+deckguard learn legacy_deck.pptx reference_deck.pptx
+# -> proposal table: role, old hex, new hex, counts, confidence (high/low)
+
+deckguard learn legacy_deck.pptx reference_deck.pptx --apply
+# -> writes high-confidence proposals into brand_rules.yaml (preserving
+#    its comments/formatting), then re-run `fix` to apply them
+```
+
+Low-confidence proposals are never auto-applied — re-run with
+`--min-confidence low` once you've manually confirmed one is correct.
+The web app's "Make an old deck look like a reference deck" form does
+this in one step: upload both decks, high-confidence differences are
+applied automatically, and you get back the transformed deck plus the
+updated `brand_rules.yaml` to download (the *server's* config is never
+mutated by a web request — proposals are applied to a scratch copy).
+
+This only handles color/font *styling*, not layout or structure — real
+deck revisions rarely have 1:1-matching shape names/ids between old and
+new versions, so no attempt is made to match or transplant individual
+shapes.
 
 ## Worked example
 

@@ -13,6 +13,7 @@ from pptx.exc import PackageNotFoundError
 from rich.console import Console
 from rich.table import Table
 
+from deckguard import learn as learn_mod
 from deckguard import report as report_mod
 from deckguard.config import ConfigError, default_config_path, load_config, validate_config
 from deckguard.fixer import fix_deck
@@ -35,16 +36,22 @@ def _open_presentation(path: str) -> Presentation:
         sys.exit(1)
 
 
-def _load_rules(rules_path: Optional[str]) -> dict:
-    """Load + validate rules for audit/fix.
+def _blocking_errors(errors: list[str]) -> tuple[list[str], list[str]]:
+    """Split validate_config() errors into (blocking, logo-path-only warnings).
 
-    Unlike the standalone `validate-rules` command (where a missing logo
-    file is correctly a hard error — that's its job), audit/fix degrade
-    gracefully here: logo detection is a no-op until `old_logo_hashes` is
-    populated and `new_logo_path` points at a real file anyway, so a
-    missing placeholder logo is a warning, not a blocker, for everything
-    else in the deterministic engine.
+    A missing placeholder logo file is a no-op elsewhere in the
+    deterministic engine (logo detection only ever runs once
+    `old_logo_hashes` is populated), so every command except the
+    standalone `validate-rules` (whose whole job is being strict) treats
+    it as a warning rather than a hard blocker.
     """
+    blocking = [e for e in errors if "logo.new_logo_path does not exist" not in e]
+    warnings = [e for e in errors if "logo.new_logo_path does not exist" in e]
+    return blocking, warnings
+
+
+def _load_rules(rules_path: Optional[str]) -> dict:
+    """Load + validate rules for audit/fix/learn."""
     path = rules_path or default_config_path()
     try:
         config = load_config(path)
@@ -52,8 +59,7 @@ def _load_rules(rules_path: Optional[str]) -> dict:
         console.print(f"[bold red]error:[/] {exc}")
         sys.exit(1)
     errors = validate_config(config, base_dir=Path(path).parent)
-    blocking = [e for e in errors if "logo.new_logo_path does not exist" not in e]
-    warnings = [e for e in errors if "logo.new_logo_path does not exist" in e]
+    blocking, warnings = _blocking_errors(errors)
     for w in warnings:
         console.print(f"[yellow]warning:[/] {w} — logo replacement will be skipped")
     if blocking:
@@ -270,6 +276,54 @@ def validate_rules_cmd(rules_path: Optional[str]):
             console.print(f"  - {e}")
         sys.exit(1)
     console.print(f"[green]OK:[/] {path} is valid")
+
+
+@main.command()
+@click.argument("old_deck", type=click.Path(exists=True, dir_okay=False))
+@click.argument("new_deck", type=click.Path(exists=True, dir_okay=False))
+@click.option("--rules", "rules_path", type=click.Path(exists=True, dir_okay=False), default=None)
+@click.option("--apply", "apply_flag", is_flag=True, help="Write matching proposals into the rules file (preserving its comments/structure).")
+@click.option("--min-confidence", type=click.Choice(["high", "low"]), default="high", help="Minimum confidence level to --apply.")
+@click.option("--out", "out_path", type=click.Path(dir_okay=False), default=None)
+@click.option("--format", "fmt", type=click.Choice(["json", "md"]), default="md")
+def learn(old_deck: str, new_deck: str, rules_path: Optional[str], apply_flag: bool, min_confidence: str, out_path: Optional[str], fmt: str):
+    """Compare OLD_DECK against an already-on-brand NEW_DECK and propose
+    colors.remap/fonts.remap additions, based on usage-count correlation
+    (a color/font that vanishes from OLD while a new one appears at a
+    similar count is proposed as a replacement). Layout/structure is not
+    analyzed -- only color and font usage."""
+    config = _load_rules(rules_path)
+    old_prs = _open_presentation(old_deck)
+    new_prs = _open_presentation(new_deck)
+
+    result = learn_mod.learn(old_prs, new_prs, config)
+
+    n_high = sum(1 for p in result.color_proposals + result.font_proposals if p.confidence == "high")
+    n_low = sum(1 for p in result.color_proposals + result.font_proposals if p.confidence == "low")
+    console.print(
+        f"[green]{n_high} high-confidence[/] and [yellow]{n_low} low-confidence[/] proposal(s); "
+        f"{len(result.unmatched_old_colors)} unmatched color(s), {len(result.unmatched_old_fonts)} unmatched font(s)"
+    )
+
+    content = (
+        report_mod.to_json(report_mod.learn_result_to_dict(result))
+        if fmt == "json"
+        else report_mod.render_learn_md(result, Path(old_deck).name, Path(new_deck).name)
+    )
+    _write_or_print(content, Path(out_path) if out_path else None)
+
+    if apply_flag:
+        target_path = Path(rules_path) if rules_path else default_config_path()
+        candidate = learn_mod.apply_learned(config, result, min_confidence=min_confidence)
+        errors = validate_config(candidate, base_dir=target_path.parent)
+        blocking, _warnings = _blocking_errors(errors)
+        if blocking:
+            console.print("[bold red]error:[/] applying these proposals would produce an invalid config, aborting:")
+            for e in blocking:
+                console.print(f"  - {e}")
+            sys.exit(1)
+        applied = learn_mod.write_learned_to_yaml(target_path, result, min_confidence=min_confidence)
+        console.print(f"[green]applied {applied} proposal(s) to {target_path}[/]")
 
 
 @main.command()

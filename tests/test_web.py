@@ -1,8 +1,9 @@
 import importlib
+import re
 
 from fastapi.testclient import TestClient
 
-from tests.helpers import add_slide, new_deck, set_run, title_run
+from tests.helpers import add_slide, body_run, new_deck, set_run, title_run
 
 
 def _write_violating_deck(path):
@@ -10,6 +11,21 @@ def _write_violating_deck(path):
     slide = add_slide(prs)
     set_run(title_run(slide), text="Title", font="Calibri", color_hex="005EB8")
     prs.save(str(path))
+
+
+def _write_deck_pair_for_learn(old_path, new_path):
+    """An old deck using an off-brand color/font, and a reference deck
+    where those same elements use the corresponding brand color/font --
+    close enough in usage-count to be a confident correlation."""
+    old_prs = new_deck()
+    slide = add_slide(old_prs)
+    set_run(body_run(slide), text="Body copy", font="Arial", color_hex="AABBCC")
+    old_prs.save(str(old_path))
+
+    new_prs = new_deck()
+    slide2 = add_slide(new_prs)
+    set_run(body_run(slide2), text="Body copy", font="Inter", color_hex="1450F5")
+    new_prs.save(str(new_path))
 
 
 def _client(tmp_path, monkeypatch, password=None):
@@ -80,6 +96,56 @@ def test_download_rejects_path_traversal_and_unknown_token(tmp_path, monkeypatch
     assert resp.status_code == 404
     resp2 = client.get("/download/0000000000000000000000000000000/fixed.pptx")
     assert resp2.status_code == 404
+
+
+def test_learn_flow_and_downloads(tmp_path, monkeypatch):
+    client, _ = _client(tmp_path, monkeypatch)
+    old_path = tmp_path / "old.pptx"
+    new_path = tmp_path / "new.pptx"
+    _write_deck_pair_for_learn(old_path, new_path)
+
+    with old_path.open("rb") as fo, new_path.open("rb") as fn:
+        resp = client.post(
+            "/learn",
+            files={
+                "old_file": ("old.pptx", fo, "application/octet-stream"),
+                "new_file": ("new.pptx", fn, "application/octet-stream"),
+            },
+        )
+    assert resp.status_code == 200
+    assert "high-confidence" in resp.text
+    assert "AABBCC" in resp.text and "1450F5" in resp.text.upper()
+
+    m = re.search(r'/download/([a-f0-9]+)/fixed\.pptx', resp.text)
+    assert m, "no fixed.pptx download link found in response"
+    dl_pptx = client.get(m.group(0))
+    assert dl_pptx.status_code == 200
+
+    dl_yaml = client.get(m.group(0).replace("fixed.pptx", "brand_rules.yaml"))
+    assert dl_yaml.status_code == 200
+    assert b"AABBCC" in dl_yaml.content.upper() or b"aabbcc" in dl_yaml.content.lower()
+
+    dl_json = client.get(m.group(0).replace("fixed.pptx", "learn_report.json"))
+    assert dl_json.status_code == 200
+
+
+def test_learn_requires_both_files_valid(tmp_path, monkeypatch):
+    client, _ = _client(tmp_path, monkeypatch)
+    old_path = tmp_path / "old.pptx"
+    new_path = tmp_path / "new.pptx"
+    _write_deck_pair_for_learn(old_path, new_path)
+
+    with old_path.open("rb") as fo:
+        resp = client.post(
+            "/learn",
+            files={
+                "old_file": ("old.pptx", fo, "application/octet-stream"),
+                "new_file": ("bad.pptx", b"not a real pptx", "application/octet-stream"),
+            },
+        )
+    assert resp.status_code == 200
+    assert "valid .pptx" in resp.text or "Learn failed" in resp.text
+    assert "Traceback" not in resp.text
 
 
 def test_password_gate(tmp_path, monkeypatch):

@@ -30,6 +30,7 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pptx import Presentation
 from pptx.exc import PackageNotFoundError
 
+from deckguard import learn as learn_mod
 from deckguard import report as report_mod
 from deckguard import webtemplates as tpl
 from deckguard.config import default_config_path, load_config, validate_config
@@ -75,9 +76,9 @@ def _cleanup_old_uploads() -> None:
         pass
 
 
-async def _save_upload(file: UploadFile, dest_dir: Path) -> Path:
+async def _save_upload(file: UploadFile, dest_dir: Path, filename: str = "source.pptx") -> Path:
     dest_dir.mkdir(parents=True, exist_ok=True)
-    dest = dest_dir / "source.pptx"
+    dest = dest_dir / filename
     size = 0
     with dest.open("wb") as out:
         while chunk := await file.read(1024 * 1024):
@@ -174,11 +175,75 @@ async def fix_route(file: UploadFile, _auth: None = Depends(_require_auth)):
     return tpl.page_shell(f"Fixed — {file.filename}", body)
 
 
+@app.post("/learn", response_class=HTMLResponse)
+async def learn_route(
+    old_file: UploadFile, new_file: UploadFile, _auth: None = Depends(_require_auth)
+):
+    _cleanup_old_uploads()
+    for f in (old_file, new_file):
+        if not f.filename or not f.filename.lower().endswith(".pptx"):
+            return tpl.page_shell("deckguard", tpl.upload_form("Please upload two .pptx files."))
+
+    token = uuid.uuid4().hex
+    work_dir = STORAGE_ROOT / token
+    old_path = await _save_upload(old_file, work_dir, "old.pptx")
+    new_path = await _save_upload(new_file, work_dir, "new.pptx")
+
+    try:
+        config = _load_engine_config()
+        old_prs = _open_presentation_or_error(old_path)
+        new_prs = _open_presentation_or_error(new_path)
+        result = learn_mod.learn(old_prs, new_prs, config)
+
+        # Apply onto a scratch copy of the real rules file, never the
+        # server's actual brand_rules.yaml -- a web request shouldn't
+        # mutate shared server state. Reuses the same comment-preserving
+        # write path the CLI's --apply uses.
+        rules_copy = work_dir / "brand_rules.yaml"
+        shutil.copy(default_config_path(), rules_copy)
+        applied = learn_mod.write_learned_to_yaml(rules_copy, result, min_confidence="high")
+        updated_config = load_config(rules_copy)
+
+        old_prs_for_fix = _open_presentation_or_error(old_path)
+        output_path = work_dir / "fixed.pptx"
+        fix_report = fix_deck(
+            old_prs_for_fix,
+            updated_config,
+            source_path=old_file.filename,
+            output_path=str(output_path),
+            dry_run=False,
+        )
+    except HTTPException as exc:
+        shutil.rmtree(work_dir, ignore_errors=True)
+        return tpl.page_shell("deckguard", tpl.upload_form(str(exc.detail)))
+    except Exception as exc:  # noqa: BLE001
+        shutil.rmtree(work_dir, ignore_errors=True)
+        return tpl.page_shell("deckguard", tpl.upload_form(f"Learn failed: {exc}"))
+
+    result_dict = report_mod.learn_result_to_dict(result)
+    (work_dir / "learn_report.json").write_text(report_mod.to_json(result_dict), encoding="utf-8")
+    fix_report_dict = report_mod.fix_report_to_dict(fix_report)
+
+    download_links = {
+        "pptx": f"/download/{token}/fixed.pptx",
+        "yaml": f"/download/{token}/brand_rules.yaml",
+        "json": f"/download/{token}/learn_report.json",
+    }
+    body = tpl.learn_result_page(
+        old_file.filename, new_file.filename, result_dict, fix_report_dict["summary"], applied, download_links
+    )
+    return tpl.page_shell(f"Learned — {old_file.filename} -> {new_file.filename}", body)
+
+
 @app.get("/download/{token}/{filename}")
 def download(token: str, filename: str, _auth: None = Depends(_require_auth)):
     # token is always a uuid4().hex we generated; filename must be one of
     # the exact names we ourselves wrote into that directory.
-    if not token.isalnum() or filename not in ("audit.json", "fixed.pptx", "changelog.json", "changelog.md"):
+    allowed = (
+        "audit.json", "fixed.pptx", "changelog.json", "changelog.md",
+        "brand_rules.yaml", "learn_report.json",
+    )
+    if not token.isalnum() or filename not in allowed:
         raise HTTPException(status_code=404, detail="Not found")
     path = STORAGE_ROOT / token / filename
     if not path.is_file():
