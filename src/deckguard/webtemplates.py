@@ -76,6 +76,15 @@ BASE_CSS = """
   .empty { color: var(--ink-faint); font-size: 0.88rem; padding: 0.5rem 0; }
   footer { color: var(--ink-faint); font-size: 0.78rem; margin-top: 2.5rem; }
   footer code { background: none; padding: 0; }
+  select {
+    font: inherit; font-size: 0.85rem; padding: 0.3rem 0.5rem; border-radius: 6px;
+    border: 1px solid var(--border); background: var(--surface); color: var(--ink);
+  }
+  .swatch {
+    display: inline-block; width: 14px; height: 14px; border-radius: 4px;
+    vertical-align: -2px; margin-right: 0.4em; border: 1px solid var(--border);
+  }
+  .muted { color: var(--ink-muted); font-size: 0.85rem; }
 """
 
 
@@ -186,6 +195,90 @@ def _change_rows(changes: list[dict]) -> str:
     return "".join(rows) + truncated
 
 
+def _color_select(field_name: str, current_hex: str, approved_colors: list[str]) -> str:
+    options = []
+    seen = set()
+    for hexval in approved_colors:
+        norm = hexval.lstrip("#").upper()
+        seen.add(norm)
+        selected = " selected" if norm == current_hex else ""
+        options.append(f'<option value="{_esc(norm)}"{selected}>#{_esc(norm)}</option>')
+    if current_hex not in seen:
+        options.insert(0, f'<option value="{_esc(current_hex)}" selected>#{_esc(current_hex)}</option>')
+    swatch_id = f"swatch_{_esc(field_name)}"
+    onchange = f"document.getElementById('{swatch_id}').style.background='#'+this.value"
+    return (
+        f'<span class="swatch" id="{swatch_id}" style="background:#{_esc(current_hex)}"></span>'
+        f'<select name="{_esc(field_name)}" onchange="{onchange}">{"".join(options)}</select>'
+    )
+
+
+def _font_select(field_name: str, current_font: str, approved_fonts: list[str]) -> str:
+    options = []
+    seen = set()
+    for font in approved_fonts:
+        seen.add(font)
+        selected = " selected" if font == current_font else ""
+        options.append(f'<option value="{_esc(font)}"{selected}>{_esc(font)}</option>')
+    if current_font not in seen:
+        options.insert(0, f'<option value="{_esc(current_font)}" selected>{_esc(current_font)}</option>')
+    return f'<select name="{_esc(field_name)}">{"".join(options)}</select>'
+
+
+def remap_override_section(
+    remap_summary: dict, approved_colors: list[str], approved_fonts: list[str], token: str
+) -> str:
+    colors = remap_summary.get("colors", [])
+    fonts = remap_summary.get("fonts", [])
+    if not colors and not fonts:
+        return ""
+
+    color_rows = ""
+    if colors:
+        rows = []
+        for row in colors:
+            old_hex, new_hex = row["old_hex"], row["new_hex"]
+            rows.append(
+                f"<tr><td><span class='swatch' style='background:#{_esc(old_hex)}'></span><code>#{_esc(old_hex)}</code></td>"
+                f"<td>&rarr;</td>"
+                f"<td>{_color_select(f'color_override__{old_hex}', new_hex, approved_colors)}</td>"
+                f"<td>{_esc(row['count'])}</td></tr>"
+            )
+        color_rows = f"""<h4 style="margin:1.25rem 0 0.5rem;font-size:0.85rem;">Colors</h4>
+<div class="table-wrap"><table>
+<thead><tr><th>Original</th><th></th><th>Remapped to</th><th>Uses</th></tr></thead>
+<tbody>{"".join(rows)}</tbody>
+</table></div>"""
+
+    font_rows = ""
+    if fonts:
+        rows = []
+        for row in fonts:
+            old_font, new_font = row["old_font"], row["new_font"]
+            rows.append(
+                f"<tr><td>{_esc(old_font)}</td><td>&rarr;</td>"
+                f"<td>{_font_select(f'font_override__{old_font}', new_font, approved_fonts)}</td>"
+                f"<td>{_esc(row['count'])}</td></tr>"
+            )
+        font_rows = f"""<h4 style="margin:1.25rem 0 0.5rem;font-size:0.85rem;">Fonts</h4>
+<div class="table-wrap"><table>
+<thead><tr><th>Original</th><th></th><th>Remapped to</th><th>Uses</th></tr></thead>
+<tbody>{"".join(rows)}</tbody>
+</table></div>"""
+
+    return f"""<div class="card">
+<h3 style="margin-top:0;font-size:0.95rem;">Review remapped colors &amp; fonts</h3>
+<p class="muted" style="margin:0 0 0.5rem;">Every original color/font found in the deck, and what it was
+remapped to. Pick a different target (constrained to the approved brand palette/fonts) and regenerate.</p>
+<form method="post" action="/regenerate/{_esc(token)}">
+{color_rows}
+{font_rows}
+<div style="height:1rem"></div>
+<button type="submit" class="primary">Regenerate with these choices</button>
+</form>
+</div>"""
+
+
 def fix_result_page(
     deck_name: str,
     fix_summary: dict,
@@ -193,6 +286,10 @@ def fix_result_page(
     manual_review: list[dict],
     download_links: dict,
     migrate_note: str | None = None,
+    remap_summary: dict | None = None,
+    approved_colors: list[str] | None = None,
+    approved_fonts: list[str] | None = None,
+    token: str | None = None,
 ) -> str:
     stats = f"""<div class="stat-row">
   <div class="stat"><b style="color:#1ED273">{fix_summary['changes_applied']}</b><span>changes applied</span></div>
@@ -209,11 +306,17 @@ def fix_result_page(
         f'<p style="color:var(--ink-muted);font-size:0.85rem;margin-top:0.75rem;">{_esc(migrate_note)}</p>'
         if migrate_note else ""
     )
+    override_section = ""
+    if remap_summary is not None and token is not None:
+        override_section = remap_override_section(
+            remap_summary, approved_colors or [], approved_fonts or [], token
+        )
     body = f"""<div class="card"><h2 style="margin-top:0;font-size:1.05rem;">Fixed — {_esc(deck_name)}</h2>
 {stats}
 {dl}
 {note_html}
 </div>
+{override_section}
 <div class="card"><h3 style="margin-top:0;font-size:0.95rem;">Changes applied</h3>
 <div class="table-wrap"><table>
 <thead><tr><th>Scope</th><th>Where</th><th>Rule</th><th>Old</th><th>New</th></tr></thead>

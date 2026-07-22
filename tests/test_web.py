@@ -3,13 +3,34 @@ import re
 
 from fastapi.testclient import TestClient
 
-from tests.helpers import add_slide, body_run, new_deck, set_run, title_run
+from tests.helpers import add_rectangle, add_slide, body_run, new_deck, set_run, title_run
 
 
 def _write_violating_deck(path):
     prs = new_deck()
     slide = add_slide(prs)
     set_run(title_run(slide), text="Title", font="Calibri", color_hex="005EB8")
+    prs.save(str(path))
+
+
+def _write_remap_violating_deck(path):
+    """A shape fill (off-brand color) and body-text font (off-brand,
+    already-approved black color) violation on the MIDDLE slide.
+
+    Deliberately not on the title/heading (subject to the separate
+    heading_always_dark contrast rule, which overrides any color
+    regardless of remap target) and not a shape fill's text color left
+    unapproved (Inter's text_colors rule restricts to black/white only,
+    which would swallow any other override) -- both would make it
+    impossible to tell whether a *palette remap* override actually took
+    effect end to end. Three slides so /fix's cover/outro migration
+    (first + last slide only) leaves this one untouched."""
+    prs = new_deck()
+    add_slide(prs)
+    slide = add_slide(prs)
+    add_rectangle(slide, name="Panel", fill_hex="005EB8", left_in=1, top_in=1, width_in=2, height_in=1)
+    set_run(body_run(slide), text="Body copy", font="Calibri", color_hex="141414")
+    add_slide(prs)
     prs.save(str(path))
 
 
@@ -106,6 +127,94 @@ def test_fix_flow_also_migrates_non_standard_cover_and_outro(tmp_path, monkeypat
 
     prs = Presentation(io.BytesIO(dl.content))
     assert prs.slides[0].slide_layout.name in ("Cover B", "Outro")
+
+
+def _panel_fill_hex(prs):
+    for shape in prs.slides[1].shapes:
+        if shape.name == "Panel":
+            return str(shape.fill.fore_color.rgb)
+    raise AssertionError("Panel shape not found on middle slide")
+
+
+def _body_run(prs):
+    return prs.slides[1].placeholders[1].text_frame.paragraphs[0].runs[0]
+
+
+def test_fix_flow_shows_remap_override_table(tmp_path, monkeypatch):
+    client, _ = _client(tmp_path, monkeypatch)
+    deck = tmp_path / "d.pptx"
+    _write_remap_violating_deck(deck)  # fill #005EB8 (-> #1450F5), font Calibri (-> Inter)
+
+    with deck.open("rb") as f:
+        resp = client.post("/fix", files={"file": ("d.pptx", f, "application/octet-stream")})
+    assert resp.status_code == 200
+    assert "Review remapped colors" in resp.text
+    assert "005EB8" in resp.text and "Calibri" in resp.text
+    assert re.search(r'/regenerate/[a-f0-9]+', resp.text), "no regenerate form action found"
+
+
+def test_regenerate_applies_approved_color_and_font_overrides(tmp_path, monkeypatch):
+    client, _ = _client(tmp_path, monkeypatch)
+    deck = tmp_path / "d.pptx"
+    _write_remap_violating_deck(deck)
+
+    with deck.open("rb") as f:
+        resp = client.post("/fix", files={"file": ("d.pptx", f, "application/octet-stream")})
+    m = re.search(r'/regenerate/([a-f0-9]+)', resp.text)
+    assert m
+    token = m.group(1)
+
+    resp2 = client.post(
+        f"/regenerate/{token}",
+        data={"color_override__005EB8": "FF5F28", "font_override__Calibri": "Inter SemiBold"},
+    )
+    assert resp2.status_code == 200
+
+    dl_m = re.search(r'/download/([a-f0-9]+)/fixed\.pptx', resp2.text)
+    assert dl_m
+    dl = client.get(dl_m.group(0))
+    assert dl.status_code == 200
+
+    import io
+
+    from pptx import Presentation
+
+    prs = Presentation(io.BytesIO(dl.content))
+    assert _panel_fill_hex(prs) == "FF5F28"
+    assert _body_run(prs).font.name == "Inter SemiBold"
+
+
+def test_regenerate_ignores_non_approved_override(tmp_path, monkeypatch):
+    """A submitted override that isn't in the brand-approved palette must
+    be silently ignored, keeping the deterministic default target --
+    overrides are constrained to brand guidelines, not free-form."""
+    client, _ = _client(tmp_path, monkeypatch)
+    deck = tmp_path / "d.pptx"
+    _write_remap_violating_deck(deck)
+
+    with deck.open("rb") as f:
+        resp = client.post("/fix", files={"file": ("d.pptx", f, "application/octet-stream")})
+    token = re.search(r'/regenerate/([a-f0-9]+)', resp.text).group(1)
+
+    resp2 = client.post(f"/regenerate/{token}", data={"color_override__005EB8": "ABCDEF"})
+    assert resp2.status_code == 200
+
+    dl_m = re.search(r'/download/([a-f0-9]+)/fixed\.pptx', resp2.text)
+    dl = client.get(dl_m.group(0))
+
+    import io
+
+    from pptx import Presentation
+
+    prs = Presentation(io.BytesIO(dl.content))
+    assert _panel_fill_hex(prs) == "1450F5"  # unchanged default target, not the rejected ABCDEF
+
+
+def test_regenerate_unknown_token_gives_clean_message(tmp_path, monkeypatch):
+    client, _ = _client(tmp_path, monkeypatch)
+    resp = client.post("/regenerate/deadbeef", data={})
+    assert resp.status_code == 200
+    assert "expired" in resp.text.lower()
 
 
 def test_corrupt_file_gives_clean_error_not_500(tmp_path, monkeypatch):

@@ -155,6 +155,42 @@ def fix_report_to_dict(report) -> dict:
     }
 
 
+def remap_overrides_summary(report) -> dict:
+    """Aggregate a fix run's applied color/font changes into unique
+    old->new pairs, for the web UI's review-and-override table.
+
+    Scoped to rules that represent a static palette remap (legacy_color,
+    near_miss_color, unapproved_font, legacy_font) -- these have one
+    deterministic target per old value, so redirecting that target to a
+    different brand-approved color/font and re-running is safe. Excludes
+    per-instance derived decisions like text_contrast (the target there
+    depends on the shape's own background, not a fixed palette entry, so
+    there's nothing meaningful to override at the "old value" level).
+    """
+    colors: dict[str, dict] = {}
+    fonts: dict[str, dict] = {}
+    color_fields = {"fill color", "line color", "gradient stop color", "theme color", "text color"}
+    font_fields = {"font", "theme font", "master default font"}
+    for c in report.changes:
+        if c.rule in ("legacy_color", "near_miss_color") and c.field in color_fields:
+            old = str(c.old).lstrip("#").upper()
+            new = str(c.new).lstrip("#").upper()
+            if len(old) != 6 or len(new) != 6:
+                continue
+            entry = colors.setdefault(old, {"old_hex": old, "new_hex": new, "count": 0})
+            entry["count"] += 1
+        elif c.rule in ("unapproved_font", "legacy_font") and c.field in font_fields:
+            old, new = str(c.old), str(c.new)
+            if not old or not new:
+                continue
+            entry = fonts.setdefault(old, {"old_font": old, "new_font": new, "count": 0})
+            entry["count"] += 1
+    return {
+        "colors": sorted(colors.values(), key=lambda x: -x["count"]),
+        "fonts": sorted(fonts.values(), key=lambda x: -x["count"]),
+    }
+
+
 def render_fix_md(report) -> str:
     lines = [f"# Fix report — {report.source_path}", ""]
     mode = "DRY RUN (no file written)" if report.dry_run else f"Output: `{report.output_path}`"

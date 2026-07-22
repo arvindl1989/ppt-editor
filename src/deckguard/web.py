@@ -16,6 +16,8 @@ somewhere with a public URL.
 
 from __future__ import annotations
 
+import copy
+import json
 import os
 import secrets
 import shutil
@@ -24,7 +26,7 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
-from fastapi import Depends, FastAPI, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pptx import Presentation
@@ -35,6 +37,7 @@ from deckguard import report as report_mod
 from deckguard import webtemplates as tpl
 from deckguard.config import default_config_path, load_config, validate_config
 from deckguard.fixer import fix_deck
+from deckguard.fonts import normalize_key as font_normalize_key
 from deckguard.inventory import build_inventory
 from deckguard.rules_engine import audit_deck, sort_violations, summarize
 from deckguard.slide_import import replace_intro_outro
@@ -137,15 +140,10 @@ async def audit_route(file: UploadFile, _auth: None = Depends(_require_auth)):
     return tpl.page_shell(f"Audit — {file.filename}", body)
 
 
-@app.post("/fix", response_class=HTMLResponse)
-async def fix_route(file: UploadFile, _auth: None = Depends(_require_auth)):
-    _cleanup_old_uploads()
-    if not file.filename or not file.filename.lower().endswith(".pptx"):
-        return tpl.page_shell("deckguard", tpl.upload_form("Please upload a .pptx file."))
-
-    token = uuid.uuid4().hex
-    work_dir = STORAGE_ROOT / token
-    source_path = await _save_upload(file, work_dir)
+def _migrate_and_fix(source_path: Path, deck_name: str, config: dict, work_dir: Path):
+    """Shared by /fix and /regenerate: run best-effort cover/outro
+    migration, then fix_deck, writing fixed.pptx + changelogs into
+    work_dir. Returns (fix_report, migrate_result)."""
     migrated_path = work_dir / "migrated.pptx"
     output_path = work_dir / "fixed.pptx"
 
@@ -160,23 +158,19 @@ async def fix_route(file: UploadFile, _auth: None = Depends(_require_auth)):
     except Exception:  # noqa: BLE001
         pass
 
-    try:
-        config = _load_engine_config()
-        prs = _open_presentation_or_error(fix_source_path)
-        fix_report = fix_deck(
-            prs, config, source_path=file.filename, output_path=str(output_path), dry_run=False
-        )
-    except HTTPException as exc:
-        shutil.rmtree(work_dir, ignore_errors=True)
-        return tpl.page_shell("deckguard", tpl.upload_form(str(exc.detail)))
-    except Exception as exc:  # noqa: BLE001
-        shutil.rmtree(work_dir, ignore_errors=True)
-        return tpl.page_shell("deckguard", tpl.upload_form(f"Fix failed: {exc}"))
+    prs = _open_presentation_or_error(fix_source_path)
+    fix_report = fix_deck(
+        prs, config, source_path=deck_name, output_path=str(output_path), dry_run=False
+    )
 
     report_dict = report_mod.fix_report_to_dict(fix_report)
     (work_dir / "changelog.json").write_text(report_mod.to_json(report_dict), encoding="utf-8")
     (work_dir / "changelog.md").write_text(report_mod.render_fix_md(fix_report), encoding="utf-8")
+    return fix_report, migrate_result
 
+
+def _fix_result_body(deck_name: str, fix_report, migrate_result: dict, config: dict, token: str) -> str:
+    report_dict = report_mod.fix_report_to_dict(fix_report)
     download_links = {
         "pptx": f"/download/{token}/fixed.pptx",
         "json": f"/download/{token}/changelog.json",
@@ -190,15 +184,104 @@ async def fix_route(file: UploadFile, _auth: None = Depends(_require_auth)):
         if migrate_result["outro_replaced"]:
             parts.append("outro")
         migrate_note = f"Also replaced the {' and '.join(parts)} slide with the org template's (title carried over)."
-    body = tpl.fix_result_page(
-        file.filename,
+    remap_summary = report_mod.remap_overrides_summary(fix_report)
+    approved_colors = config.get("colors", {}).get("approved", []) or []
+    approved_fonts = config.get("fonts", {}).get("approved", []) or []
+    return tpl.fix_result_page(
+        deck_name,
         report_dict["summary"],
         report_dict["changes"],
         report_dict["manual_review"],
         download_links,
         migrate_note=migrate_note,
+        remap_summary=remap_summary,
+        approved_colors=approved_colors,
+        approved_fonts=approved_fonts,
+        token=token,
     )
+
+
+@app.post("/fix", response_class=HTMLResponse)
+async def fix_route(file: UploadFile, _auth: None = Depends(_require_auth)):
+    _cleanup_old_uploads()
+    if not file.filename or not file.filename.lower().endswith(".pptx"):
+        return tpl.page_shell("deckguard", tpl.upload_form("Please upload a .pptx file."))
+
+    token = uuid.uuid4().hex
+    work_dir = STORAGE_ROOT / token
+    source_path = await _save_upload(file, work_dir)
+    (work_dir / "meta.json").write_text(json.dumps({"deck_name": file.filename}), encoding="utf-8")
+
+    try:
+        config = _load_engine_config()
+        fix_report, migrate_result = _migrate_and_fix(source_path, file.filename, config, work_dir)
+    except HTTPException as exc:
+        shutil.rmtree(work_dir, ignore_errors=True)
+        return tpl.page_shell("deckguard", tpl.upload_form(str(exc.detail)))
+    except Exception as exc:  # noqa: BLE001
+        shutil.rmtree(work_dir, ignore_errors=True)
+        return tpl.page_shell("deckguard", tpl.upload_form(f"Fix failed: {exc}"))
+
+    body = _fix_result_body(file.filename, fix_report, migrate_result, config, token)
     return tpl.page_shell(f"Fixed — {file.filename}", body)
+
+
+@app.post("/regenerate/{token}", response_class=HTMLResponse)
+async def regenerate_route(token: str, request: Request, _auth: None = Depends(_require_auth)):
+    if not token.isalnum():
+        raise HTTPException(status_code=404, detail="Not found")
+    work_dir = STORAGE_ROOT / token
+    source_path = work_dir / "source.pptx"
+    meta_path = work_dir / "meta.json"
+    if not source_path.is_file() or not meta_path.is_file():
+        return tpl.page_shell(
+            "deckguard", tpl.upload_form("Those results have expired — please upload the deck again.")
+        )
+    deck_name = json.loads(meta_path.read_text(encoding="utf-8"))["deck_name"]
+
+    form = await request.form()
+    color_overrides: dict[str, str] = {}
+    font_overrides: dict[str, str] = {}
+    for key, value in form.multi_items():
+        if not value:
+            continue
+        if key.startswith("color_override__"):
+            color_overrides[key[len("color_override__"):]] = str(value)
+        elif key.startswith("font_override__"):
+            font_overrides[key[len("font_override__"):]] = str(value)
+
+    try:
+        base_config = _load_engine_config()
+    except RuntimeError as exc:
+        return tpl.page_shell("deckguard", tpl.upload_form(str(exc)))
+
+    # Overrides apply on top of a scratch copy of the server's real config,
+    # scoped to this one request -- never mutate brand_rules.yaml itself
+    # (same pattern /learn uses for its scratch rules-file copy).
+    config = copy.deepcopy(base_config)
+    approved_colors = {h.lstrip("#").upper() for h in (config.get("colors", {}).get("approved", []) or [])}
+    approved_fonts = set(config.get("fonts", {}).get("approved", []) or [])
+    color_remap = config.setdefault("colors", {}).setdefault("remap", {})
+    for old_hex, new_hex in color_overrides.items():
+        if new_hex.upper() not in approved_colors:
+            continue  # not a brand-approved color -- ignore, keep the default target
+        color_remap[f"#{old_hex}"] = f"#{new_hex}"
+    font_remap = config.setdefault("fonts", {}).setdefault("remap", {})
+    approved_font_keys = {font_normalize_key(f) for f in approved_fonts}
+    for old_font, new_font in font_overrides.items():
+        if font_normalize_key(new_font) not in approved_font_keys:
+            continue  # not a brand-approved font -- ignore, keep the default target
+        font_remap[old_font] = new_font
+
+    try:
+        fix_report, migrate_result = _migrate_and_fix(source_path, deck_name, config, work_dir)
+    except HTTPException as exc:
+        return tpl.page_shell("deckguard", tpl.upload_form(str(exc.detail)))
+    except Exception as exc:  # noqa: BLE001
+        return tpl.page_shell("deckguard", tpl.upload_form(f"Regenerate failed: {exc}"))
+
+    body = _fix_result_body(deck_name, fix_report, migrate_result, config, token)
+    return tpl.page_shell(f"Fixed — {deck_name}", body)
 
 
 @app.post("/learn", response_class=HTMLResponse)
