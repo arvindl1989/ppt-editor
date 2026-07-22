@@ -1,5 +1,7 @@
+from pptx.dml.color import RGBColor
+
 from deckguard.inventory import build_inventory
-from tests.helpers import add_picture, add_slide, body_run, make_pattern_png, new_deck, set_run, title_run
+from tests.helpers import add_picture, add_rectangle, add_slide, body_run, make_pattern_png, new_deck, set_run, title_run
 
 
 def test_build_inventory_basic_shape_fields():
@@ -42,3 +44,45 @@ def test_build_inventory_all_upper_detection():
     runs = {r.text: r for s in inv.slides[0].shapes for p in s.paragraphs for r in p.runs}
     assert runs["SHOUT"].all_upper is True
     assert runs["Mixed Case"].all_upper is False
+
+
+def _line_element(shape):
+    from pptx.oxml.ns import qn
+
+    spPr = shape._element.find(qn("p:spPr"))
+    return spPr.find(qn("a:ln")) if spPr is not None else None
+
+
+def test_build_inventory_never_adds_a_line_element_as_a_side_effect():
+    """Regression test for a real deck-corrupting bug found in production:
+    python-pptx's LineFormat.color forces the line's fill type to SOLID as
+    a documented side effect of merely being read, turning "no <a:ln> at
+    all" (the normal state of a plain text box) into an empty
+    `<a:ln><a:solidFill/></a:ln>` with no color specified -- which
+    PowerPoint renders as a visible default-colored border around every
+    text box in the deck. Plain inspection/audit must never touch shapes
+    this way."""
+    from pptx.util import Inches
+
+    prs = new_deck()
+    slide = add_slide(prs)
+    title_run(slide).text = "Title"
+    textbox = slide.shapes.add_textbox(Inches(1), Inches(3), Inches(2), Inches(1))
+    textbox.text_frame.text = "Plain text box, no explicit line"
+    assert _line_element(textbox) is None  # sanity: matches real-world default shape state
+
+    build_inventory(prs)  # read-only -- must not mutate anything
+
+    assert _line_element(textbox) is None, "inspection added a line element that wasn't there before"
+
+
+def test_build_inventory_reports_existing_line_color_correctly():
+    prs = new_deck()
+    slide = add_slide(prs)
+    box = add_rectangle(slide, name="Colored box", fill_hex="1450F5")
+    box.line.color.rgb = RGBColor.from_string("FF5F28")
+
+    inv = build_inventory(prs)
+    shape = next(s for s in inv.slides[0].shapes if s.name == "Colored box")
+    assert shape.line is not None
+    assert shape.line.color.hex == "FF5F28"

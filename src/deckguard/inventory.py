@@ -119,13 +119,38 @@ class LineInfo:
     color: Optional[ColorInfo] = None
 
 
+def _has_solid_line_color(shape) -> bool:
+    """Read-only check for an actual line color, via raw XML.
+
+    `shape.line.color` looks like a harmless read but isn't: python-pptx's
+    LineFormat.color forces the line's fill type to SOLID as a documented
+    side effect of merely accessing it, turning "no <a:ln> at all" into
+    `<a:ln><a:solidFill/></a:ln>` with no color specified -- an empty fill
+    that PowerPoint renders as a visible default-colored line. Every shape
+    without an explicit line would silently gain one the moment this
+    module inspected it. Only touch the high-level accessor once this
+    check has confirmed a real solid color already exists, so plain
+    inspection/audit can never corrupt a shape that never had a line.
+    """
+    spPr = effects_mod.get_spPr(shape)
+    if spPr is None:
+        return False
+    ln = spPr.find(effects_mod.a_qn("ln"))
+    if ln is None:
+        return False
+    solid_fill = ln.find(effects_mod.a_qn("solidFill"))
+    if solid_fill is None:
+        return False
+    return solid_fill.find(effects_mod.a_qn("srgbClr")) is not None or solid_fill.find(effects_mod.a_qn("schemeClr")) is not None
+
+
 def _line_info(shape, theme_scheme) -> Optional[LineInfo]:
+    if not _has_solid_line_color(shape):
+        return LineInfo(color=ColorInfo(kind="none"))
     try:
-        line = shape.line
+        info = _color_info(shape.line.color, theme_scheme)
     except (AttributeError, TypeError):
         return None
-    try:
-        info = _color_info(line.color, theme_scheme)
     except Exception:  # noqa: BLE001
         info = None
     return LineInfo(color=info)

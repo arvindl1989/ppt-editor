@@ -33,6 +33,7 @@ colors:
     - "#666666"
     - "#BABDBF"
     - "#07233B"
+    - "#EDEFF0"   # light card/panel background (0 exact shape-matched instances ever change to D0D0D0 in New_Test_Slides.pptx)
 
   remap:
     "#005EB8": "#1450F5"   # old KONE Blue -> new KONE Blue
@@ -49,7 +50,6 @@ colors:
     "#D2358F": "#FFCDD7"   # old magenta -> new secondary pink
     "#E51A92": "#FFCDD7"   # old magenta (variant) -> new secondary pink
     "#3B4245": "#727272"   # old dark gray -> black 60% tint
-    "#EDEFF0": "#D0D0D0"   # old light gray -> black 20% tint
     "#000000": "#141414"   # pure black -> brand black
     # Grow this list empirically: run `deckguard inspect` on legacy decks
     # and add mappings for old-blue tints and other legacy colors found.
