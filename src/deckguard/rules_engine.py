@@ -293,17 +293,29 @@ def _check_shape(
             # Family-specific checks (approval, text color, caps, role
             # restrictions) require a resolved font name. A run with no
             # explicit override inherits from the placeholder/layout/master
-            # chain, ultimately the theme's fontScheme — which fix/audit
-            # does correct (see fonts.remap_theme_fonts). Resolving that
-            # inheritance chain per-run is out of scope for Phase 1, so
-            # rather than guessing, these checks are skipped for such runs
-            # instead of flagging a false positive on every unstyled run.
-            if run.font_raw is not None:
-                matched_approved = font_tables.match_approved(run.font_raw, run.bold)
-                remap_target = font_tables.remap_target(run.font_raw)
+            # chain -- font_effective resolves that (paragraph level ->
+            # master txStyles -> theme fontScheme; see
+            # fonts.resolve_effective_font). Layout/placeholder-specific
+            # overrides between the master and the run aren't resolved
+            # (uncommon relative to run-level or pure master-default
+            # styling), so those still fall through to None and are
+            # skipped here rather than guessed at.
+            if run.font_effective is not None:
+                matched_approved = font_tables.match_approved(run.font_effective, run.bold)
+                remap_target = font_tables.remap_target(run.font_effective)
 
                 if matched_approved is None:
                     severity = "critical" if is_heading else "major"
+                    # An unapproved font found only via inheritance (no
+                    # explicit run-level override) isn't safely fixable by
+                    # rewriting this one run -- that would hardcode an
+                    # override where the deck relied on inheritance. The
+                    # correct fix is upstream, at the master/theme level
+                    # (see fonts.remap_literal_fonts_in_master_txstyles),
+                    # which fixer.py runs before this check ever sees the
+                    # run -- so surfacing here without auto-fixing is the
+                    # safety net for whatever that pass doesn't cover.
+                    inherited = run.font_raw is None
                     violations.append(
                         Violation(
                             slide_index=slide_idx,
@@ -312,12 +324,13 @@ def _check_shape(
                             element="run",
                             rule="unapproved_font",
                             message=(
-                                f"font '{run.font_raw}' is not approved"
+                                f"font '{run.font_effective}' is not approved"
                                 + (" (used in a heading)" if is_heading else "")
+                                + (" (inherited, not an explicit override)" if inherited else "")
                             ),
                             severity=severity,
-                            auto_fixable=remap_target is not None,
-                            details={"current": run.font_raw, "target": remap_target},
+                            auto_fixable=remap_target is not None and not inherited,
+                            details={"current": run.font_effective, "target": remap_target},
                             target=run,
                         )
                     )

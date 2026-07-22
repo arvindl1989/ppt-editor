@@ -68,8 +68,33 @@ def test_unapproved_font_with_no_remap_target_is_not_auto_fixable():
     assert viol[0].auto_fixable is False
 
 
-def test_run_with_no_explicit_font_is_not_flagged():
+def test_inherited_unapproved_font_is_flagged_but_not_auto_fixed():
+    """A run with no explicit font override still renders with a real
+    font -- inherited from the master's txStyles/theme (Calibri, for
+    python-pptx's stock template). That's now resolved and checked like
+    any other font, but auto-fixing it would mean hardcoding a per-run
+    override where the deck relied on inheritance -- the correct fix is
+    upstream (theme/master), so this is flagged for review, not silently
+    rewritten."""
     prs = new_deck()
+    slide = add_slide(prs)
+    title_run(slide).text = "Inherits from layout"
+
+    viol = by_rule(violations_for(prs), "unapproved_font")
+    assert len(viol) == 1
+    assert viol[0].details["current"] == "Calibri"
+    assert viol[0].auto_fixable is False
+    assert "inherited" in viol[0].message
+
+
+def test_inherited_approved_font_is_not_flagged():
+    """Same shape, but the deck's theme is already on-brand (Inter) --
+    inheritance should resolve cleanly with no violation at all."""
+    from tests.helpers import set_theme_font
+
+    prs = new_deck()
+    set_theme_font(prs, "majorFont", "Inter")
+    set_theme_font(prs, "minorFont", "Inter")
     slide = add_slide(prs)
     title_run(slide).text = "Inherits from layout"
 

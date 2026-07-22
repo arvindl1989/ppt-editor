@@ -17,7 +17,10 @@ from pptx.util import Emu
 
 from deckguard import colors as colors_mod
 from deckguard import effects as effects_mod
+from deckguard import fonts as fonts_mod
 from deckguard import logo as logo_mod
+
+HEADING_PLACEHOLDER_TYPES = {"TITLE", "CENTER_TITLE"}
 
 ALIGN_NAMES = {
     PP_ALIGN.LEFT: "left",
@@ -157,9 +160,21 @@ def _line_info(shape, theme_scheme) -> Optional[LineInfo]:
 
 
 @dataclass
+class FontContext:
+    """What a run with no explicit font override should resolve against:
+    its shape's role (governs which of the master's titleStyle/bodyStyle/
+    otherStyle applies) plus the master + its theme's font scheme."""
+
+    category: str  # "title" | "body" | "other"
+    master: object
+    theme_fonts: dict
+
+
+@dataclass
 class RunRecord:
     text: str
     font_raw: Optional[str]
+    font_effective: Optional[str]
     bold: bool
     italic: bool
     size_pt: Optional[float]
@@ -169,15 +184,22 @@ class RunRecord:
     obj: object = field(repr=False, compare=False, default=None)
 
 
-def _run_record(run, theme_scheme) -> RunRecord:
+def _run_record(run, theme_scheme, font_ctx: Optional[FontContext], level: int) -> RunRecord:
     font = run.font
     size_pt = font.size.pt if font.size is not None else None
     color_info = _color_info(font.color, theme_scheme) if font.color is not None else None
     text = run.text or ""
     all_upper = any(c.isalpha() for c in text) and text == text.upper()
+    font_raw = font.name
+    font_effective = font_raw
+    if font_effective is None and font_ctx is not None and font_ctx.master is not None:
+        font_effective = fonts_mod.resolve_effective_font(
+            font_raw, font_ctx.category, level, font_ctx.master, font_ctx.theme_fonts
+        )
     return RunRecord(
         text=text,
-        font_raw=font.name,
+        font_raw=font_raw,
+        font_effective=font_effective,
         bold=bool(font.bold),
         italic=bool(font.italic),
         size_pt=size_pt,
@@ -197,13 +219,14 @@ class ParagraphRecord:
     obj: object = field(repr=False, compare=False, default=None)
 
 
-def _paragraph_record(paragraph, theme_scheme) -> ParagraphRecord:
+def _paragraph_record(paragraph, theme_scheme, font_ctx: Optional[FontContext] = None) -> ParagraphRecord:
     raw_align = paragraph.alignment
+    level = paragraph.level
     return ParagraphRecord(
         alignment=ALIGN_NAMES.get(raw_align) if raw_align is not None else None,
         alignment_explicit=raw_align is not None,
-        level=paragraph.level,
-        runs=[_run_record(r, theme_scheme) for r in paragraph.runs],
+        level=level,
+        runs=[_run_record(r, theme_scheme, font_ctx, level) for r in paragraph.runs],
         obj=paragraph,
     )
 
@@ -263,20 +286,7 @@ class ShapeRecord:
     obj: object = field(repr=False, compare=False, default=None)
 
 
-def _shape_record(shape, theme_scheme) -> ShapeRecord:
-    children = []
-    if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
-        children = [_shape_record(child, theme_scheme) for child in shape.shapes]
-
-    paragraphs = []
-    if getattr(shape, "has_text_frame", False):
-        paragraphs = [_paragraph_record(p, theme_scheme) for p in shape.text_frame.paragraphs]
-
-    try:
-        rotation = shape.rotation
-    except (AttributeError, NotImplementedError):
-        rotation = 0.0
-
+def _shape_record(shape, theme_scheme, master=None, theme_fonts: Optional[dict] = None) -> ShapeRecord:
     placeholder_type = None
     is_placeholder = False
     try:
@@ -285,6 +295,27 @@ def _shape_record(shape, theme_scheme) -> ShapeRecord:
             placeholder_type = shape.placeholder_format.type.name if shape.placeholder_format.type else None
     except (AttributeError, ValueError):
         pass
+
+    if placeholder_type in HEADING_PLACEHOLDER_TYPES:
+        category = "title"
+    elif is_placeholder:
+        category = "body"
+    else:
+        category = "other"
+    font_ctx = FontContext(category=category, master=master, theme_fonts=theme_fonts or {}) if master is not None else None
+
+    children = []
+    if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
+        children = [_shape_record(child, theme_scheme, master, theme_fonts) for child in shape.shapes]
+
+    paragraphs = []
+    if getattr(shape, "has_text_frame", False):
+        paragraphs = [_paragraph_record(p, theme_scheme, font_ctx) for p in shape.text_frame.paragraphs]
+
+    try:
+        rotation = shape.rotation
+    except (AttributeError, NotImplementedError):
+        rotation = 0.0
 
     try:
         shape_type_name = shape.shape_type.name if shape.shape_type is not None else "UNKNOWN"
@@ -345,15 +376,18 @@ def _aspect_ratio(width_emu: int, height_emu: int) -> str:
 
 def build_inventory(prs: Presentation) -> DeckInventory:
     theme_by_master_part = {}
+    theme_fonts_by_master_part = {}
     for master in colors_mod.iter_slide_masters(prs):
         theme_by_master_part[id(master.part)] = colors_mod.get_theme_scheme(master)
+        theme_fonts_by_master_part[id(master.part)] = fonts_mod.read_theme_font_scheme(master)
 
     slides = []
     for i, slide in enumerate(prs.slides, start=1):
         layout = slide.slide_layout
         master = layout.slide_master
         theme_scheme = theme_by_master_part.get(id(master.part))
-        shape_records = [_shape_record(s, theme_scheme) for s in slide.shapes]
+        theme_fonts = theme_fonts_by_master_part.get(id(master.part), {})
+        shape_records = [_shape_record(s, theme_scheme, master, theme_fonts) for s in slide.shapes]
         slides.append(
             SlideRecord(
                 index=i,

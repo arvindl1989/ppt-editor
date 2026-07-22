@@ -29,6 +29,7 @@ from pptx.enum.shapes import MSO_SHAPE_TYPE
 
 from deckguard import colors as colors_mod
 from deckguard import effects as effects_mod
+from deckguard import fonts as fonts_mod
 from deckguard import logo as logo_mod
 from deckguard.fonts import FontTables, normalize_key, remap_theme_fonts
 from deckguard.inventory import ALIGN_BY_NAME, build_inventory
@@ -358,6 +359,19 @@ def fix_deck(prs, config: dict, source_path: str, output_path: Optional[str], dr
         )
 
     changes += _remap_explicit_fonts_in_masters_and_layouts(prs, font_remap)
+
+    txstyles_font_changes = fonts_mod.remap_literal_fonts_in_master_txstyles(prs, font_remap)
+    for c in txstyles_font_changes:
+        changes.append(
+            Change(
+                scope="master",
+                rule="legacy_font",
+                field="master default font",
+                old=c["old"],
+                new=c["new"],
+                location=f"{c['master']} [{c['style']}]",
+            )
+        )
 
     layout_panel_remap = colors_cfg.get("layout_panel_remap", {}) or {}
     layout_panel_min_area_sq_in = colors_cfg.get("layout_panel_min_area_sq_in", 8.0)
