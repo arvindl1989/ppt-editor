@@ -138,6 +138,23 @@ def add_picture(slide, image_path, left_in=1, top_in=1, width_in=2, height_in=1)
     )
 
 
+def add_rectangle(slide, name=None, fill_hex=None, left_in=1, top_in=1, width_in=1, height_in=1):
+    from pptx.enum.shapes import MSO_SHAPE
+
+    shape = slide.shapes.add_shape(
+        MSO_SHAPE.RECTANGLE,
+        Emu(int(914400 * left_in)), Emu(int(914400 * top_in)),
+        Emu(int(914400 * width_in)), Emu(int(914400 * height_in)),
+    )
+    if name is not None:
+        shape.name = name
+    if fill_hex is not None:
+        shape.fill.solid()
+        shape.fill.fore_color.rgb = RGBColor.from_string(fill_hex)
+    shape.line.fill.background()
+    return shape
+
+
 def make_solid_png(path, rgb=(0, 94, 184), size=(64, 64)):
     from PIL import Image
 

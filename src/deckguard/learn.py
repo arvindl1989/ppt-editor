@@ -2,18 +2,30 @@
 already-on-brand reference deck.
 
 This formalizes, as a repeatable tool feature, the workflow used to grow
-brand_rules.yaml from real decks throughout this project: extract each
-deck's color/font usage, correlate which old value disappeared while a
-new one appeared at a similar count (the signal that it was replaced),
-and propose colors.remap / fonts.remap additions. Ambiguous or
-low-confidence matches are flagged rather than silently guessed — same
-"never destructive, prefer flagging over guessing" principle as the rest
-of the engine.
+brand_rules.yaml from real decks throughout this project. Two passes,
+in priority order:
+
+1. Exact evidence from shapes that survive (same slide index + shape
+   name) between the two decks — unambiguous ground truth where it's
+   available. This matters: on a real deck pair, two old colors used at
+   similar overall counts (e.g. 16 and 17 instances) were both plausible
+   matches for two new colors at similar counts (15 and 17) -- whole-deck
+   correlation alone picked the WRONG pairing (swapped), because nothing
+   about aggregate counts alone could tell them apart. Exact shape-level
+   correspondence resolves it unambiguously.
+2. Whole-deck usage-count correlation for anything pass 1 has no exact
+   evidence for (e.g. a color only used in text on a shape that didn't
+   survive structurally between deck versions). Correlates which old
+   value disappeared while a new one appeared at a similar count.
+   Ambiguous/low-confidence matches are flagged rather than guessed —
+   same "never destructive, prefer flagging over guessing" principle as
+   the rest of the engine.
 
 Not covered here: layout/structural differences. This only reasons about
-color and font *usage*, not shape identity or position, since two deck
-revisions rarely have 1:1-matching shape names/ids (see the shape-name
-drift observed between real old/new deck pairs).
+color and font *usage*, not shape position/size, and pass 1 only helps
+for shapes whose name happens to survive between deck revisions (see the
+shape-name drift observed between real old/new deck pairs — many
+survive, but not all).
 """
 
 from __future__ import annotations
@@ -83,6 +95,50 @@ def _color_usage(prs) -> Counter:
     return usage
 
 
+def _shape_fill_line_colors(prs) -> dict[tuple[int, str], dict[str, str]]:
+    """{(slide_index, shape_name): {"fill": hex, "line": hex}} for every shape."""
+    inv = build_inventory(prs)
+    out: dict[tuple[int, str], dict[str, str]] = {}
+    for slide in inv.slides:
+        for shape in iter_shapes_recursive(slide.shapes):
+            colors: dict[str, str] = {}
+            if shape.fill and shape.fill.type == "solid":
+                for c in shape.fill.colors:
+                    if c.hex:
+                        colors["fill"] = c.hex
+            if shape.line and shape.line.color and shape.line.color.hex:
+                colors["line"] = shape.line.color.hex
+            if colors:
+                out[(slide.index, shape.name)] = colors
+    return out
+
+
+def _shape_matched_color_correspondence(old_prs, new_prs) -> Counter:
+    """Exact (role, old_hex) -> new_hex evidence from shapes present in both
+    decks at the same (slide_index, shape_name) key.
+
+    This is unambiguous ground truth where it's available, and is
+    strictly more trustworthy than whole-deck usage-count correlation:
+    when two old colors are both candidates for two new colors at similar
+    overall counts, count correlation alone can pick the wrong pairing
+    (this happened in practice — see learn.py's module docstring history).
+    Falls back to count correlation (in `learn()`) only for colors that
+    never appear on a name-matched shape.
+    """
+    old_map = _shape_fill_line_colors(old_prs)
+    new_map = _shape_fill_line_colors(new_prs)
+    correspondence: Counter = Counter()
+    for key, old_colors in old_map.items():
+        new_colors = new_map.get(key)
+        if not new_colors:
+            continue
+        for role, old_hex in old_colors.items():
+            new_hex = new_colors.get(role)
+            if new_hex and new_hex != old_hex:
+                correspondence[(role, old_hex, new_hex)] += 1
+    return correspondence
+
+
 def _font_usage(prs) -> Counter:
     inv = build_inventory(prs)
     usage: Counter = Counter()
@@ -138,16 +194,42 @@ def learn(old_prs, new_prs, config: dict) -> LearnResult:
     old_colors = _color_usage(old_prs)
     new_colors = _color_usage(new_prs)
 
+    # Pass 1: exact evidence from shapes that survive (same slide index +
+    # shape name) between the two decks. Unambiguous where available, so
+    # it's resolved here directly rather than handed to the count-based
+    # matcher below, which can be fooled when several old colors are all
+    # plausible matches for several new colors at similar overall counts.
+    exact_evidence = _shape_matched_color_correspondence(old_prs, new_prs)
+    exact_target_votes: dict[tuple[str, str], Counter] = {}
+    for (role, old_hex, new_hex), count in exact_evidence.items():
+        exact_target_votes.setdefault((role, old_hex), Counter())[new_hex] = count
+
+    color_proposals = []
+    exactly_resolved: set[tuple[str, str]] = set()
+    for (role, old_hex), votes in exact_target_votes.items():
+        if old_hex in approved or old_hex in remap:
+            continue
+        new_hex, count = votes.most_common(1)[0]
+        color_proposals.append(
+            ColorProposal(
+                role=role, old_hex=old_hex, new_hex=new_hex,
+                old_count=count, new_count=count, confidence="high",
+            )
+        )
+        exactly_resolved.add((role, old_hex))
+
+    # Pass 2: whole-deck usage-count correlation, for colors with no exact
+    # shape-level evidence (e.g. only used in text on shapes that didn't
+    # survive structurally between deck versions).
     old_items = [
         ((role, hexval), count)
         for (role, hexval), count in old_colors.items()
-        if hexval not in approved and hexval not in remap
+        if hexval not in approved and hexval not in remap and (role, hexval) not in exactly_resolved
     ]
     new_items = [((role, hexval), count) for (role, hexval), count in new_colors.items()]
 
     matches, unmatched = _greedy_match(old_items, new_items, key_fn=lambda ident: ident[0])
 
-    color_proposals = []
     for oi, ni, score in matches:
         (role, old_hex), old_count = old_items[oi]
         (_, new_hex), new_count = new_items[ni]

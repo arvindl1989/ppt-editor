@@ -36,11 +36,11 @@ colors:
 
   remap:
     "#005EB8": "#1450F5"   # old KONE Blue -> new KONE Blue
-    "#0071B9": "#1450F5"   # old KONE Blue (variant) -> new KONE Blue
+    "#0071B9": "#7296F9"   # old KONE Blue (variant) -> KONE Blue 60% tint (corrected: 15 exact shape-matched instances vs New_Test_Slides.pptx)
     "#93C0E2": "#1450F5"   # old light blue -> new KONE Blue
     "#306FB3": "#7296F9"   # old mid blue -> KONE Blue 60% tint
     "#002060": "#1450F5"   # old dark navy -> new KONE Blue
-    "#86C2E6": "#7296F9"   # old light blue -> KONE Blue 60% tint (confirmed via New_Test_Slides.pptx, 17->15 fill match)
+    "#86C2E6": "#1450F5"   # old light blue -> new KONE Blue (corrected: 17 exact shape-matched instances vs New_Test_Slides.pptx)
     "#EBAB3B": "#FFA023"   # old gold -> new KONE Orange
     "#F6A800": "#FFA023"   # old orange/gold -> KONE Orange (confirmed via New_Test_Slides.pptx, 25->23 fill match)
     "#F6C84E": "#FFE141"   # old yellow -> new secondary yellow

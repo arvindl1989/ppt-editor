@@ -1,6 +1,6 @@
 from deckguard import learn
 from deckguard.config import default_config_path, load_config
-from tests.helpers import add_slide, body_run, new_deck, set_run, title_run
+from tests.helpers import add_rectangle, add_slide, body_run, new_deck, set_run, title_run
 
 BASE_CONFIG = {
     "colors": {"approved": ["#1450F5", "#FFFFFF"], "remap": {}, "tolerance": 0},
@@ -154,3 +154,69 @@ def test_default_config_learn_smoke():
     result = learn.learn(prs, prs, config)
     assert result.color_proposals == []
     assert result.font_proposals == []
+
+
+def test_exact_shape_match_beats_ambiguous_count_correlation():
+    """Regression test for a real bug: two old colors (A, B) at similar
+    overall counts to two new colors (A', B') can be matched *backwards*
+    by whole-deck count correlation alone when the counts are ambiguous.
+    Exact same-slide/same-shape-name evidence must resolve this correctly
+    even when the naive count correlation would prefer the wrong pairing.
+    """
+    old_prs = new_deck()
+    slide = add_slide(old_prs)
+    # 3 shapes with color A, 2 with color B -- overall counts 3 vs 2
+    add_rectangle(slide, name="Box 1", fill_hex="AAAAAA", left_in=0, top_in=0)
+    add_rectangle(slide, name="Box 2", fill_hex="AAAAAA", left_in=1, top_in=0)
+    add_rectangle(slide, name="Box 3", fill_hex="AAAAAA", left_in=2, top_in=0)
+    add_rectangle(slide, name="Box 4", fill_hex="BBBBBB", left_in=0, top_in=1)
+    add_rectangle(slide, name="Box 5", fill_hex="BBBBBB", left_in=1, top_in=1)
+
+    new_prs = new_deck()
+    slide2 = add_slide(new_prs)
+    # Same shape names, but deliberately close overall counts for the
+    # *other* pairing too (2 of A''s new color, 3 of B's), so a naive
+    # global count-correlation matcher could easily pick A->new_count=2
+    # and B->new_count=3 -- the WRONG pairing. Shape identity makes the
+    # correct pairing unambiguous regardless.
+    add_rectangle(slide2, name="Box 1", fill_hex="1450F5", left_in=0, top_in=0)
+    add_rectangle(slide2, name="Box 2", fill_hex="1450F5", left_in=1, top_in=0)
+    add_rectangle(slide2, name="Box 3", fill_hex="1450F5", left_in=2, top_in=0)
+    add_rectangle(slide2, name="Box 4", fill_hex="7296F9", left_in=0, top_in=1)
+    add_rectangle(slide2, name="Box 5", fill_hex="7296F9", left_in=1, top_in=1)
+
+    result = learn.learn(old_prs, new_prs, BASE_CONFIG)
+    by_old_hex = {p.old_hex: p for p in result.color_proposals}
+
+    assert by_old_hex["AAAAAA"].new_hex == "1450F5"
+    assert by_old_hex["AAAAAA"].confidence == "high"
+    assert by_old_hex["BBBBBB"].new_hex == "7296F9"
+    assert by_old_hex["BBBBBB"].confidence == "high"
+
+
+def test_write_learned_to_yaml_preserves_sexagesimal_like_quoted_strings(tmp_path):
+    """Regression test: ruamel interprets an unquoted `16:9`-style value as
+    a base-60 YAML 1.1 integer (16*60+9=969) unless quotes are preserved.
+    brand_rules.yaml's layout.slide_size is exactly this shape."""
+    rules_path = tmp_path / "brand_rules.yaml"
+    rules_path.write_text(
+        "colors:\n"
+        "  approved: [\"#1450F5\"]\n"
+        "  remap: {}\n"
+        "  tolerance: 0\n"
+        "fonts:\n"
+        "  approved: [\"Inter\"]\n"
+        "  remap: {}\n"
+        "layout:\n"
+        "  slide_size: \"16:9\"\n",
+        encoding="utf-8",
+    )
+
+    old_prs = _deck_with_run("Arial", "AABBCC")
+    new_prs = _deck_with_run("Inter", "1450F5")
+    result = learn.learn(old_prs, new_prs, BASE_CONFIG)
+    learn.write_learned_to_yaml(rules_path, result)
+
+    text = rules_path.read_text(encoding="utf-8")
+    assert 'slide_size: "16:9"' in text
+    assert "969" not in text
