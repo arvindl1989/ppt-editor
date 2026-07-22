@@ -426,6 +426,41 @@ def test_text_contrast_still_wcag_computed_for_tints_below_the_override_list():
     assert viol[0].details["target"] == "#141414"
 
 
+def test_text_contrast_heading_is_always_dark_even_on_a_blue_background():
+    """Regression test for an explicit brand-consistency request:
+    PowerPoint title/heading text must always be black -- not computed
+    against its background at all, unlike ordinary body text/panels,
+    even when that background is one of the always-white-text blues."""
+    prs = new_deck()
+    slide = add_slide(prs)
+    title = slide.shapes.title
+    title.fill.solid()
+    title.fill.fore_color.rgb = RGBColor.from_string("1450F5")
+    run = title_run(slide)
+    run.text = "Heading"
+    run.font.name = "Inter"
+    run.font.color.rgb = RGBColor.from_string("FFFFFF")  # wrong -- headings are always dark
+
+    viol = by_rule(violations_for(prs), "text_contrast")
+    assert len(viol) == 1
+    assert viol[0].details["target"] == "#141414"
+    assert "always dark" in viol[0].message
+
+
+def test_text_contrast_heading_already_dark_is_not_flagged():
+    prs = new_deck()
+    slide = add_slide(prs)
+    title = slide.shapes.title
+    title.fill.solid()
+    title.fill.fore_color.rgb = RGBColor.from_string("1450F5")
+    run = title_run(slide)
+    run.text = "Heading"
+    run.font.name = "Inter"
+    run.font.color.rgb = RGBColor.from_string("141414")
+
+    assert by_rule(violations_for(prs), "text_contrast") == []
+
+
 def test_text_contrast_not_checked_without_a_resolved_shape_background():
     """No shape-level solid fill (plain text on the page canvas) -- can't
     compute contrast without full z-order resolution, so it's skipped

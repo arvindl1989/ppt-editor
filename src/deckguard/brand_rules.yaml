@@ -168,6 +168,11 @@ typography_rules:
       - "#1450F5"   # KONE Blue
       - "#4373F7"   # KONE Blue 80%
       - "#7296F9"   # KONE Blue 60%
+    # PowerPoint title/heading placeholders are always dark_hex,
+    # full stop -- not computed against whatever background the title
+    # happens to sit on. A fixed editorial choice for that role, not a
+    # legibility default among two acceptable options.
+    heading_always_dark: true
   text_effects:
     forbidden: ["shadow", "glow", "reflection", "outline", "3d"]
   role_restrictions:

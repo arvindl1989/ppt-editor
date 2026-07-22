@@ -260,6 +260,11 @@ def _check_shape(
     # palest tints are light enough that white text would be genuinely
     # illegible, which defeats the purpose of a legibility rule.
     always_light_bg = {colors_mod.normalize_hex(h) for h in contrast_cfg.get("always_light_text_backgrounds", []) or []}
+    # Brand-consistency override: title/heading text is always dark,
+    # regardless of background -- a stronger rule than "compute contrast"
+    # since it's not about legibility per background, it's a fixed
+    # editorial choice for that role.
+    heading_always_dark = bool(contrast_cfg.get("heading_always_dark", False))
     # Only checkable when the shape has its own resolved solid background --
     # text sitting on an inherited/layout/no-fill background can't be
     # evaluated here without full z-order resolution, so it's left alone
@@ -344,6 +349,39 @@ def _check_shape(
                         )
                     )
                     matched_approved = None
+                elif (
+                    is_heading
+                    and heading_always_dark
+                    and matched_approved in contrast_fonts
+                    and contrast_dark is not None
+                ):
+                    # Explicit brand-consistency rule: PowerPoint title/
+                    # heading text is always black -- overrides contrast/
+                    # background computation entirely for headings, not
+                    # just a default choice among two legible options.
+                    current_hex = run.color.hex if run.color and run.color.kind != "none" else None
+                    if current_hex != contrast_dark:
+                        violations.append(
+                            Violation(
+                                slide_index=slide_idx,
+                                shape_id=shape.shape_id,
+                                shape_name=shape.name,
+                                element="run",
+                                rule="text_contrast",
+                                message=(
+                                    f"'{matched_approved}' heading text must be #{contrast_dark} "
+                                    "(headings are always dark), found "
+                                    + (f"#{current_hex}" if current_hex else "no explicit color (inherited)")
+                                ),
+                                severity="major",
+                                auto_fixable=True,
+                                details={
+                                    "current": f"#{current_hex}" if current_hex else None,
+                                    "target": f"#{contrast_dark}",
+                                },
+                                target=run,
+                            )
+                        )
                 else:
                     # Legibility on a known background is the more specific,
                     # more correct check (e.g. white -- not black -- text on
