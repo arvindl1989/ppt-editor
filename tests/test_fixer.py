@@ -3,16 +3,20 @@ import hashlib
 from pptx import Presentation
 from pptx.enum.text import PP_ALIGN
 
+from deckguard import logo as logo_mod
 from deckguard.config import load_config, default_config_path
 from deckguard.fixer import fix_deck
 from deckguard.inventory import build_inventory
 from deckguard.rules_engine import audit_deck
 from tests.helpers import (
+    add_picture_to_container,
     add_rectangle,
     add_shadow_effect,
     add_slide,
     body_run,
+    make_pattern_png,
     new_deck,
+    set_background_image,
     set_run,
     set_theme_font,
     set_theme_slot,
@@ -263,3 +267,106 @@ def test_fix_converts_a_grey_scheme_tint_panel_fill_to_literal_f3eee6():
 
     assert any(c.rule == "legacy_color" and c.shape_name == "Panel" for c in report.changes)
     assert str(box.fill.fore_color.rgb) == "F3EEE6"
+
+
+def _logo_config(old_hash, new_logo_path):
+    """Minimal config isolating just old-logo replacement, so these tests
+    aren't coupled to the real brand_rules.yaml's own (currently empty,
+    per a separate finding) old_logo_hashes list."""
+    return {
+        "colors": {"approved": ["#1450F5"], "remap": {}},
+        "fonts": {"approved": ["Inter"], "remap": {}},
+        "typography_rules": {},
+        "logo": {"old_logo_hashes": [old_hash], "new_logo_path": str(new_logo_path)},
+        "layout": {},
+        "audit": {"fail_on": []},
+    }
+
+
+def test_fix_replaces_old_logo_placed_directly_on_a_slide_layout(tmp_path):
+    """Regression test for a real report: a logo placed on a slide LAYOUT
+    (inherited by every slide that uses it, a common way to put a logo on
+    every slide at once) rather than any individual slide is invisible to
+    ordinary slide-level scanning (inventory.slides[].shapes never visits
+    layout shapes) -- so it was never detected or fixed."""
+    old_logo = make_pattern_png(tmp_path / "old.png", seed=1)
+    new_logo = make_pattern_png(tmp_path / "new.png", seed=9)
+    old_hash = logo_mod.compute_phash(old_logo.read_bytes())
+
+    prs = new_deck()
+    layout = prs.slide_layouts[1]
+    add_picture_to_container(layout, str(old_logo), name="Logo")
+    add_slide(prs, layout_idx=1)
+
+    report = fix_deck(prs, _logo_config(old_hash, new_logo), source_path="in.pptx", output_path=None, dry_run=True)
+
+    assert any(c.rule == "old_logo" and c.scope == "layout" for c in report.changes)
+    pic = next(s for s in layout.shapes if s.name == "Logo")
+    assert pic.image.blob == new_logo.read_bytes()
+
+
+def test_fix_replaces_old_logo_placed_directly_on_a_slide_master(tmp_path):
+    old_logo = make_pattern_png(tmp_path / "old.png", seed=1)
+    new_logo = make_pattern_png(tmp_path / "new.png", seed=9)
+    old_hash = logo_mod.compute_phash(old_logo.read_bytes())
+
+    prs = new_deck()
+    master = prs.slide_masters[0]
+    add_picture_to_container(master, str(old_logo), name="Logo")
+    add_slide(prs)
+
+    report = fix_deck(prs, _logo_config(old_hash, new_logo), source_path="in.pptx", output_path=None, dry_run=True)
+
+    assert any(c.rule == "old_logo" and c.scope == "master" for c in report.changes)
+    pic = next(s for s in master.shapes if s.name == "Logo")
+    assert pic.image.blob == new_logo.read_bytes()
+
+
+def test_fix_replaces_old_logo_baked_into_a_slide_background_fill(tmp_path):
+    """A logo can also be baked into a page-level background-FILL image
+    (<p:cSld><p:bg>) rather than being a picture shape at all -- outside
+    the shape tree entirely, so even a full recursive shape scan can't
+    see it. This is the "hard-coded, not an element" case."""
+    old_logo = make_pattern_png(tmp_path / "old.png", seed=1)
+    new_logo = make_pattern_png(tmp_path / "new.png", seed=9)
+    old_hash = logo_mod.compute_phash(old_logo.read_bytes())
+
+    prs = new_deck()
+    slide = add_slide(prs)
+    blip = set_background_image(slide, str(old_logo))
+
+    report = fix_deck(prs, _logo_config(old_hash, new_logo), source_path="in.pptx", output_path=None, dry_run=True)
+
+    assert any(c.rule == "old_logo" and c.field == "background image" and c.scope == "slide" for c in report.changes)
+    rid = blip.get(f"{{{logo_mod.R_NS}}}embed")
+    assert slide.part.related_part(rid).blob == new_logo.read_bytes()
+
+
+def test_fix_replaces_old_logo_baked_into_a_layout_background_fill(tmp_path):
+    old_logo = make_pattern_png(tmp_path / "old.png", seed=1)
+    new_logo = make_pattern_png(tmp_path / "new.png", seed=9)
+    old_hash = logo_mod.compute_phash(old_logo.read_bytes())
+
+    prs = new_deck()
+    layout = prs.slide_layouts[1]
+    blip = set_background_image(layout, str(old_logo))
+    add_slide(prs, layout_idx=1)
+
+    report = fix_deck(prs, _logo_config(old_hash, new_logo), source_path="in.pptx", output_path=None, dry_run=True)
+
+    assert any(c.rule == "old_logo" and c.field == "background image" and c.scope == "layout" for c in report.changes)
+    rid = blip.get(f"{{{logo_mod.R_NS}}}embed")
+    assert layout.part.related_part(rid).blob == new_logo.read_bytes()
+
+
+def test_fix_old_logo_replacement_is_a_no_op_without_configured_hashes():
+    """Documents the OTHER real gap: even a logo sitting in plain sight as
+    a normal slide picture is never touched if logo.old_logo_hashes is
+    empty (nothing to match against) -- config population, not detection
+    scope, is the remaining blocker for that case."""
+    prs = new_deck()
+    slide = add_slide(prs)
+
+    report = fix_deck(prs, CONFIG, source_path="in.pptx", output_path=None, dry_run=True)
+
+    assert not any(c.rule == "old_logo" for c in report.changes)

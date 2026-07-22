@@ -136,6 +136,61 @@ def _remap_large_panel_fills_in_masters_and_layouts(
     return changes
 
 
+def _replace_old_logo_everywhere(
+    prs, old_hashes: list[str], new_logo_path: Optional[str], threshold: int
+) -> list[Change]:
+    """Fix old-logo instances the per-slide/per-shape audit can never see:
+
+    - A logo placed directly on a slide MASTER or LAYOUT rather than any
+      individual slide -- a common, in fact standard, way to put a logo
+      on every slide at once by inheritance. Ordinary slide-level
+      scanning (`inventory.slides[].shapes`) never visits master/layout
+      shapes, so a logo living only there is invisible to it.
+    - A logo baked into a page-level background-FILL image
+      (`<p:cSld><p:bg>`) on a slide, layout, or master, rather than
+      being a picture *shape* at all -- outside the shape tree entirely,
+      so even a full recursive shape scan can't see it either. This is
+      "hard-coded" in the sense that it isn't an element deckguard's
+      shape-based model can address.
+    """
+    changes: list[Change] = []
+    if not old_hashes or not new_logo_path or not Path(new_logo_path).exists():
+        return changes
+
+    def _pic_changes(shapes, scope: str, location: str) -> None:
+        for match in logo_mod.find_old_logo_matches(shapes, old_hashes, threshold):
+            logo_mod.replace_logo_image(match.shape, new_logo_path)
+            changes.append(
+                Change(scope=scope, rule="old_logo", field="image",
+                       old=match.matched_hash, new=new_logo_path, location=location)
+            )
+
+    def _bg_change(part, container_element, scope: str, location: str, slide_index: int = 0) -> None:
+        match = logo_mod.find_old_logo_background_match(part, container_element, old_hashes, threshold)
+        if match is None:
+            return
+        logo_mod.replace_background_image(part, match.shape, new_logo_path)
+        changes.append(
+            Change(scope=scope, rule="old_logo", field="background image",
+                   old=match.matched_hash, new=new_logo_path, location=location, slide_index=slide_index)
+        )
+
+    seen_masters = set()
+    for master in colors_mod.iter_slide_masters(prs):
+        if id(master.part) not in seen_masters:
+            seen_masters.add(id(master.part))
+            _pic_changes(master.shapes, "master", master.name)
+            _bg_change(master.part, master._element, "master", f"{master.name} [background]")
+        for layout in master.slide_layouts:
+            _pic_changes(layout.shapes, "layout", layout.name)
+            _bg_change(layout.part, layout._element, "layout", f"{layout.name} [background]")
+
+    for i, slide in enumerate(prs.slides, start=1):
+        _bg_change(slide.part, slide._element, "slide", "(slide background)", slide_index=i)
+
+    return changes
+
+
 def _remap_shapes_fills(shapes, remap: dict[str, str], min_area_emu2: float, scope: str, location: str) -> list[Change]:
     changes = []
     for shape in shapes:
@@ -383,6 +438,14 @@ def fix_deck(prs, config: dict, source_path: str, output_path: Optional[str], dr
     layout_panel_min_area_sq_in = colors_cfg.get("layout_panel_min_area_sq_in", 8.0)
     changes += _remap_large_panel_fills_in_masters_and_layouts(
         prs, layout_panel_remap, layout_panel_min_area_sq_in
+    )
+
+    logo_cfg = config.get("logo", {}) or {}
+    changes += _replace_old_logo_everywhere(
+        prs,
+        logo_cfg.get("old_logo_hashes", []) or [],
+        logo_cfg.get("new_logo_path"),
+        logo_cfg.get("match_threshold", logo_mod.DEFAULT_MATCH_THRESHOLD),
     )
 
     # Apply auto-fixable violations to a fixpoint. Fixing one violation can

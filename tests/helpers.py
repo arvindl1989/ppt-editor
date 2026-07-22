@@ -12,6 +12,7 @@ from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.enum.dml import MSO_THEME_COLOR
 from pptx.opc.constants import RELATIONSHIP_TYPE as RT
+from pptx.oxml.ns import qn
 from pptx.util import Emu, Pt
 
 A_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
@@ -136,6 +137,45 @@ def add_picture(slide, image_path, left_in=1, top_in=1, width_in=2, height_in=1)
         image_path, Emu(int(914400 * left_in)), Emu(int(914400 * top_in)),
         width=Emu(int(914400 * width_in)), height=Emu(int(914400 * height_in)),
     )
+
+
+def add_picture_to_container(container_obj, image_path, name="Logo", left_in=1, top_in=1, width_in=1.5, height_in=0.75):
+    """Place a picture directly into a slide/layout/MASTER's own shape
+    tree. LayoutShapes/MasterShapes have no add_picture() (python-pptx
+    only supports that on a real slide) -- build the <p:pic> element via
+    python-pptx's own oxml builder and register the image part by hand,
+    then append it directly into the live shape tree (mirrors the
+    deepcopy-into-layout trick used elsewhere for rectangles)."""
+    from pptx.oxml.shapes.picture import CT_Picture
+
+    _, rid = container_obj.part.get_or_add_image_part(image_path)
+    shape_id = len(container_obj.shapes._spTree.findall(qn("p:pic"))) + 100
+    pic = CT_Picture.new_pic(
+        shape_id, name, "", rid,
+        int(914400 * left_in), int(914400 * top_in), int(914400 * width_in), int(914400 * height_in),
+    )
+    container_obj.shapes._spTree.append(pic)
+    return container_obj.shapes[-1]
+
+
+def set_background_image(container_obj, image_path):
+    """Give a slide/layout/master a page-level picture-fill background
+    (`<p:cSld><p:bg><p:bgPr><a:blipFill>...`) -- python-pptx has no
+    high-level API for a picture background fill, so build the XML by
+    hand. Returns the `<a:blip>` element."""
+    _, rid = container_obj.part.get_or_add_image_part(image_path)
+    cSld = container_obj._element.find(qn("p:cSld"))
+    bg = etree.SubElement(cSld, qn("p:bg"))
+    cSld.remove(bg)
+    cSld.insert(0, bg)  # <p:bg>, where present, must be cSld's first child
+    bgPr = etree.SubElement(bg, qn("p:bgPr"))
+    blipFill = etree.SubElement(bgPr, qn("a:blipFill"))
+    blip = etree.SubElement(blipFill, qn("a:blip"))
+    blip.set(qn("r:embed"), rid)
+    stretch = etree.SubElement(blipFill, qn("a:stretch"))
+    etree.SubElement(stretch, qn("a:fillRect"))
+    etree.SubElement(bgPr, qn("a:effectLst"))
+    return blip
 
 
 def add_rectangle(slide, name=None, fill_hex=None, left_in=1, top_in=1, width_in=1, height_in=1):
