@@ -1,5 +1,6 @@
 import json
 
+import pytest
 from click.testing import CliRunner
 
 from deckguard.cli import main
@@ -128,12 +129,17 @@ def test_inspect_on_corrupt_file_gives_clean_error(tmp_path):
     assert "Traceback" not in result.output
 
 
-def test_migrate_stub(tmp_path):
+def test_migrate_replaces_non_standard_cover_and_outro(tmp_path):
+    from deckguard.slide_import import default_template_path
+
+    if not default_template_path().exists():
+        pytest.skip("bundled template asset not present")
+
     deck = tmp_path / "d.pptx"
-    template = tmp_path / "t.pptx"
-    _write_violating_deck(deck)
-    _write_violating_deck(template)
+    _write_violating_deck(deck)  # a single, non-KONE-layout slide
     runner = CliRunner()
-    result = runner.invoke(main, ["migrate", str(deck), "--template", str(template)])
-    assert result.exit_code == 0
-    assert "not yet implemented" in result.output
+    result = runner.invoke(main, ["migrate", str(deck), "--out", str(tmp_path)])
+    assert result.exit_code == 0, result.output
+    assert "cover replaced" in result.output
+    assert "outro replaced" in result.output
+    assert (tmp_path / "d_migrated.pptx").exists()

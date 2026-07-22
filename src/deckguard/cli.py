@@ -329,10 +329,45 @@ def learn(old_deck: str, new_deck: str, rules_path: Optional[str], apply_flag: b
 
 @main.command()
 @click.argument("deck", type=click.Path(exists=True, dir_okay=False))
-@click.option("--template", type=click.Path(exists=True, dir_okay=False), required=True)
-def migrate(deck: str, template: str):
-    """Move DECK onto TEMPLATE. Phase 3 — not yet implemented."""
-    console.print("[yellow]migrate: not yet implemented[/] (Phase 3 — see docs/migration_design.md)")
+@click.option(
+    "--template", type=click.Path(exists=True, dir_okay=False), default=None,
+    help="Org template .pptx to migrate onto (default: the bundled KONE master template).",
+)
+@click.option("--cover-slide", type=int, default=3, show_default=True, help="Slide number in TEMPLATE to use as the cover.")
+@click.option("--outro-slide", type=int, default=11, show_default=True, help="Slide number in TEMPLATE to use as the outro.")
+@click.option("--out", "out_dir", type=click.Path(file_okay=False), default=None, help="Output directory (default: alongside DECK).")
+def migrate(deck: str, template: Optional[str], cover_slide: int, outro_slide: int, out_dir: Optional[str]):
+    """Replace DECK's cover/outro slides with the org template's, if they're not already on it.
+
+    Only touches the first and last slide, and only if each isn't
+    already built on one of the template's Cover/Outro layouts. Title
+    (and subtitle, for the cover) text carries over into the new slide's
+    placeholders; everything else in DECK is untouched.
+    """
+    from deckguard.slide_import import replace_intro_outro
+
+    deck_path = Path(deck)
+    out_directory = Path(out_dir) if out_dir else deck_path.parent
+    out_directory.mkdir(parents=True, exist_ok=True)
+    output_path = out_directory / f"{deck_path.stem}_migrated.pptx"
+
+    result = replace_intro_outro(
+        str(deck_path),
+        str(output_path),
+        template_path=template,
+        cover_slide_num=cover_slide,
+        outro_slide_num=outro_slide,
+    )
+
+    console.print(f"[green]wrote:[/] {output_path}")
+    if result["cover_replaced"]:
+        console.print(f"[cyan]cover replaced[/] (title carried over: {result.get('cover_title')!r})")
+    else:
+        console.print("[cyan]cover already on the template — left alone[/]")
+    if result["outro_replaced"]:
+        console.print(f"[cyan]outro replaced[/] (title carried over: {result.get('outro_title')!r})")
+    else:
+        console.print("[cyan]outro already on the template — left alone[/]")
 
 
 if __name__ == "__main__":

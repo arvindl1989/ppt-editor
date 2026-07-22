@@ -36,7 +36,7 @@ deckguard = "deckguard.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-deckguard = ["brand_rules.yaml", "assets/*.png"]
+deckguard = ["brand_rules.yaml", "assets/*.png", "assets/*.pptx"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
