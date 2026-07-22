@@ -74,6 +74,7 @@ colors:
     "#FFC627": "#FFE141"   # old gold -> secondary yellow
     "#FFF5F7": "#FFCDD7"   # old pale pink -> secondary pink
     "#8D9194": "#1450F5"   # old gray -> KONE Blue
+    "#004987": "#1450F5"   # old dark navy (a foreign deck's own theme accent1) -> KONE Blue
     # Grow this list empirically: run `deckguard inspect` on legacy decks
     # and add mappings for old-blue tints and other legacy colors found.
 
