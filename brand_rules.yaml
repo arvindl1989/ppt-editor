@@ -29,17 +29,27 @@ colors:
     - "#727272"   # 60%
     - "#A1A1A1"   # 40%
     - "#D0D0D0"   # 20%
+    # Confirmed as intentionally-kept colors from real deck audits
+    - "#666666"
+    - "#BABDBF"
+    - "#07233B"
 
   remap:
     "#005EB8": "#1450F5"   # old KONE Blue -> new KONE Blue
     "#0071B9": "#1450F5"   # old KONE Blue (variant) -> new KONE Blue
     "#93C0E2": "#1450F5"   # old light blue -> new KONE Blue
     "#306FB3": "#7296F9"   # old mid blue -> KONE Blue 60% tint
+    "#002060": "#1450F5"   # old dark navy -> new KONE Blue
+    "#86C2E6": "#D2F5FF"   # old light blue -> new secondary light blue
     "#EBAB3B": "#FFA023"   # old gold -> new KONE Orange
+    "#F6A800": "#FFE141"   # old orange/gold -> new secondary yellow
     "#F6C84E": "#FFE141"   # old yellow -> new secondary yellow
     "#6DA93F": "#1ED273"   # old green -> new KONE Green
     "#1C4883": "#FF5F28"   # old navy -> new KONE Red
     "#D2358F": "#FFCDD7"   # old magenta -> new secondary pink
+    "#E51A92": "#FFCDD7"   # old magenta (variant) -> new secondary pink
+    "#3B4245": "#727272"   # old dark gray -> black 60% tint
+    "#EDEFF0": "#D0D0D0"   # old light gray -> black 20% tint
     "#000000": "#141414"   # pure black -> brand black
     # Grow this list empirically: run `deckguard inspect` on legacy decks
     # and add mappings for old-blue tints and other legacy colors found.
