@@ -32,6 +32,14 @@ colors:
 
   remap:
     "#005EB8": "#1450F5"   # old KONE Blue -> new KONE Blue
+    "#0071B9": "#1450F5"   # old KONE Blue (variant) -> new KONE Blue
+    "#93C0E2": "#1450F5"   # old light blue -> new KONE Blue
+    "#306FB3": "#7296F9"   # old mid blue -> KONE Blue 60% tint
+    "#EBAB3B": "#FFA023"   # old gold -> new KONE Orange
+    "#F6C84E": "#FFE141"   # old yellow -> new secondary yellow
+    "#6DA93F": "#1ED273"   # old green -> new KONE Green
+    "#1C4883": "#FF5F28"   # old navy -> new KONE Red
+    "#D2358F": "#FFCDD7"   # old magenta -> new secondary pink
     "#000000": "#141414"   # pure black -> brand black
     # Grow this list empirically: run `deckguard inspect` on legacy decks
     # and add mappings for old-blue tints and other legacy colors found.
