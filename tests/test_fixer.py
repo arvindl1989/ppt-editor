@@ -217,3 +217,20 @@ def test_fix_corrects_text_color_for_legibility_on_kone_blue():
 
     assert any(c.rule == "text_contrast" for c in report.changes)
     assert str(run.font.color.rgb) == "FFFFFF"
+
+
+def test_fix_sets_explicit_color_for_legibility_when_run_has_no_color_at_all():
+    """End-to-end regression test for the real bug report: text with no
+    explicit color on a KONE Blue panel must come out of fix() explicitly
+    white, not stay silently inherited (and therefore black)."""
+    prs = new_deck()
+    slide = add_slide(prs)
+    box = add_rectangle(slide, name="Blue panel", fill_hex="1450F5", left_in=1, top_in=1, width_in=3, height_in=1)
+    box.text_frame.text = "Label"
+    run = box.text_frame.paragraphs[0].runs[0]
+    run.font.name = "Inter"
+    # no run.font.color set at all -- inherits
+
+    fix_deck(prs, CONFIG, source_path="in.pptx", output_path=None, dry_run=True)
+
+    assert str(run.font.color.rgb) == "FFFFFF"

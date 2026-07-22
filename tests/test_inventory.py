@@ -86,3 +86,47 @@ def test_build_inventory_reports_existing_line_color_correctly():
     shape = next(s for s in inv.slides[0].shapes if s.name == "Colored box")
     assert shape.line is not None
     assert shape.line.color.hex == "FF5F28"
+
+
+def _run_element(run):
+    return run._r
+
+
+def test_build_inventory_never_adds_a_solid_fill_to_run_text_color_as_a_side_effect():
+    """Regression test for a real, severe deck-corrupting bug found in
+    production: python-pptx's Font.color forces the run's fill type to
+    SOLID as a documented side effect of merely being read (it calls
+    self.fill.solid() whenever the type isn't already SOLID), turning "no
+    color override, inherits from theme/master" into an explicit-but-empty
+    <a:solidFill/> with no color specified -- which PowerPoint renders as
+    black regardless of what the run actually inherited. This corrupted
+    every run without an explicit color in every deck ever run through
+    inspect/audit/fix, silently overriding inherited/theme text colors to
+    black. Plain inspection must never touch a run this way."""
+    from lxml import etree
+
+    prs = new_deck()
+    slide = add_slide(prs)
+    box = add_rectangle(slide, name="Panel", fill_hex="1450F5")
+    box.text_frame.text = "Plain text, no explicit color"
+    run = box.text_frame.paragraphs[0].runs[0]
+    run.font.bold = True  # a real rPr exists, but with no solidFill child
+    before = etree.tostring(_run_element(run)).decode()
+    assert "solidFill" not in before  # sanity: matches real-world unstyled-color state
+
+    build_inventory(prs)  # read-only -- must not mutate anything
+
+    after = etree.tostring(_run_element(run)).decode()
+    assert "solidFill" not in after, "inspection added a solidFill that wasn't there before"
+
+
+def test_build_inventory_reports_run_with_no_explicit_color_as_none():
+    prs = new_deck()
+    slide = add_slide(prs)
+    box = add_rectangle(slide, name="Panel", fill_hex="1450F5")
+    box.text_frame.text = "No explicit color"
+
+    inv = build_inventory(prs)
+    shape = next(s for s in inv.slides[0].shapes if s.name == "Panel")
+    run = shape.paragraphs[0].runs[0]
+    assert run.color.kind == "none"

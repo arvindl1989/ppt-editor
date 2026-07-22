@@ -349,14 +349,20 @@ def _check_shape(
                         and contrast_dark is not None
                         and contrast_light is not None
                     )
-                    if (
-                        contrast_applies
-                        and run.color
-                        and run.color.kind != "none"
-                        and run.color.hex
-                    ):
+                    if contrast_applies and run.color:
+                        # A run with NO explicit color (inherits from the
+                        # theme/master) is just as much in scope as one
+                        # with an explicit-but-wrong color -- inheritance
+                        # isn't resolved for color the way it is for font
+                        # (schemeClr + lumMod/lumOff brightness would need
+                        # reproducing by hand), so rather than silently
+                        # trusting an unknown inherited color against a
+                        # background we DO know, this sets it explicitly.
+                        # Always correct (computed from the same WCAG
+                        # check either way), never destructive.
+                        current_hex = run.color.hex if run.color.kind != "none" else None
                         expected_hex = colors_mod.expected_contrast_text_hex(bg_hex, contrast_dark, contrast_light)
-                        if run.color.hex != expected_hex:
+                        if current_hex != expected_hex:
                             violations.append(
                                 Violation(
                                     slide_index=slide_idx,
@@ -366,12 +372,13 @@ def _check_shape(
                                     rule="text_contrast",
                                     message=(
                                         f"'{matched_approved}' text on background #{bg_hex} should be "
-                                        f"#{expected_hex} for legibility, found #{run.color.hex}"
+                                        f"#{expected_hex} for legibility, found "
+                                        + (f"#{current_hex}" if current_hex else "no explicit color (inherited)")
                                     ),
                                     severity="major",
                                     auto_fixable=True,
                                     details={
-                                        "current": f"#{run.color.hex}",
+                                        "current": f"#{current_hex}" if current_hex else None,
                                         "target": f"#{expected_hex}",
                                         "background": f"#{bg_hex}",
                                     },

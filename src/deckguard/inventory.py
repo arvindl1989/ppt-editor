@@ -184,10 +184,34 @@ class RunRecord:
     obj: object = field(repr=False, compare=False, default=None)
 
 
+def _has_explicit_run_color(run) -> bool:
+    """Read-only check for an actual run text color, via raw XML.
+
+    `run.font.color` looks like a harmless read but isn't: python-pptx's
+    Font.color forces the run's fill type to SOLID as a documented side
+    effect of merely being accessed (it calls `self.fill.solid()`
+    whenever the current type isn't already SOLID), turning "no color
+    override, inherits from the theme/master" into an explicit-but-empty
+    `<a:solidFill/>` with no color specified. PowerPoint renders that as
+    black regardless of what the run actually inherited -- silently
+    breaking every run's color the moment this module inspected it.
+    Mirrors `_has_solid_line_color` for the exact same reason: only touch
+    the high-level accessor once this check confirms a real color
+    already exists.
+    """
+    rPr = effects_mod.get_rPr(run)
+    if rPr is None:
+        return False
+    solid_fill = rPr.find(effects_mod.a_qn("solidFill"))
+    if solid_fill is None:
+        return False
+    return solid_fill.find(effects_mod.a_qn("srgbClr")) is not None or solid_fill.find(effects_mod.a_qn("schemeClr")) is not None
+
+
 def _run_record(run, theme_scheme, font_ctx: Optional[FontContext], level: int) -> RunRecord:
     font = run.font
     size_pt = font.size.pt if font.size is not None else None
-    color_info = _color_info(font.color, theme_scheme) if font.color is not None else None
+    color_info = _color_info(font.color, theme_scheme) if _has_explicit_run_color(run) else ColorInfo(kind="none")
     text = run.text or ""
     all_upper = any(c.isalpha() for c in text) and text == text.upper()
     font_raw = font.name

@@ -341,6 +341,28 @@ def test_text_contrast_flags_black_text_on_kone_blue_background():
     assert by_rule(violations, "text_color") == []
 
 
+def test_text_contrast_flags_run_with_no_explicit_color_at_all():
+    """Regression test for a real bug report: text with NO explicit color
+    (inherits from the theme/master, which color-inheritance resolution
+    doesn't attempt to reproduce -- unlike font) was silently skipped by
+    the contrast check entirely, so a black-inheriting run sitting on a
+    KONE Blue panel just stayed illegible. An unknown inherited color is
+    exactly as much in scope as a wrong explicit one."""
+    prs = new_deck()
+    slide = add_slide(prs)
+    box = add_rectangle(slide, name="Blue panel", fill_hex="1450F5", left_in=1, top_in=1, width_in=3, height_in=1)
+    box.text_frame.text = "Label"
+    run = box.text_frame.paragraphs[0].runs[0]
+    run.font.name = "Inter"
+    # no run.font.color set at all -- inherits
+
+    viol = by_rule(violations_for(prs), "text_contrast")
+    assert len(viol) == 1
+    assert viol[0].details["target"] == "#FFFFFF"
+    assert viol[0].details["current"] is None
+    assert viol[0].auto_fixable is True
+
+
 def test_text_contrast_passes_when_white_text_on_kone_blue_background():
     prs = new_deck()
     slide = add_slide(prs)
