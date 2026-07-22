@@ -65,6 +65,10 @@ colors:
                            # off the documented secondary color -- General_Branding.docx
                            # is authoritative, so any deck inheriting the template's
                            # own (wrong) theme value gets corrected too.
+    "#595959": "#FFFFFF"   # diagram-label text (52x, slides 1-3) sitting over a KONE
+                           # Blue diagram element -- plain TextBoxes have no fill of
+                           # their own, so the text_contrast rule can't see that
+                           # background and correct it automatically; confirmed manually.
     # Grow this list empirically: run `deckguard inspect` on legacy decks
     # and add mappings for old-blue tints and other legacy colors found.
 
