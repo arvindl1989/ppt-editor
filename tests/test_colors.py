@@ -69,3 +69,23 @@ def test_effective_rgb_none_for_unset_color():
     run = slide.shapes.title.text_frame.paragraphs[0].add_run()
     run.text = "x"
     assert colors_mod.effective_rgb(run.font.color, None) is None
+
+
+def test_relative_luminance_black_and_white_are_the_extremes():
+    assert colors_mod.relative_luminance((0, 0, 0)) == 0.0
+    assert colors_mod.relative_luminance((255, 255, 255)) == 1.0
+
+
+def test_contrast_ratio_black_vs_white_is_maximal():
+    assert colors_mod.contrast_ratio((0, 0, 0), (255, 255, 255)) == pytest.approx(21.0, abs=0.01)
+    assert colors_mod.contrast_ratio((10, 10, 10), (10, 10, 10)) == pytest.approx(1.0, abs=0.01)
+
+
+def test_expected_contrast_text_hex_matches_general_branding_examples():
+    """Regression test pinned to General_Branding.docx's explicit
+    examples: white text on KONE Blue, black text on a pale secondary color."""
+    assert colors_mod.expected_contrast_text_hex("1450F5", "141414", "FFFFFF") == "FFFFFF"
+    assert colors_mod.expected_contrast_text_hex("F3EEE6", "141414", "FFFFFF") == "141414"
+    assert colors_mod.expected_contrast_text_hex("FFCDD7", "141414", "FFFFFF") == "141414"
+    assert colors_mod.expected_contrast_text_hex("141414", "141414", "FFFFFF") == "FFFFFF"
+    assert colors_mod.expected_contrast_text_hex("FFFFFF", "141414", "FFFFFF") == "141414"

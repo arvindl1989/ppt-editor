@@ -130,9 +130,23 @@ typography_rules:
     allowed_words: ["KONE"]                          # ...except the word KONE
     required_fonts: ["KONE Information"]             # ALWAYS all-caps
   text_colors:
-    "Inter": ["#141414"]              # black only
-    "Inter SemiBold": ["#141414"]     # black only
+    # "Always use Inter either in black or white" (General_Branding.docx) --
+    # which of the two is correct is a legibility question, governed by the
+    # `contrast` rule below wherever a background is resolvable. This list
+    # is the fallback for text with no resolvable background (e.g. sitting
+    # directly on the page canvas): still must be black or white, black first.
+    "Inter": ["#141414", "#FFFFFF"]
+    "Inter SemiBold": ["#141414", "#FFFFFF"]
     "KONE Information": ["#1450F5", "#141414", "#FFFFFF"]  # blue preferred
+  # Legibility rule (General_Branding.docx): white text on a dark/saturated
+  # background (KONE Blue), black text on a light background (secondary
+  # colors, white). Computed by WCAG contrast ratio against the shape's own
+  # resolved solid fill -- not a fixed lookup table, so it generalizes to
+  # any approved background color, not just the two the doc calls out by name.
+  contrast:
+    fonts: ["Inter", "Inter SemiBold"]
+    dark_hex: "#141414"
+    light_hex: "#FFFFFF"
   text_effects:
     forbidden: ["shadow", "glow", "reflection", "outline", "3d"]
   role_restrictions:

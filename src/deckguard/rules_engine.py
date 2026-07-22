@@ -247,6 +247,20 @@ def _check_shape(
     min_title_pt = fonts_cfg.get("min_title_size_pt")
     min_size_by_level = {int(k): v for k, v in (fonts_cfg.get("min_size_by_level", {}) or {}).items()}
 
+    contrast_cfg = typo.get("contrast", {}) or {}
+    contrast_fonts = set(contrast_cfg.get("fonts", []) or [])
+    contrast_dark = colors_mod.normalize_hex(contrast_cfg["dark_hex"]) if contrast_cfg.get("dark_hex") else None
+    contrast_light = colors_mod.normalize_hex(contrast_cfg["light_hex"]) if contrast_cfg.get("light_hex") else None
+    # Only checkable when the shape has its own resolved solid background --
+    # text sitting on an inherited/layout/no-fill background can't be
+    # evaluated here without full z-order resolution, so it's left alone
+    # rather than guessed at.
+    bg_hex = None
+    if shape.fill and shape.fill.type == "solid" and shape.fill.colors:
+        first = shape.fill.colors[0]
+        if first.hex:
+            bg_hex = first.hex
+
     for para in shape.paragraphs:
         full_text = "".join(r.text for r in para.runs).strip()
 
@@ -309,36 +323,79 @@ def _check_shape(
                     )
                     matched_approved = None
                 else:
-                    # run text color vs. that font's allowed text colors (config
-                    # list order is significant — e.g. KONE Information lists
-                    # blue first as the preferred color — preserve it rather
-                    # than sorting).
-                    allowed_colors_ordered = [
-                        colors_mod.normalize_hex(h) for h in text_colors_cfg.get(matched_approved, [])
-                    ]
-                    allowed_colors = set(allowed_colors_ordered)
-                    if allowed_colors and run.color and run.color.kind != "none" and run.color.hex:
-                        if run.color.hex not in allowed_colors:
+                    # Legibility on a known background is the more specific,
+                    # more correct check (e.g. white -- not black -- text on
+                    # KONE Blue), so it takes over entirely for fonts/shapes
+                    # where it applies; the generic allowed-colors-list check
+                    # below is the fallback for everything else (no resolved
+                    # background to check contrast against, e.g. text on the
+                    # page's plain canvas, or a font contrast isn't configured for).
+                    contrast_applies = (
+                        matched_approved in contrast_fonts
+                        and bg_hex is not None
+                        and contrast_dark is not None
+                        and contrast_light is not None
+                    )
+                    if (
+                        contrast_applies
+                        and run.color
+                        and run.color.kind != "none"
+                        and run.color.hex
+                    ):
+                        expected_hex = colors_mod.expected_contrast_text_hex(bg_hex, contrast_dark, contrast_light)
+                        if run.color.hex != expected_hex:
                             violations.append(
                                 Violation(
                                     slide_index=slide_idx,
                                     shape_id=shape.shape_id,
                                     shape_name=shape.name,
                                     element="run",
-                                    rule="text_color",
+                                    rule="text_contrast",
                                     message=(
-                                        f"'{matched_approved}' text must use one of "
-                                        f"{['#' + h for h in allowed_colors_ordered]}, found #{run.color.hex}"
+                                        f"'{matched_approved}' text on background #{bg_hex} should be "
+                                        f"#{expected_hex} for legibility, found #{run.color.hex}"
                                     ),
                                     severity="major",
                                     auto_fixable=True,
                                     details={
                                         "current": f"#{run.color.hex}",
-                                        "target": f"#{allowed_colors_ordered[0]}",
+                                        "target": f"#{expected_hex}",
+                                        "background": f"#{bg_hex}",
                                     },
                                     target=run,
                                 )
                             )
+                    elif not contrast_applies:
+                        # run text color vs. that font's allowed text colors (config
+                        # list order is significant — e.g. KONE Information lists
+                        # blue first as the preferred color — preserve it rather
+                        # than sorting).
+                        allowed_colors_ordered = [
+                            colors_mod.normalize_hex(h) for h in text_colors_cfg.get(matched_approved, [])
+                        ]
+                        allowed_colors = set(allowed_colors_ordered)
+                        if allowed_colors and run.color and run.color.kind != "none" and run.color.hex:
+                            if run.color.hex not in allowed_colors:
+                                violations.append(
+                                    Violation(
+                                        slide_index=slide_idx,
+                                        shape_id=shape.shape_id,
+                                        shape_name=shape.name,
+                                        element="run",
+                                        rule="text_color",
+                                        message=(
+                                            f"'{matched_approved}' text must use one of "
+                                            f"{['#' + h for h in allowed_colors_ordered]}, found #{run.color.hex}"
+                                        ),
+                                        severity="major",
+                                        auto_fixable=True,
+                                        details={
+                                            "current": f"#{run.color.hex}",
+                                            "target": f"#{allowed_colors_ordered[0]}",
+                                        },
+                                        target=run,
+                                    )
+                                )
 
                     # all-caps rules — flagged only, not auto-fixed:
                     # transforming case is a content edit (can't safely

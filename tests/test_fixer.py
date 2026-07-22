@@ -198,3 +198,22 @@ def test_fix_layout_panel_remap_is_a_no_op_when_not_configured():
     fix_deck(prs, config, source_path="in.pptx", output_path=None, dry_run=True)
 
     assert _fill_hex(panel) == "EDEFF0"
+
+
+def test_fix_corrects_text_color_for_legibility_on_kone_blue():
+    """End-to-end: fix_deck must rewrite black-on-blue text to white, not
+    leave it for manual review -- this is auto-fixable by construction."""
+    prs = new_deck()
+    slide = add_slide(prs)
+    box = add_rectangle(slide, name="Blue panel", fill_hex="1450F5", left_in=1, top_in=1, width_in=3, height_in=1)
+    box.text_frame.text = "Label"
+    run = box.text_frame.paragraphs[0].runs[0]
+    run.font.name = "Inter"
+    from pptx.dml.color import RGBColor
+
+    run.font.color.rgb = RGBColor.from_string("141414")
+
+    report = fix_deck(prs, CONFIG, source_path="in.pptx", output_path=None, dry_run=True)
+
+    assert any(c.rule == "text_contrast" for c in report.changes)
+    assert str(run.font.color.rgb) == "FFFFFF"

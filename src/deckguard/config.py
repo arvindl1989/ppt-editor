@@ -123,6 +123,24 @@ def validate_config(config: dict, base_dir: str | Path = ".") -> list[str]:
         if not isinstance(val, (int, float)) or val <= 0:
             errors.append(f"fonts.min_size_by_level[{level!r}] must be a positive number")
 
+    typo_cfg = config.get("typography_rules", {}) or {}
+    contrast_cfg = typo_cfg.get("contrast", {}) or {}
+    if contrast_cfg:
+        for key in ("dark_hex", "light_hex"):
+            val = contrast_cfg.get(key)
+            if not val:
+                errors.append(f"typography_rules.contrast.{key} is required when contrast is configured")
+                continue
+            try:
+                norm = colors_mod.normalize_hex(val)
+            except ValueError as exc:
+                errors.append(f"typography_rules.contrast.{key}: {exc}")
+                continue
+            if norm not in approved_norm:
+                errors.append(f"typography_rules.contrast.{key} '{val}' is not in colors.approved")
+        if not contrast_cfg.get("fonts"):
+            errors.append("typography_rules.contrast.fonts must list at least one font name")
+
     logo_cfg = config.get("logo", {}) or {}
     logo_path = logo_cfg.get("new_logo_path")
     if not logo_path:

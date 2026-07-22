@@ -1,9 +1,11 @@
+from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN
 
 from deckguard.config import load_config, default_config_path
 from deckguard.inventory import build_inventory
 from deckguard.rules_engine import audit_deck
 from tests.helpers import (
+    add_rectangle,
     add_shadow_effect,
     add_slide,
     body_run,
@@ -290,3 +292,65 @@ def test_non_standard_layout_is_a_no_op_when_approved_layouts_not_configured():
 
     violations = audit_deck(build_inventory(prs), config)
     assert by_rule(violations, "non_standard_layout") == []
+
+
+def test_text_contrast_flags_black_text_on_kone_blue_background():
+    """Regression test for General_Branding.docx's legibility rule: black
+    text on the KONE Blue background is wrong -- must be white."""
+    prs = new_deck()
+    slide = add_slide(prs)
+    box = add_rectangle(slide, name="Blue panel", fill_hex="1450F5", left_in=1, top_in=1, width_in=3, height_in=1)
+    box.text_frame.text = "Label"
+    run = box.text_frame.paragraphs[0].runs[0]
+    run.font.name = "Inter"
+    run.font.color.rgb = RGBColor.from_string("141414")
+
+    violations = violations_for(prs)
+    viol = by_rule(violations, "text_contrast")
+    assert len(viol) == 1
+    assert viol[0].details["target"] == "#FFFFFF"
+    assert viol[0].severity == "major"
+    assert viol[0].auto_fixable is True
+
+    # the generic allowed-colors-list check must not also fire for the same run
+    assert by_rule(violations, "text_color") == []
+
+
+def test_text_contrast_passes_when_white_text_on_kone_blue_background():
+    prs = new_deck()
+    slide = add_slide(prs)
+    box = add_rectangle(slide, name="Blue panel", fill_hex="1450F5", left_in=1, top_in=1, width_in=3, height_in=1)
+    box.text_frame.text = "Label"
+    run = box.text_frame.paragraphs[0].runs[0]
+    run.font.name = "Inter"
+    run.font.color.rgb = RGBColor.from_string("FFFFFF")
+
+    assert by_rule(violations_for(prs), "text_contrast") == []
+
+
+def test_text_contrast_flags_white_text_on_light_secondary_background():
+    prs = new_deck()
+    slide = add_slide(prs)
+    box = add_rectangle(slide, name="Pink card", fill_hex="FFCDD7", left_in=1, top_in=1, width_in=3, height_in=1)
+    box.text_frame.text = "Label"
+    run = box.text_frame.paragraphs[0].runs[0]
+    run.font.name = "Inter"
+    run.font.color.rgb = RGBColor.from_string("FFFFFF")
+
+    viol = by_rule(violations_for(prs), "text_contrast")
+    assert len(viol) == 1
+    assert viol[0].details["target"] == "#141414"
+
+
+def test_text_contrast_not_checked_without_a_resolved_shape_background():
+    """No shape-level solid fill (plain text on the page canvas) -- can't
+    compute contrast without full z-order resolution, so it's skipped
+    rather than guessed at; the generic allowed-colors check still applies."""
+    prs = new_deck()
+    slide = add_slide(prs)
+    set_run(body_run(slide), text="Body copy", font="Inter", color_hex="FFFFFF")
+
+    assert by_rule(violations_for(prs), "text_contrast") == []
+    # white isn't the fallback list's first choice, but it IS an allowed
+    # color for Inter (black or white) -- so no text_color violation either
+    assert by_rule(violations_for(prs), "text_color") == []

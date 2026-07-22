@@ -86,6 +86,34 @@ def rgb_distance(a: tuple[int, int, int], b: tuple[int, int, int]) -> float:
     return sum((x - y) ** 2 for x, y in zip(a, b)) ** 0.5
 
 
+def relative_luminance(rgb: tuple[int, int, int]) -> float:
+    """WCAG relative luminance (0=black, 1=white), gamma-corrected per channel."""
+
+    def channel(c: int) -> float:
+        c = c / 255
+        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+
+    r, g, b = rgb
+    return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+
+
+def contrast_ratio(a: tuple[int, int, int], b: tuple[int, int, int]) -> float:
+    """WCAG contrast ratio, 1 (no contrast) to 21 (black vs white)."""
+    la, lb = relative_luminance(a), relative_luminance(b)
+    lighter, darker = max(la, lb), min(la, lb)
+    return (lighter + 0.05) / (darker + 0.05)
+
+
+def expected_contrast_text_hex(bg_hex: str, dark_hex: str, light_hex: str) -> str:
+    """Which of `dark_hex`/`light_hex` is more legible on `bg_hex`, by WCAG
+    contrast ratio -- e.g. white text on KONE Blue, black text on a pale
+    secondary color, per General_Branding.docx's legibility rule."""
+    bg_rgb = hex_to_rgb(bg_hex)
+    dark_rgb = hex_to_rgb(dark_hex)
+    light_rgb = hex_to_rgb(light_hex)
+    return light_hex if contrast_ratio(bg_rgb, light_rgb) > contrast_ratio(bg_rgb, dark_rgb) else dark_hex
+
+
 def apply_brightness(rgb: tuple[int, int, int], brightness: float) -> tuple[int, int, int]:
     """Approximate PowerPoint's lumMod/lumOff tint(+)/shade(-) adjustment."""
     r, g, b = rgb
