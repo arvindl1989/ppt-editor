@@ -1,4 +1,13 @@
 # brand_rules.yaml — KONE brand configuration for deckguard
+#
+# Grounded in two authoritative sources (2026-07-22):
+#   - KONE_PowerPoint_template_1.potx — the accepted org template: theme
+#     clrScheme/fontScheme, slide master txStyles, and all 62 sanctioned
+#     slide layouts.
+#   - General_Branding.docx — the written brand guideline (colors, type
+#     rules, usage notes).
+# Where the two disagreed, the written guideline wins (see colors.remap's
+# F3EEEA entry below) — the template file is not assumed infallible.
 
 brand:
   name: "KONE"
@@ -9,11 +18,12 @@ colors:
     - "#1450F5"   # KONE Blue
     - "#FFFFFF"   # White
     - "#141414"   # Black
-    # Accent
+    # Accent — used in UI and illustrations only, not theme slots
     - "#FF5F28"   # Red
     - "#FFA023"   # Orange
     - "#1ED273"   # Green
-    # Secondary
+    # Secondary (General_Branding.docx; matches template theme accent2-5 + lt2,
+    # except lt2 — see colors.remap note on #F3EEEA)
     - "#F3EEE6"
     - "#FFE141"
     - "#D2F5FF"
@@ -22,7 +32,7 @@ colors:
     # KONE Blue tints
     - "#4373F7"   # 80%
     - "#7296F9"   # 60%
-    - "#A1B9FB"   # 40%
+    - "#A1B9FB"   # 40% (also used as the template theme's accent6 slot)
     - "#D0DCFD"   # 20%
     # Black tints
     - "#434343"   # 80%
@@ -51,6 +61,10 @@ colors:
     "#E51A92": "#FFCDD7"   # old magenta (variant) -> new secondary pink
     "#3B4245": "#727272"   # old dark gray -> black 60% tint
     "#000000": "#141414"   # pure black -> brand black
+    "#F3EEEA": "#F3EEE6"   # the org .potx's own theme lt2 slot drifted one nibble
+                           # off the documented secondary color -- General_Branding.docx
+                           # is authoritative, so any deck inheriting the template's
+                           # own (wrong) theme value gets corrected too.
     # Grow this list empirically: run `deckguard inspect` on legacy decks
     # and add mappings for old-blue tints and other legacy colors found.
 
@@ -63,6 +77,11 @@ colors:
   # `layout_panel_min_area_sq_in` in area so small accent/placeholder
   # rectangles on the same layout (e.g. unselected tab backgrounds) that
   # intentionally reuse the same literal color are left untouched.
+  #
+  # NOTE: "AMP", the layout this entry was derived from, is not one of the
+  # org template's 62 sanctioned layouts (see layout.approved_layouts) --
+  # decks using it will also be flagged by the non_standard_layout rule.
+  # This remap stays as a pragmatic fix for decks already built on it.
   layout_panel_remap:
     "#EDEFF0": "#1450F5"   # AMP layout's big content/picture background panel
                            # (confirmed: New_Test_Slides.pptx's AMP layout has
@@ -72,15 +91,32 @@ colors:
 
 fonts:
   approved:
-    - "Inter"             # Regular & Semi Bold weights
-    - "Inter Semi Bold"
+    - "Inter"             # Regular weight
+    - "Inter SemiBold"     # actual installed family name (one word, per the .potx) — matches "Inter Semi Bold"/"Inter-SemiBold" via normalize_key regardless of how a given run spells it
     - "KONE Information"  # numbers, small labels, sub-headers ONLY
   remap:
     "Calibri": "Inter"
-    "Arial": "Inter"
+    "Arial": "Inter"       # Arial is documented as an EMAIL-ONLY fallback, never sanctioned in PPT
     "Segoe UI": "Inter"
-  min_body_size_pt: 12    # placeholder — flag as configurable
-  min_title_size_pt: 24   # placeholder — flag as configurable
+  min_body_size_pt: 11     # safety-net fallback only -- min_size_by_level covers every real
+                            # paragraph level (0-8); this only fires if that table is incomplete
+  min_title_size_pt: 24    # confirmed: the template's own "Title (24pt) and footers" layout
+                            # is the smallest sanctioned title size (master default is 32pt)
+  # The master's bodyStyle defines a *different* minimum per outline level
+  # by design (footnote-tier levels 6/7 are deliberately 11pt) -- a single
+  # flat minimum would false-positive on those. Applies to placeholder text
+  # only; free-form text boxes (footnotes, tab labels, page numbers) have
+  # no master-defined floor and are intentionally exempt (see rules_engine.py).
+  min_size_by_level:
+    0: 14
+    1: 14
+    2: 14
+    3: 14
+    4: 18
+    5: 14
+    6: 11
+    7: 11
+    8: 11   # also KONE Information's own outline level (blue, all-caps by default) — sized via role_restrictions.max_size_pt instead
 
 typography_rules:
   alignment:
@@ -90,12 +126,12 @@ typography_rules:
     # numeric-only content for pagination. Prefer false positives with
     # low severity over silent misses.
   all_caps:
-    forbidden_fonts: ["Inter", "Inter Semi Bold"]   # never all-caps...
+    forbidden_fonts: ["Inter", "Inter SemiBold"]   # never all-caps...
     allowed_words: ["KONE"]                          # ...except the word KONE
     required_fonts: ["KONE Information"]             # ALWAYS all-caps
   text_colors:
     "Inter": ["#141414"]              # black only
-    "Inter Semi Bold": ["#141414"]    # black only
+    "Inter SemiBold": ["#141414"]     # black only
     "KONE Information": ["#1450F5", "#141414", "#FFFFFF"]  # blue preferred
   text_effects:
     forbidden: ["shadow", "glow", "reflection", "outline", "3d"]
@@ -113,6 +149,75 @@ logo:
 layout:
   slide_size: "16:9"
   forbidden_elements: ["wordart", "3d_effects"]
+  # The org's accepted PowerPoint template's sanctioned layouts (from
+  # KONE_PowerPoint_template_1.potx's single slide master), minus its own
+  # internal-only entries ("User guide", the ">Do not use..." marker
+  # slide). A slide on any layout NOT in this list is flagged
+  # (non_standard_layout) rather than silently trusted or silently
+  # recolored -- color/font rules alone can't validate a layout deckguard
+  # has never seen the structure of.
+  approved_layouts:
+    - "Cover A"
+    - "Cover B"
+    - "Cover C"
+    - "Cover D"
+    - "Cover E"
+    - "Cover F"
+    - "Agenda A"
+    - "Agenda B"
+    - "Agenda C"
+    - "Section divider (numbering)"
+    - "Section divider A"
+    - "Section divider B"
+    - "Section divider C"
+    - "Section divider D"
+    - "Section divider (just title)"
+    - "Title and content A"
+    - "Title and content B"
+    - "Title, subtitle and content A"
+    - "Title, subtitle and content B"
+    - "Two content A"
+    - "Two content B"
+    - "Two content C"
+    - "Two content D"
+    - "Three content A"
+    - "Three content B"
+    - "Three content C"
+    - "Three content D"
+    - "Two pictures and text A"
+    - "Two pictures and text B"
+    - "Two pictures and text C"
+    - "Three pictures and text"
+    - "Four pictures and text"
+    - "Text and picture A"
+    - "Text and picture B"
+    - "Text and picture C"
+    - "Text and picture F"
+    - "Text and picture G"
+    - "Text and picture H"
+    - "Title and text"
+    - "Quote A"
+    - "Quote B"
+    - "Quote C"
+    - "Quote D"
+    - "Quote E"
+    - "Title (24pt) and footers"
+    - "Fullslide picture"
+    - "Fullslide video"
+    - "Statement A"
+    - "Statement B"
+    - "Statement C"
+    - "Statement D"
+    - "Statement E"
+    - "Statement F"
+    - "Statement or quote"
+    - "Outro"
+    - "End"
+    - "REPORT Two content"
+    - "REPORT Three content"
+    - "REPORT Five content"
+    - "REPORT Seven content"
+    - "Blank"
 
 audit:
   fail_on: ["critical"]

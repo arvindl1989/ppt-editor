@@ -111,6 +111,18 @@ def validate_config(config: dict, base_dir: str | Path = ".") -> list[str]:
         if val is not None and (not isinstance(val, (int, float)) or val <= 0):
             errors.append(f"fonts.{key} must be a positive number")
 
+    min_size_by_level = fonts_cfg.get("min_size_by_level", {}) or {}
+    for level, val in min_size_by_level.items():
+        try:
+            level_int = int(level)
+        except (TypeError, ValueError):
+            errors.append(f"fonts.min_size_by_level key {level!r} must be an integer (paragraph outline level)")
+            continue
+        if not 0 <= level_int <= 8:
+            errors.append(f"fonts.min_size_by_level key {level!r} must be between 0 and 8")
+        if not isinstance(val, (int, float)) or val <= 0:
+            errors.append(f"fonts.min_size_by_level[{level!r}] must be a positive number")
+
     logo_cfg = config.get("logo", {}) or {}
     logo_path = logo_cfg.get("new_logo_path")
     if not logo_path:
@@ -124,6 +136,10 @@ def validate_config(config: dict, base_dir: str | Path = ".") -> list[str]:
     slide_size = layout_cfg.get("slide_size")
     if slide_size not in (None, "16:9", "4:3"):
         errors.append(f"layout.slide_size '{slide_size}' is not one of: 16:9, 4:3")
+
+    approved_layouts = layout_cfg.get("approved_layouts")
+    if approved_layouts is not None and not isinstance(approved_layouts, list):
+        errors.append("layout.approved_layouts must be a list of layout names")
 
     audit_cfg = config.get("audit", {}) or {}
     for sev in audit_cfg.get("fail_on", []) or []:

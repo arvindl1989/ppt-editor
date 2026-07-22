@@ -245,6 +245,7 @@ def _check_shape(
     default_align = alignment_cfg.get("default", "left")
     min_body_pt = fonts_cfg.get("min_body_size_pt")
     min_title_pt = fonts_cfg.get("min_title_size_pt")
+    min_size_by_level = {int(k): v for k, v in (fonts_cfg.get("min_size_by_level", {}) or {}).items()}
 
     for para in shape.paragraphs:
         full_text = "".join(r.text for r in para.runs).strip()
@@ -426,8 +427,19 @@ def _check_shape(
                     )
                 )
 
-            # minimum size
-            min_pt = min_title_pt if is_heading else min_body_pt
+            # minimum size — headings use a flat floor; placeholder body
+            # text uses the master's own per-outline-level sizes (it's
+            # deliberately not flat: footnote-tier levels go down to 11pt
+            # by design). Plain, non-placeholder text boxes (footnotes, tab
+            # labels, page numbers dropped in free-form) have no
+            # master-defined floor at all, so they're intentionally exempt
+            # rather than guessed at.
+            if is_heading:
+                min_pt = min_title_pt
+            elif shape.is_placeholder:
+                min_pt = min_size_by_level.get(para.level, min_body_pt)
+            else:
+                min_pt = None
             if min_pt and run.size_pt and run.size_pt < min_pt:
                 violations.append(
                     Violation(
@@ -475,11 +487,36 @@ def audit_deck(inventory: DeckInventory, config: dict) -> list[Violation]:
     logo_cfg = config.get("logo", {}) or {}
     old_hashes = logo_cfg.get("old_logo_hashes", []) or []
 
+    approved_layouts = layout_cfg.get("approved_layouts")
+
     slide_height_in = inventory.slide_height_emu / 914400 if inventory.slide_height_emu else None
 
     for slide in inventory.slides:
         top_shapes = slide.shapes
         all_shapes = list(iter_shapes_recursive(top_shapes))
+
+        # A slide built on a layout outside the sanctioned template (e.g. a
+        # bespoke layout an agency/team added on the side) isn't something
+        # color/font rules can catch -- those checks only ever see whatever
+        # that custom layout happens to define. Surfaced as its own
+        # category rather than silently trusted or silently recolored.
+        if approved_layouts is not None and slide.layout_name not in approved_layouts:
+            violations.append(
+                Violation(
+                    slide_index=slide.index,
+                    shape_id=None,
+                    shape_name="(slide)",
+                    element="slide",
+                    rule="non_standard_layout",
+                    message=(
+                        f"slide uses layout '{slide.layout_name}', which is not part of "
+                        f"the approved template"
+                    ),
+                    severity="major",
+                    auto_fixable=False,
+                    details={"layout_name": slide.layout_name},
+                )
+            )
 
         if old_hashes:
             matches = logo_mod.find_old_logo_matches([s.obj for s in top_shapes], old_hashes)

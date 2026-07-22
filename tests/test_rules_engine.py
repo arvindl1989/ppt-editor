@@ -189,7 +189,11 @@ def test_theme_based_legacy_tint_is_flagged_via_effective_color():
     assert viol[0].severity == "critical"
 
 
-def test_clean_deck_has_no_violations_besides_slide_size():
+def test_clean_deck_has_no_violations_besides_template_provenance():
+    """python-pptx's stock template is inherently 4:3 and built on generic
+    Office layout names, not KONE's -- slide_size and non_standard_layout
+    are expected artifacts of the test fixture, not something a real
+    KONE-template deck would ever trip. Everything else must be clean."""
     prs = new_deck()
     slide = add_slide(prs)
     set_run(title_run(slide), text="Title", font="Inter Semi Bold", color_hex="141414")
@@ -198,5 +202,91 @@ def test_clean_deck_has_no_violations_besides_slide_size():
     set_run(body_run(slide), text="Body copy", font="Inter", color_hex="141414")
     slide.placeholders[1].text_frame.paragraphs[0].alignment = PP_ALIGN.LEFT
 
-    rules = [v.rule for v in violations_for(prs)]
-    assert rules == ["slide_size"]
+    rules = {v.rule for v in violations_for(prs)}
+    assert rules == {"slide_size", "non_standard_layout"}
+
+
+def test_min_size_uses_the_paragraphs_own_outline_level_not_a_flat_floor():
+    """The master's body text has a deliberately different minimum per
+    outline level (footnote-tier levels are 11pt by design, not a flat
+    number) -- config.min_size_by_level must be consulted per-paragraph,
+    not just a single fonts.min_body_size_pt."""
+    prs = new_deck()
+    slide = add_slide(prs)
+    set_run(body_run(slide), text="footnote-tier", font="Inter", size_pt=11, color_hex="141414")
+    para = slide.placeholders[1].text_frame.paragraphs[0]
+    para.level = 6  # min_size_by_level[6] == 11pt in the real config -- should NOT be flagged
+
+    assert by_rule(violations_for(prs), "min_size") == []
+
+
+def test_min_size_still_flags_a_level_below_its_own_threshold():
+    prs = new_deck()
+    slide = add_slide(prs)
+    set_run(body_run(slide), text="too small even for level 6", font="Inter", size_pt=8, color_hex="141414")
+    para = slide.placeholders[1].text_frame.paragraphs[0]
+    para.level = 6  # min_size_by_level[6] == 11pt -- 8pt still violates
+
+    viol = by_rule(violations_for(prs), "min_size")
+    assert len(viol) == 1
+    assert viol[0].details["min_pt"] == 11
+
+
+def test_min_size_exempts_plain_text_boxes_with_no_master_defined_floor():
+    """Free-form text boxes (footnotes, tab labels, page numbers typed
+    into a plain shape rather than a real placeholder) have no
+    master-defined size floor -- unlike placeholder body text, they must
+    not be flagged just for being small."""
+    from pptx.util import Inches, Pt
+
+    from pptx.dml.color import RGBColor
+
+    prs = new_deck()
+    slide = add_slide(prs)
+    box = slide.shapes.add_textbox(Inches(1), Inches(1), Inches(2), Inches(0.5))
+    run = box.text_frame.paragraphs[0].add_run()
+    run.text = "tiny footnote"
+    run.font.name = "Inter"
+    run.font.size = Pt(8)
+    run.font.color.rgb = RGBColor.from_string("141414")
+
+    assert by_rule(violations_for(prs), "min_size") == []
+
+
+def test_non_standard_layout_flagged_when_not_in_approved_list():
+    prs = new_deck()
+    add_slide(prs, layout_idx=1)  # "Title and Content" -- not a KONE template layout name
+
+    config = dict(CONFIG)
+    config["layout"] = dict(CONFIG["layout"])
+    config["layout"]["approved_layouts"] = ["Some Other Layout"]
+
+    violations = audit_deck(build_inventory(prs), config)
+    viol = by_rule(violations, "non_standard_layout")
+    assert len(viol) == 1
+    assert viol[0].severity == "major"
+    assert viol[0].auto_fixable is False
+
+
+def test_non_standard_layout_not_flagged_when_layout_is_approved():
+    prs = new_deck()
+    add_slide(prs, layout_idx=1)
+
+    config = dict(CONFIG)
+    config["layout"] = dict(CONFIG["layout"])
+    config["layout"]["approved_layouts"] = ["Title and Content"]
+
+    violations = audit_deck(build_inventory(prs), config)
+    assert by_rule(violations, "non_standard_layout") == []
+
+
+def test_non_standard_layout_is_a_no_op_when_approved_layouts_not_configured():
+    prs = new_deck()
+    add_slide(prs, layout_idx=1)
+
+    config = dict(CONFIG)
+    config["layout"] = dict(CONFIG["layout"])
+    config["layout"].pop("approved_layouts", None)
+
+    violations = audit_deck(build_inventory(prs), config)
+    assert by_rule(violations, "non_standard_layout") == []

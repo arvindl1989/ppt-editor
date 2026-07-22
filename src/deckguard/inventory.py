@@ -192,6 +192,7 @@ def _run_record(run, theme_scheme) -> RunRecord:
 class ParagraphRecord:
     alignment: Optional[str]
     alignment_explicit: bool
+    level: int
     runs: list
     obj: object = field(repr=False, compare=False, default=None)
 
@@ -201,6 +202,7 @@ def _paragraph_record(paragraph, theme_scheme) -> ParagraphRecord:
     return ParagraphRecord(
         alignment=ALIGN_NAMES.get(raw_align) if raw_align is not None else None,
         alignment_explicit=raw_align is not None,
+        level=paragraph.level,
         runs=[_run_record(r, theme_scheme) for r in paragraph.runs],
         obj=paragraph,
     )

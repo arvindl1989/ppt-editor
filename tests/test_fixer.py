@@ -95,10 +95,10 @@ def test_fix_is_idempotent_on_a_clean_deck():
     slide.placeholders[1].text_frame.paragraphs[0].alignment = PP_ALIGN.LEFT
 
     report = fix_deck(prs, CONFIG, source_path="clean.pptx", output_path=None, dry_run=True)
-    # Nothing to fix except the (unfixable) slide-size mismatch of the
-    # default python-pptx template.
+    # Nothing to fix except the (unfixable) slide-size mismatch and
+    # non-KONE layout names inherent to the default python-pptx template.
     assert report.changes == []
-    assert all(v.rule == "slide_size" for v in report.manual_review)
+    assert all(v.rule in ("slide_size", "non_standard_layout") for v in report.manual_review)
 
 
 def test_fix_report_summary_counts_match():
