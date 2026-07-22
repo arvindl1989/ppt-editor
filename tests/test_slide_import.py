@@ -17,6 +17,8 @@ from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 
 from deckguard.slide_import import (
+    _next_master_or_layout_id,
+    _next_sld_id,
     default_template_path,
     import_cover_and_outro_parts,
     replace_intro_outro,
@@ -25,6 +27,67 @@ from tests.helpers import add_slide, new_deck, title_run
 
 TEMPLATE_PATH = default_template_path()
 pytestmark = pytest.mark.skipif(not TEMPLATE_PATH.exists(), reason="bundled template asset not present")
+
+
+def test_next_master_or_layout_id_starts_at_schema_floor_on_empty_target():
+    # ST_SlideMasterId/ST_SlideLayoutId minInclusive per pml.xsd.
+    target = {"ppt/presentation.xml": b"<p:presentation></p:presentation>"}
+    assert _next_master_or_layout_id(target) == 2147483648
+
+
+def test_next_master_or_layout_id_respects_existing_slide_master_id():
+    target = {
+        "ppt/presentation.xml": (
+            b'<p:presentation><p:sldMasterIdLst>'
+            b'<p:sldMasterId id="2147483700" r:id="rId1"/>'
+            b"</p:sldMasterIdLst></p:presentation>"
+        )
+    }
+    assert _next_master_or_layout_id(target) == 2147483701
+
+
+def test_next_master_or_layout_id_respects_existing_slide_layout_id_in_any_master():
+    """Regression test for the real corruption bug: sldLayoutId and
+    sldMasterId share one ID namespace, so a layout ID buried in a
+    *second* slideMaster's XML must still be found and avoided -- this
+    is exactly the collision that made a real deck's output invalid."""
+    target = {
+        "ppt/presentation.xml": b"<p:presentation></p:presentation>",
+        "ppt/slideMasters/slideMaster1.xml": (
+            b'<p:sldMaster><p:sldLayoutIdLst>'
+            b'<p:sldLayoutId id="2147483730" r:id="rId1"/>'
+            b"</p:sldLayoutIdLst></p:sldMaster>"
+        ),
+        "ppt/slideMasters/slideMaster2.xml": (
+            b'<p:sldMaster><p:sldLayoutIdLst>'
+            b'<p:sldLayoutId id="2147483700" r:id="rId1"/>'
+            b"</p:sldLayoutIdLst></p:sldMaster>"
+        ),
+    }
+    # Must be strictly greater than every id found across *both* masters,
+    # not just the one a naive implementation might check first.
+    assert _next_master_or_layout_id(target) == 2147483731
+
+
+def test_next_sld_id_starts_at_schema_floor_on_empty_target():
+    # ST_SlideId minInclusive per pml.xsd.
+    target = {"ppt/presentation.xml": b"<p:presentation></p:presentation>"}
+    assert _next_sld_id(target) == 256
+
+
+def test_next_sld_id_respects_existing_slide_ids_and_stays_below_master_range():
+    target = {
+        "ppt/presentation.xml": (
+            b'<p:presentation><p:sldIdLst>'
+            b'<p:sldId id="256" r:id="rId2"/>'
+            b'<p:sldId id="300" r:id="rId3"/>'
+            b"</p:sldIdLst></p:presentation>"
+        )
+    }
+    next_id = _next_sld_id(target)
+    assert next_id == 301
+    # ST_SlideId maxExclusive: must never stray into the master/layout range.
+    assert next_id < 2147483648
 
 
 def _no_duplicate_zip_entries(path) -> bool:

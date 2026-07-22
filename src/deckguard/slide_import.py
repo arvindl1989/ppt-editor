@@ -56,6 +56,41 @@ def _next_part_number(parts: dict[str, bytes], dirname: str, stem: str) -> int:
     return (max(nums) if nums else 0) + 1
 
 
+def _next_master_or_layout_id(target: dict[str, bytes]) -> int:
+    """sldMasterId and sldLayoutId share one ID namespace (a layout ID
+    reused as a master ID elsewhere in the same file is a hard
+    uniqueness violation -- confirmed by direct validation against the
+    real OOXML schema, ISO/IEC 29500, in production), and per that same
+    schema both types are constrained to >= 2147483648 (ST_SlideMasterId/
+    ST_SlideLayoutId's minInclusive) -- a disjoint range from sldId
+    (ST_SlideId: >= 256 and < 2147483648), so the two never need
+    cross-checking against each other. A same-looking-safe hardcoded
+    constant isn't actually safe -- it collided with a real deck's own
+    pre-existing ID in production. Scans every sldMasterId in
+    presentation.xml plus every sldLayoutId in every existing
+    slideMasterN.xml, and returns one past the max found.
+    """
+    max_id = 2147483648 - 1
+    pres_xml = target.get("ppt/presentation.xml", b"").decode()
+    for m in re.finditer(r'<p:sldMasterId id="(\d+)"', pres_xml):
+        max_id = max(max_id, int(m.group(1)))
+    for name, data in target.items():
+        if re.match(r"^ppt/slideMasters/slideMaster\d+\.xml$", name):
+            for m in re.finditer(r'<p:sldLayoutId id="(\d+)"', data.decode()):
+                max_id = max(max_id, int(m.group(1)))
+    return max_id + 1
+
+
+def _next_sld_id(target: dict[str, bytes]) -> int:
+    """sldId's own, separate ID pool -- see _next_master_or_layout_id for
+    why these two ranges are disjoint by schema design."""
+    max_id = 255
+    pres_xml = target.get("ppt/presentation.xml", b"").decode()
+    for m in re.finditer(r'<p:sldId id="(\d+)"', pres_xml):
+        max_id = max(max_id, int(m.group(1)))
+    return max_id + 1
+
+
 def _rels_path(part_path: str) -> str:
     d = part_path.rsplit("/", 1)
     return f"{d[0]}/_rels/{d[1]}.rels"
@@ -106,6 +141,14 @@ def import_cover_and_outro_parts(
     next_layout_num = _next_part_number(target, "slideLayouts", "slideLayout")
     next_theme_num = _next_part_number(target, "theme", "theme")
     next_slide_num = _next_part_number(target, "slides", "slide")
+
+    next_master_layout_id = _next_master_or_layout_id(target)
+    new_master_id = next_master_layout_id
+    new_cover_layout_id = next_master_layout_id + 1
+    new_outro_layout_id = next_master_layout_id + 2
+    next_sld_id = _next_sld_id(target)
+    new_cover_sld_id = next_sld_id
+    new_outro_sld_id = next_sld_id + 1
 
     pres_rels_text = target["ppt/_rels/presentation.xml.rels"].decode()
     next_rid = max((int(m) for m in re.findall(r'Id="rId(\d+)"', pres_rels_text)), default=0) + 1
@@ -163,10 +206,10 @@ def import_cover_and_outro_parts(
     master_xml = tmpl["ppt/slideMasters/slideMaster1.xml"].decode()
     master_xml = re.sub(
         r"<p:sldLayoutIdLst>.*?</p:sldLayoutIdLst>",
-        '<p:sldLayoutIdLst>'
-        '<p:sldLayoutId id="2147483730" r:id="rId101"/>'
-        '<p:sldLayoutId id="2147483731" r:id="rId102"/>'
-        '</p:sldLayoutIdLst>',
+        "<p:sldLayoutIdLst>"
+        f'<p:sldLayoutId id="{new_cover_layout_id}" r:id="rId101"/>'
+        f'<p:sldLayoutId id="{new_outro_layout_id}" r:id="rId102"/>'
+        "</p:sldLayoutIdLst>",
         master_xml,
         flags=re.S,
     )
@@ -265,7 +308,7 @@ def import_cover_and_outro_parts(
     next_rid += 1
     pres_xml = pres_xml.replace(
         "</p:sldMasterIdLst>",
-        f'<p:sldMasterId id="2147483700" r:id="rId{master_rid}"/></p:sldMasterIdLst>',
+        f'<p:sldMasterId id="{new_master_id}" r:id="rId{master_rid}"/></p:sldMasterIdLst>',
     )
 
     cover_rid = next_rid
@@ -273,13 +316,10 @@ def import_cover_and_outro_parts(
     outro_rid = next_rid
     next_rid += 1
 
-    existing_sld_ids = [int(n) for n in re.findall(r'<p:sldId id="(\d+)"', pres_xml)]
-    new_cover_id = max(existing_sld_ids, default=255) + 1
-    new_outro_id = new_cover_id + 1
     pres_xml = pres_xml.replace(
         "</p:sldIdLst>",
-        f'<p:sldId id="{new_cover_id}" r:id="rId{cover_rid}"/>'
-        f'<p:sldId id="{new_outro_id}" r:id="rId{outro_rid}"/></p:sldIdLst>',
+        f'<p:sldId id="{new_cover_sld_id}" r:id="rId{cover_rid}"/>'
+        f'<p:sldId id="{new_outro_sld_id}" r:id="rId{outro_rid}"/></p:sldIdLst>',
     )
     target["ppt/presentation.xml"] = pres_xml.encode()
 
