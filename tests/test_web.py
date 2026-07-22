@@ -82,6 +82,32 @@ def test_fix_flow_and_download(tmp_path, monkeypatch):
     assert dl_json.status_code == 200
 
 
+def test_fix_flow_also_migrates_non_standard_cover_and_outro(tmp_path, monkeypatch):
+    """The /fix route (the one Railway/the hosted tool actually calls)
+    must run the same cover/outro migration the CLI's `migrate` command
+    does -- this was missing initially (migrate was CLI-only), so the
+    hosted tool never picked up the new cover/outro at all."""
+    client, _ = _client(tmp_path, monkeypatch)
+    deck = tmp_path / "d.pptx"
+    _write_violating_deck(deck)  # single slide, not on a KONE Cover/Outro layout
+
+    with deck.open("rb") as f:
+        resp = client.post("/fix", files={"file": ("d.pptx", f, "application/octet-stream")})
+    assert resp.status_code == 200
+    assert "org template" in resp.text
+
+    m = re.search(r'/download/([a-f0-9]+)/fixed\.pptx', resp.text)
+    assert m
+    dl = client.get(m.group(0))
+    assert dl.status_code == 200
+
+    from pptx import Presentation
+    import io
+
+    prs = Presentation(io.BytesIO(dl.content))
+    assert prs.slides[0].slide_layout.name in ("Cover B", "Outro")
+
+
 def test_corrupt_file_gives_clean_error_not_500(tmp_path, monkeypatch):
     client, _ = _client(tmp_path, monkeypatch)
     resp = client.post("/audit", files={"file": ("bad.pptx", b"not a real pptx", "application/octet-stream")})

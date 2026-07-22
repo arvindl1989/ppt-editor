@@ -34,16 +34,14 @@ colors:
     - "#7296F9"   # 60%
     - "#A1B9FB"   # 40% (also used as the template theme's accent6 slot)
     - "#D0DCFD"   # 20%
-    # Black tints
+    # Black tints -- documented (General_Branding.docx) for sparing use in
+    # charts/infographics specifically. A different purpose from the
+    # background/panel greys below, so NOT included in the grey->F3EEE6
+    # remap even though they're also technically grey.
     - "#434343"   # 80%
     - "#727272"   # 60%
     - "#A1A1A1"   # 40%
     - "#D0D0D0"   # 20%
-    # Confirmed as intentionally-kept colors from real deck audits
-    - "#666666"
-    - "#BABDBF"
-    - "#07233B"
-    - "#EDEFF0"   # light card/panel background (0 exact shape-matched instances ever change to D0D0D0 in New_Test_Slides.pptx)
 
   remap:
     "#005EB8": "#1450F5"   # old KONE Blue -> new KONE Blue
@@ -75,6 +73,17 @@ colors:
     "#FFF5F7": "#FFCDD7"   # old pale pink -> secondary pink
     "#8D9194": "#1450F5"   # old gray -> KONE Blue
     "#004987": "#1450F5"   # old dark navy (a foreign deck's own theme accent1) -> KONE Blue
+    # Background/panel greys -> secondary off-white, per explicit instruction:
+    # any plain grey background/panel should read as F3EEE6, not stay grey.
+    # Distinct from the Black tint scale above (kept, different documented
+    # purpose) and from #EDEFF0's separate layout_panel_remap entry below
+    # (which targets #1450F5 specifically for the one known big blue panel
+    # role -- this entry instead covers EDEFF0 wherever it's used as an
+    # ordinary slide-level shape fill).
+    "#666666": "#F3EEE6"
+    "#BABDBF": "#F3EEE6"
+    "#07233B": "#F3EEE6"
+    "#EDEFF0": "#F3EEE6"
     # Grow this list empirically: run `deckguard inspect` on legacy decks
     # and add mappings for old-blue tints and other legacy colors found.
 

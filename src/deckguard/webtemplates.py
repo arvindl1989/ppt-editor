@@ -186,7 +186,14 @@ def _change_rows(changes: list[dict]) -> str:
     return "".join(rows) + truncated
 
 
-def fix_result_page(deck_name: str, fix_summary: dict, changes: list[dict], manual_review: list[dict], download_links: dict) -> str:
+def fix_result_page(
+    deck_name: str,
+    fix_summary: dict,
+    changes: list[dict],
+    manual_review: list[dict],
+    download_links: dict,
+    migrate_note: str | None = None,
+) -> str:
     stats = f"""<div class="stat-row">
   <div class="stat"><b style="color:#1ED273">{fix_summary['changes_applied']}</b><span>changes applied</span></div>
   <div class="stat"><b>{fix_summary['manual_review_required']}</b><span>need review</span></div>
@@ -198,9 +205,14 @@ def fix_result_page(deck_name: str, fix_summary: dict, changes: list[dict], manu
         f'<a class="dl secondary" href="{download_links["md"]}">Markdown change log</a>'
         f'<a class="dl secondary" href="/">Fix another deck</a>'
     )
+    note_html = (
+        f'<p style="color:var(--ink-muted);font-size:0.85rem;margin-top:0.75rem;">{_esc(migrate_note)}</p>'
+        if migrate_note else ""
+    )
     body = f"""<div class="card"><h2 style="margin-top:0;font-size:1.05rem;">Fixed — {_esc(deck_name)}</h2>
 {stats}
 {dl}
+{note_html}
 </div>
 <div class="card"><h3 style="margin-top:0;font-size:0.95rem;">Changes applied</h3>
 <div class="table-wrap"><table>

@@ -37,6 +37,7 @@ from deckguard.config import default_config_path, load_config, validate_config
 from deckguard.fixer import fix_deck
 from deckguard.inventory import build_inventory
 from deckguard.rules_engine import audit_deck, sort_violations, summarize
+from deckguard.slide_import import replace_intro_outro
 
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
 STORAGE_ROOT = Path(os.environ.get("DECKGUARD_WEB_STORAGE", "/tmp/deckguard-web"))
@@ -145,11 +146,23 @@ async def fix_route(file: UploadFile, _auth: None = Depends(_require_auth)):
     token = uuid.uuid4().hex
     work_dir = STORAGE_ROOT / token
     source_path = await _save_upload(file, work_dir)
+    migrated_path = work_dir / "migrated.pptx"
     output_path = work_dir / "fixed.pptx"
+
+    # Cover/outro migration runs first (best-effort -- if it fails for any
+    # reason, fall back to fixing the deck as-uploaded rather than
+    # blocking the whole request on a newer, more failure-prone step).
+    migrate_result = {"cover_replaced": False, "outro_replaced": False}
+    fix_source_path = source_path
+    try:
+        migrate_result = replace_intro_outro(str(source_path), str(migrated_path))
+        fix_source_path = migrated_path
+    except Exception:  # noqa: BLE001
+        pass
 
     try:
         config = _load_engine_config()
-        prs = _open_presentation_or_error(source_path)
+        prs = _open_presentation_or_error(fix_source_path)
         fix_report = fix_deck(
             prs, config, source_path=file.filename, output_path=str(output_path), dry_run=False
         )
@@ -169,8 +182,21 @@ async def fix_route(file: UploadFile, _auth: None = Depends(_require_auth)):
         "json": f"/download/{token}/changelog.json",
         "md": f"/download/{token}/changelog.md",
     }
+    migrate_note = None
+    if migrate_result["cover_replaced"] or migrate_result["outro_replaced"]:
+        parts = []
+        if migrate_result["cover_replaced"]:
+            parts.append("cover")
+        if migrate_result["outro_replaced"]:
+            parts.append("outro")
+        migrate_note = f"Also replaced the {' and '.join(parts)} slide with the org template's (title carried over)."
     body = tpl.fix_result_page(
-        file.filename, report_dict["summary"], report_dict["changes"], report_dict["manual_review"], download_links
+        file.filename,
+        report_dict["summary"],
+        report_dict["changes"],
+        report_dict["manual_review"],
+        download_links,
+        migrate_note=migrate_note,
     )
     return tpl.page_shell(f"Fixed — {file.filename}", body)
 
