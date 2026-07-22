@@ -103,6 +103,78 @@ def _remap_explicit_fonts_in_masters_and_layouts(prs, font_remap: dict[str, str]
     return changes
 
 
+def _remap_large_panel_fills_in_masters_and_layouts(
+    prs, layout_panel_remap: dict[str, str], min_area_sq_in: float
+) -> list[Change]:
+    """Fix explicit solid fills on large background panels defined on a
+    slide layout/master rather than the slide itself.
+
+    Slide-level color remap only ever sees shapes actually placed on a
+    slide. A shape's fill can instead live entirely on the layout it
+    inherits from -- e.g. a full-panel background rectangle behind a
+    picture/content placeholder -- and would otherwise never be touched.
+    Scoped to `layout_panel_remap` (a separate table from `colors.remap`)
+    and to shapes at least `min_area_sq_in` in area, because the same
+    literal color is often reused on a layout for small accent/placeholder
+    rectangles (e.g. unselected tab backgrounds) whose color is
+    intentionally static regardless of brand and must not be touched.
+    """
+    changes: list[Change] = []
+    if not layout_panel_remap:
+        return changes
+    remap = {colors_mod.normalize_hex(k): v for k, v in layout_panel_remap.items()}
+    min_area_emu2 = min_area_sq_in * 914400 * 914400
+
+    seen_masters = set()
+    for master in colors_mod.iter_slide_masters(prs):
+        if id(master.part) not in seen_masters:
+            seen_masters.add(id(master.part))
+            changes += _remap_shapes_fills(master.shapes, remap, min_area_emu2, "master", master.name)
+        for layout in master.slide_layouts:
+            changes += _remap_shapes_fills(layout.shapes, remap, min_area_emu2, "layout", layout.name)
+    return changes
+
+
+def _remap_shapes_fills(shapes, remap: dict[str, str], min_area_emu2: float, scope: str, location: str) -> list[Change]:
+    changes = []
+    for shape in shapes:
+        if getattr(shape, "shape_type", None) == MSO_SHAPE_TYPE.GROUP:
+            changes += _remap_shapes_fills(shape.shapes, remap, min_area_emu2, scope, location)
+            continue
+        width, height = getattr(shape, "width", None), getattr(shape, "height", None)
+        if not width or not height or (width * height) < min_area_emu2:
+            continue
+        spPr = effects_mod.get_spPr(shape)
+        if spPr is None:
+            continue
+        solid_fill = spPr.find(effects_mod.a_qn("solidFill"))
+        if solid_fill is None:
+            continue
+        srgb = solid_fill.find(effects_mod.a_qn("srgbClr"))
+        if srgb is None:
+            continue
+        old_hex = colors_mod.normalize_hex(srgb.get("val"))
+        if old_hex not in remap:
+            continue
+        new_hex = colors_mod.normalize_hex(remap[old_hex])
+        if new_hex == old_hex:
+            continue
+        srgb.set("val", new_hex)
+        changes.append(
+            Change(
+                scope=scope,
+                rule="legacy_color",
+                field="fill color",
+                old=f"#{old_hex}",
+                new=f"#{new_hex}",
+                shape_id=shape.shape_id,
+                shape_name=shape.name,
+                location=location,
+            )
+        )
+    return changes
+
+
 def _remap_shapes_fonts(shapes, remap_by_key: dict[str, str], scope: str, location: str) -> list[Change]:
     changes = []
     for shape in shapes:
@@ -286,6 +358,12 @@ def fix_deck(prs, config: dict, source_path: str, output_path: Optional[str], dr
         )
 
     changes += _remap_explicit_fonts_in_masters_and_layouts(prs, font_remap)
+
+    layout_panel_remap = colors_cfg.get("layout_panel_remap", {}) or {}
+    layout_panel_min_area_sq_in = colors_cfg.get("layout_panel_min_area_sq_in", 8.0)
+    changes += _remap_large_panel_fills_in_masters_and_layouts(
+        prs, layout_panel_remap, layout_panel_min_area_sq_in
+    )
 
     # Apply auto-fixable violations to a fixpoint. Fixing one violation can
     # mechanically unlock another check on the very same run — e.g. renaming

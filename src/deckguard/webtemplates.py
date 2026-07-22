@@ -249,6 +249,25 @@ def _font_proposal_rows(proposals: list[dict]) -> str:
     return "".join(rows)
 
 
+def _layout_panel_proposal_rows(proposals: list[dict]) -> str:
+    if not proposals:
+        return '<tr><td colspan="7" class="empty">No layout background-panel differences found.</td></tr>'
+    rows = []
+    for p in proposals:
+        conf_color = "#1ED273" if p["confidence"] == "high" else "#FFA023"
+        rows.append(
+            f"<tr><td><span class='sev' style='background:{conf_color}'></span>{_esc(p['confidence'])}</td>"
+            f"<td>{_esc(p['layout_name'])}</td>"
+            f"<td>{_esc(p['old_shape_name'])}</td><td>{_esc(p['new_shape_name'])}</td>"
+            f"<td><span style='display:inline-block;width:14px;height:14px;border-radius:4px;"
+            f"background:#{_esc(p['old_hex'])};vertical-align:-2px;margin-right:0.3em;'></span><code>#{_esc(p['old_hex'])}</code></td>"
+            f"<td><span style='display:inline-block;width:14px;height:14px;border-radius:4px;"
+            f"background:#{_esc(p['new_hex'])};vertical-align:-2px;margin-right:0.3em;'></span><code>#{_esc(p['new_hex'])}</code></td>"
+            f"<td>{_esc(p['area_sq_in'])}</td></tr>"
+        )
+    return "".join(rows)
+
+
 def learn_result_page(
     old_name: str,
     new_name: str,
@@ -259,8 +278,10 @@ def learn_result_page(
 ) -> str:
     color_proposals = result_dict["color_proposals"]
     font_proposals = result_dict["font_proposals"]
-    n_high = sum(1 for p in color_proposals + font_proposals if p["confidence"] == "high")
-    n_low = sum(1 for p in color_proposals + font_proposals if p["confidence"] == "low")
+    layout_panel_proposals = result_dict.get("layout_panel_proposals", [])
+    all_proposals = color_proposals + font_proposals + layout_panel_proposals
+    n_high = sum(1 for p in all_proposals if p["confidence"] == "high")
+    n_low = sum(1 for p in all_proposals if p["confidence"] == "low")
 
     stats = f"""<div class="stat-row">
   <div class="stat"><b style="color:#1ED273">{n_high}</b><span>high-confidence</span></div>
@@ -298,5 +319,11 @@ def learn_result_page(
 <div class="table-wrap"><table>
 <thead><tr><th>Confidence</th><th>Old</th><th>New</th><th>Old count</th><th>New count</th></tr></thead>
 <tbody>{_font_proposal_rows(font_proposals)}</tbody>
+</table></div></div>
+<div class="card"><h3 style="margin-top:0;font-size:0.95rem;">Layout background-panel differences</h3>
+<p style="color:var(--ink-muted);font-size:0.85rem;margin-top:-0.25rem;">Large background panels defined on a slide layout rather than any slide — invisible to ordinary slide-level color remap.</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Confidence</th><th>Layout</th><th>Old shape</th><th>New shape</th><th>Old</th><th>New</th><th>Area (in²)</th></tr></thead>
+<tbody>{_layout_panel_proposal_rows(layout_panel_proposals)}</tbody>
 </table></div></div>"""
     return body

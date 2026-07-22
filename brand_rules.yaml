@@ -56,6 +56,20 @@ colors:
 
   tolerance: 0   # RGB distance tolerance; raise to ~10 if near-miss colors appear
 
+  # Separate from `remap` above: fixes literal fills on shapes that live on
+  # a slide LAYOUT (not any slide itself), e.g. a full-panel background
+  # rectangle behind a picture/content placeholder that every slide using
+  # that layout inherits. Scoped to shapes at least
+  # `layout_panel_min_area_sq_in` in area so small accent/placeholder
+  # rectangles on the same layout (e.g. unselected tab backgrounds) that
+  # intentionally reuse the same literal color are left untouched.
+  layout_panel_remap:
+    "#EDEFF0": "#1450F5"   # AMP layout's big content/picture background panel
+                           # (confirmed: New_Test_Slides.pptx's AMP layout has
+                           # this panel as #1450F5 where the legacy deck's AMP
+                           # layout still has it as #EDEFF0 gray)
+  layout_panel_min_area_sq_in: 8
+
 fonts:
   approved:
     - "Inter"             # Regular & Semi Bold weights

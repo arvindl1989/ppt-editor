@@ -198,8 +198,9 @@ def learn_result_to_dict(result) -> dict:
 
 def render_learn_md(result, old_name: str, new_name: str) -> str:
     lines = [f"# Learned brand differences — {old_name} → {new_name}", ""]
-    n_high = sum(1 for p in result.color_proposals + result.font_proposals if p.confidence == "high")
-    n_low = sum(1 for p in result.color_proposals + result.font_proposals if p.confidence == "low")
+    all_proposals = result.color_proposals + result.font_proposals + result.layout_panel_proposals
+    n_high = sum(1 for p in all_proposals if p.confidence == "high")
+    n_low = sum(1 for p in all_proposals if p.confidence == "low")
     lines.append(f"**{n_high} high-confidence**, **{n_low} low-confidence** proposals; "
                  f"{len(result.unmatched_old_colors)} unmatched color(s), "
                  f"{len(result.unmatched_old_fonts)} unmatched font(s)")
@@ -212,6 +213,21 @@ def render_learn_md(result, old_name: str, new_name: str) -> str:
         for p in result.color_proposals:
             icon = CONFIDENCE_ICON.get(p.confidence, "")
             lines.append(f"| {icon} {p.confidence} | {p.role} | #{p.old_hex} | #{p.new_hex} | {p.old_count} | {p.new_count} |")
+        lines.append("")
+
+    if result.layout_panel_proposals:
+        lines.append("## Layout background-panel proposals")
+        lines.append("_Large background panels defined on a slide layout (not any slide) — "
+                      "invisible to ordinary slide-level color remap._")
+        lines.append("")
+        lines.append("| | Layout | Old shape | New shape | Old | New | Area (in²) |")
+        lines.append("|---|---|---|---|---|---|---|")
+        for p in result.layout_panel_proposals:
+            icon = CONFIDENCE_ICON.get(p.confidence, "")
+            lines.append(
+                f"| {icon} {p.confidence} | {p.layout_name} | {p.old_shape_name} | {p.new_shape_name} "
+                f"| #{p.old_hex} | #{p.new_hex} | {p.area_sq_in} |"
+            )
         lines.append("")
 
     if result.font_proposals:

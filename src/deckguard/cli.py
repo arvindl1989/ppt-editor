@@ -298,8 +298,9 @@ def learn(old_deck: str, new_deck: str, rules_path: Optional[str], apply_flag: b
 
     result = learn_mod.learn(old_prs, new_prs, config)
 
-    n_high = sum(1 for p in result.color_proposals + result.font_proposals if p.confidence == "high")
-    n_low = sum(1 for p in result.color_proposals + result.font_proposals if p.confidence == "low")
+    all_proposals = result.color_proposals + result.font_proposals + result.layout_panel_proposals
+    n_high = sum(1 for p in all_proposals if p.confidence == "high")
+    n_low = sum(1 for p in all_proposals if p.confidence == "low")
     console.print(
         f"[green]{n_high} high-confidence[/] and [yellow]{n_low} low-confidence[/] proposal(s); "
         f"{len(result.unmatched_old_colors)} unmatched color(s), {len(result.unmatched_old_fonts)} unmatched font(s)"

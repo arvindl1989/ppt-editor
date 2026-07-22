@@ -8,6 +8,7 @@ from deckguard.fixer import fix_deck
 from deckguard.inventory import build_inventory
 from deckguard.rules_engine import audit_deck
 from tests.helpers import (
+    add_rectangle,
     add_shadow_effect,
     add_slide,
     body_run,
@@ -17,6 +18,7 @@ from tests.helpers import (
     set_theme_slot,
     title_run,
 )
+from pptx.oxml.ns import qn
 
 CONFIG = load_config(default_config_path())
 
@@ -105,3 +107,94 @@ def test_fix_report_summary_counts_match():
     summary = report.summary
     assert summary["changes_applied"] == len(report.changes)
     assert summary["manual_review_required"] == len(report.manual_review)
+
+
+def _panel_config(min_area_sq_in=8.0):
+    """Minimal config isolating just the layout-panel-fill remap, so these
+    tests aren't coupled to the real brand_rules.yaml's exact thresholds."""
+    return {
+        "colors": {
+            "approved": ["#1450F5", "#EDEFF0"],
+            "remap": {},
+            "layout_panel_remap": {"#EDEFF0": "#1450F5"},
+            "layout_panel_min_area_sq_in": min_area_sq_in,
+        },
+        "fonts": {"approved": ["Inter"], "remap": {}},
+        "typography_rules": {},
+        "logo": {},
+        "layout": {},
+        "audit": {"fail_on": []},
+    }
+
+
+def _add_rectangle_to_layout(layout, name, fill_hex, left_in, top_in, width_in, height_in):
+    """python-pptx's LayoutShapes has no add_shape() -- layout shapes are
+    normally inherited from a template, not built via the API. Build the
+    rectangle on a scratch slide (where add_shape works) and move its XML
+    element into the layout's shape tree instead."""
+    from copy import deepcopy
+
+    scratch = Presentation()
+    scratch_slide = scratch.slides.add_slide(scratch.slide_layouts[6])
+    shape = add_rectangle(
+        scratch_slide, name=name, fill_hex=fill_hex,
+        left_in=left_in, top_in=top_in, width_in=width_in, height_in=height_in,
+    )
+    elem = deepcopy(shape._element)
+    layout.shapes._spTree.append(elem)
+    return layout.shapes[-1]
+
+
+def _fill_hex(shape):
+    spPr = shape._element.find(qn("p:spPr"))
+    solid_fill = spPr.find(qn("a:solidFill"))
+    srgb = solid_fill.find(qn("a:srgbClr"))
+    return srgb.get("val")
+
+
+def test_fix_remaps_large_background_panel_defined_on_a_layout():
+    """Regression test for a real bug: a shape's fill can live entirely on
+    the slide LAYOUT it inherits from (e.g. a full-panel background behind
+    a picture/content placeholder), never on any slide -- so ordinary
+    slide-level color remap never sees or fixes it. This was the actual
+    root cause behind a real deck's "grey box that should be blue" report:
+    the legacy deck's layout still had the panel as the old gray, while
+    the reference deck's equivalent layout had it corrected to KONE Blue."""
+    prs = new_deck()
+    layout = prs.slide_layouts[1]
+    panel = _add_rectangle_to_layout(layout, "Big Panel", "EDEFF0", left_in=1, top_in=1, width_in=4, height_in=3)
+    add_slide(prs, layout_idx=1)
+
+    report = fix_deck(prs, _panel_config(), source_path="in.pptx", output_path=None, dry_run=True)
+
+    assert _fill_hex(panel) == "1450F5"
+    assert any(c.scope == "layout" and c.shape_name == "Big Panel" for c in report.changes)
+
+
+def test_fix_leaves_small_layout_shapes_untouched():
+    """The exact same literal color is legitimately reused on a layout for
+    small accent/placeholder shapes (e.g. unselected tab backgrounds)
+    whose color must stay static -- only large background panels should
+    ever be treated as the "brand panel" and remapped."""
+    prs = new_deck()
+    layout = prs.slide_layouts[1]
+    small = _add_rectangle_to_layout(layout, "Tab", "EDEFF0", left_in=1, top_in=1, width_in=1, height_in=0.5)
+    add_slide(prs, layout_idx=1)
+
+    fix_deck(prs, _panel_config(min_area_sq_in=8.0), source_path="in.pptx", output_path=None, dry_run=True)
+
+    assert _fill_hex(small) == "EDEFF0"
+
+
+def test_fix_layout_panel_remap_is_a_no_op_when_not_configured():
+    prs = new_deck()
+    layout = prs.slide_layouts[1]
+    panel = _add_rectangle_to_layout(layout, "Big Panel", "EDEFF0", left_in=1, top_in=1, width_in=4, height_in=3)
+    add_slide(prs, layout_idx=1)
+
+    config = _panel_config()
+    config["colors"]["layout_panel_remap"] = {}
+
+    fix_deck(prs, config, source_path="in.pptx", output_path=None, dry_run=True)
+
+    assert _fill_hex(panel) == "EDEFF0"

@@ -77,6 +77,26 @@ def validate_config(config: dict, base_dir: str | Path = ".") -> list[str]:
     if not isinstance(tolerance, (int, float)) or tolerance < 0:
         errors.append("colors.tolerance must be a non-negative number")
 
+    layout_panel_remap = colors_cfg.get("layout_panel_remap", {}) or {}
+    for old, new in layout_panel_remap.items():
+        try:
+            colors_mod.normalize_hex(old)
+        except ValueError as exc:
+            errors.append(f"colors.layout_panel_remap key: {exc}")
+        try:
+            new_norm = colors_mod.normalize_hex(new)
+        except ValueError as exc:
+            errors.append(f"colors.layout_panel_remap value: {exc}")
+            continue
+        if new_norm not in approved_norm:
+            errors.append(
+                f"colors.layout_panel_remap target '{new}' (for '{old}') is not in colors.approved"
+            )
+
+    layout_panel_min_area = colors_cfg.get("layout_panel_min_area_sq_in", 8.0)
+    if not isinstance(layout_panel_min_area, (int, float)) or layout_panel_min_area < 0:
+        errors.append("colors.layout_panel_min_area_sq_in must be a non-negative number")
+
     fonts_cfg = config.get("fonts", {}) or {}
     fonts_approved = set(fonts_cfg.get("approved", []) or [])
     if not fonts_approved:

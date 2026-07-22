@@ -1,3 +1,7 @@
+from copy import deepcopy
+
+from pptx import Presentation
+
 from deckguard import learn
 from deckguard.config import default_config_path, load_config
 from tests.helpers import add_rectangle, add_slide, body_run, new_deck, set_run, title_run
@@ -220,3 +224,72 @@ def test_write_learned_to_yaml_preserves_sexagesimal_like_quoted_strings(tmp_pat
     text = rules_path.read_text(encoding="utf-8")
     assert 'slide_size: "16:9"' in text
     assert "969" not in text
+
+
+def _add_rectangle_to_layout(layout, name, fill_hex, left_in, top_in, width_in, height_in):
+    """LayoutShapes has no add_shape() -- build on a scratch slide, then
+    move the shape's XML element onto the layout's shape tree."""
+    scratch = Presentation()
+    scratch_slide = scratch.slides.add_slide(scratch.slide_layouts[6])
+    shape = add_rectangle(
+        scratch_slide, name=name, fill_hex=fill_hex,
+        left_in=left_in, top_in=top_in, width_in=width_in, height_in=height_in,
+    )
+    elem = deepcopy(shape._element)
+    layout.shapes._spTree.append(elem)
+    return layout.shapes[-1]
+
+
+def test_learn_proposes_layout_panel_fix_for_large_renamed_shape():
+    """Regression test for a real bug: a shape's fill can live entirely on
+    a slide LAYOUT (not any slide), and its name can drift between deck
+    revisions (e.g. 'Rectangle 19' -> 'Rectangle 4') -- so it must be
+    matched by position+size, not name, and proposed as a distinct
+    layout_panel_remap entry rather than folded into ordinary colors.remap."""
+    old_prs = new_deck()
+    _add_rectangle_to_layout(old_prs.slide_layouts[1], "Rectangle 19", "EDEFF0", left_in=5, top_in=1, width_in=4, height_in=5)
+    add_slide(old_prs, layout_idx=1)
+
+    new_prs = new_deck()
+    _add_rectangle_to_layout(new_prs.slide_layouts[1], "Rectangle 4", "1450F5", left_in=5, top_in=1, width_in=4, height_in=5)
+    add_slide(new_prs, layout_idx=1)
+
+    result = learn.learn(old_prs, new_prs, BASE_CONFIG)
+
+    assert len(result.layout_panel_proposals) == 1
+    p = result.layout_panel_proposals[0]
+    assert p.old_hex == "EDEFF0" and p.new_hex == "1450F5"
+    assert p.old_shape_name == "Rectangle 19" and p.new_shape_name == "Rectangle 4"
+    assert p.confidence == "high"
+    # Not a colors.remap proposal -- EDEFF0 is small-shape-safe elsewhere.
+    assert not any(cp.old_hex == "EDEFF0" for cp in result.color_proposals)
+
+
+def test_learn_ignores_small_layout_shapes_below_area_threshold():
+    old_prs = new_deck()
+    _add_rectangle_to_layout(old_prs.slide_layouts[1], "Tab", "EDEFF0", left_in=1, top_in=1, width_in=1, height_in=0.5)
+    add_slide(old_prs, layout_idx=1)
+
+    new_prs = new_deck()
+    _add_rectangle_to_layout(new_prs.slide_layouts[1], "Tab", "1450F5", left_in=1, top_in=1, width_in=1, height_in=0.5)
+    add_slide(new_prs, layout_idx=1)
+
+    result = learn.learn(old_prs, new_prs, BASE_CONFIG)
+
+    assert result.layout_panel_proposals == []
+
+
+def test_apply_learned_writes_layout_panel_remap_separately_from_colors_remap():
+    old_prs = new_deck()
+    _add_rectangle_to_layout(old_prs.slide_layouts[1], "Rectangle 19", "EDEFF0", left_in=5, top_in=1, width_in=4, height_in=5)
+    add_slide(old_prs, layout_idx=1)
+
+    new_prs = new_deck()
+    _add_rectangle_to_layout(new_prs.slide_layouts[1], "Rectangle 4", "1450F5", left_in=5, top_in=1, width_in=4, height_in=5)
+    add_slide(new_prs, layout_idx=1)
+
+    result = learn.learn(old_prs, new_prs, BASE_CONFIG)
+    merged = learn.apply_learned(BASE_CONFIG, result, min_confidence="high")
+
+    assert merged["colors"]["layout_panel_remap"] == {"#EDEFF0": "#1450F5"}
+    assert "EDEFF0" not in merged["colors"]["remap"]
