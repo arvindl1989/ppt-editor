@@ -251,6 +251,15 @@ def _check_shape(
     contrast_fonts = set(contrast_cfg.get("fonts", []) or [])
     contrast_dark = colors_mod.normalize_hex(contrast_cfg["dark_hex"]) if contrast_cfg.get("dark_hex") else None
     contrast_light = colors_mod.normalize_hex(contrast_cfg["light_hex"]) if contrast_cfg.get("light_hex") else None
+    # Brand-consistency override: these backgrounds always get the light
+    # (white) text color regardless of what the WCAG contrast math would
+    # otherwise pick -- e.g. KONE Blue's 60% tint is technically light
+    # enough for black text to score a higher contrast ratio, but the
+    # brand wants every one of these treated as "a blue panel", not
+    # computed per-shade. Deliberately NOT the full tint scale: the
+    # palest tints are light enough that white text would be genuinely
+    # illegible, which defeats the purpose of a legibility rule.
+    always_light_bg = {colors_mod.normalize_hex(h) for h in contrast_cfg.get("always_light_text_backgrounds", []) or []}
     # Only checkable when the shape has its own resolved solid background --
     # text sitting on an inherited/layout/no-fill background can't be
     # evaluated here without full z-order resolution, so it's left alone
@@ -361,7 +370,10 @@ def _check_shape(
                         # Always correct (computed from the same WCAG
                         # check either way), never destructive.
                         current_hex = run.color.hex if run.color.kind != "none" else None
-                        expected_hex = colors_mod.expected_contrast_text_hex(bg_hex, contrast_dark, contrast_light)
+                        if bg_hex in always_light_bg:
+                            expected_hex = contrast_light
+                        else:
+                            expected_hex = colors_mod.expected_contrast_text_hex(bg_hex, contrast_dark, contrast_light)
                         if current_hex != expected_hex:
                             violations.append(
                                 Violation(

@@ -157,6 +157,17 @@ typography_rules:
     fonts: ["Inter", "Inter SemiBold"]
     dark_hex: "#141414"
     light_hex: "#FFFFFF"
+    # Brand-consistency override: these always get white text regardless
+    # of the WCAG math (KONE Blue's 60% tint technically scores a higher
+    # contrast ratio with black, but the brand wants every one of these
+    # treated uniformly as "a blue panel"). Deliberately stops at 60% --
+    # the 40%/20% tints (#A1B9FB/#D0DCFD) are light enough that white
+    # text would be genuinely illegible, which would defeat the rule's
+    # actual purpose, so those stay contrast-computed.
+    always_light_text_backgrounds:
+      - "#1450F5"   # KONE Blue
+      - "#4373F7"   # KONE Blue 80%
+      - "#7296F9"   # KONE Blue 60%
   text_effects:
     forbidden: ["shadow", "glow", "reflection", "outline", "3d"]
   role_restrictions:

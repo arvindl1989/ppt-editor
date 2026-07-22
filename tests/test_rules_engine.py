@@ -389,6 +389,43 @@ def test_text_contrast_flags_white_text_on_light_secondary_background():
     assert viol[0].details["target"] == "#141414"
 
 
+def test_text_contrast_always_white_on_kone_blue_60_percent_tint_overriding_wcag():
+    """Regression test for an explicit brand-consistency request: KONE
+    Blue's 60% tint (#7296F9) is technically light enough that WCAG math
+    alone picks black text (higher contrast ratio) -- confirmed via
+    colors.expected_contrast_text_hex directly. The brand wants every
+    tint in always_light_text_backgrounds treated uniformly as a blue
+    panel regardless, so the configured override must win over the math."""
+    prs = new_deck()
+    slide = add_slide(prs)
+    box = add_rectangle(slide, name="Blue tint panel", fill_hex="7296F9", left_in=1, top_in=1, width_in=3, height_in=1)
+    box.text_frame.text = "Label"
+    run = box.text_frame.paragraphs[0].runs[0]
+    run.font.name = "Inter"
+    run.font.color.rgb = RGBColor.from_string("141414")
+
+    viol = by_rule(violations_for(prs), "text_contrast")
+    assert len(viol) == 1
+    assert viol[0].details["target"] == "#FFFFFF"
+
+
+def test_text_contrast_still_wcag_computed_for_tints_below_the_override_list():
+    """The 40% tint (#A1B9FB) is deliberately NOT in
+    always_light_text_backgrounds -- white text there would be
+    borderline illegible, so it must stay contrast-computed (black)."""
+    prs = new_deck()
+    slide = add_slide(prs)
+    box = add_rectangle(slide, name="Light tint panel", fill_hex="A1B9FB", left_in=1, top_in=1, width_in=3, height_in=1)
+    box.text_frame.text = "Label"
+    run = box.text_frame.paragraphs[0].runs[0]
+    run.font.name = "Inter"
+    run.font.color.rgb = RGBColor.from_string("FFFFFF")  # wrong -- should be black
+
+    viol = by_rule(violations_for(prs), "text_contrast")
+    assert len(viol) == 1
+    assert viol[0].details["target"] == "#141414"
+
+
 def test_text_contrast_not_checked_without_a_resolved_shape_background():
     """No shape-level solid fill (plain text on the page canvas) -- can't
     compute contrast without full z-order resolution, so it's skipped

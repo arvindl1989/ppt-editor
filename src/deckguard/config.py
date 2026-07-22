@@ -140,6 +140,16 @@ def validate_config(config: dict, base_dir: str | Path = ".") -> list[str]:
                 errors.append(f"typography_rules.contrast.{key} '{val}' is not in colors.approved")
         if not contrast_cfg.get("fonts"):
             errors.append("typography_rules.contrast.fonts must list at least one font name")
+        for val in contrast_cfg.get("always_light_text_backgrounds", []) or []:
+            try:
+                norm = colors_mod.normalize_hex(val)
+            except ValueError as exc:
+                errors.append(f"typography_rules.contrast.always_light_text_backgrounds: {exc}")
+                continue
+            if norm not in approved_norm:
+                errors.append(
+                    f"typography_rules.contrast.always_light_text_backgrounds '{val}' is not in colors.approved"
+                )
 
     logo_cfg = config.get("logo", {}) or {}
     logo_path = logo_cfg.get("new_logo_path")
