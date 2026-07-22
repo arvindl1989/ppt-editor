@@ -8,3 +8,4 @@ dist/
 *_fixed.pptx
 *_changelog.json
 *_changelog.md
+/deckguard-web-storage/

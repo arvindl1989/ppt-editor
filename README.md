@@ -1,7 +1,8 @@
 # deckguard
 
-`deckguard` is a Python CLI that automates PowerPoint brand compliance for
-KONE's Marketing Hub. It has three capabilities:
+`deckguard` is a Python tool that automates PowerPoint brand compliance for
+KONE's Marketing Hub — available as a CLI and as a small hostable web app.
+It has three capabilities:
 
 - **`fix`** — auto-correct brand violations in a `.pptx` file
 - **`audit`** — scan one deck or a folder of decks and report violations
@@ -37,14 +38,56 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -e .
 ```
 
-Requires Python 3.11+. This installs the `deckguard` console script plus
-`python-pptx`, `Pillow`, `imagehash`, `PyYAML`, `click`, and `rich`.
+Requires Python 3.11+. This installs the `deckguard` console script, the
+`deckguard.web` FastAPI app, and their shared dependencies (`python-pptx`,
+`Pillow`, `imagehash`, `PyYAML`, `click`, `rich`, `fastapi`, `uvicorn`).
 
 > **LibreOffice (Phase 2 only):** the upcoming AI visual-audit layer
 > renders slides to PNG via `soffice --headless --convert-to png`. It
 > isn't required for anything in this repo today — `fix`, `audit`,
-> `inspect`, `hash-logo`, and `validate-rules` are all pure-Python and
-> work without it.
+> `inspect`, `hash-logo`, `validate-rules`, and the web app are all
+> pure-Python and work without it.
+
+## Web app
+
+A minimal browser UI over the same engine the CLI uses — upload a
+`.pptx`, audit or fix it, download the results. No new brand logic lives
+here; `deckguard/web.py` just calls the same `inventory` /
+`rules_engine` / `fixer` functions the CLI does, so the two can never
+disagree about what counts as a violation or a fix.
+
+```bash
+uvicorn deckguard.web:app --reload
+# -> http://127.0.0.1:8000
+```
+
+Routes: `GET /` (upload form), `POST /audit`, `POST /fix`,
+`GET /download/{token}/{filename}`, `GET /health`.
+
+Set `DECKGUARD_WEB_PASSWORD` to require an HTTP Basic Auth password
+before anything is reachable (username is ignored) — unset by default,
+which is fine for local use but **should be set once this is hosted
+anywhere with a public URL**, since it processes decks you upload.
+Uploads and results live under `DECKGUARD_WEB_STORAGE` (defaults to
+`/tmp/deckguard-web`) and are cleaned up after ~2 hours.
+
+### Hosting on Railway
+
+The repo ships `Procfile` and `railway.json` for this:
+
+1. In Railway, **New Project → Deploy from GitHub repo**, pick this repo.
+2. Railway's Nixpacks builder detects `pyproject.toml` and runs
+   `pip install .`, then starts `uvicorn deckguard.web:app --host 0.0.0.0
+   --port $PORT` per `railway.json`/`Procfile` — no extra config needed.
+3. Under the service's **Variables**, set `DECKGUARD_WEB_PASSWORD` to
+   something before sharing the URL around.
+4. Railway assigns a public URL under **Settings → Networking → Generate
+   Domain**.
+
+Any other Python host that runs a `Procfile`-style start command (or
+just `uvicorn deckguard.web:app --host 0.0.0.0 --port $PORT`) works the
+same way — nothing here is Railway-specific beyond those two config
+files.
 
 ## Quickstart
 
@@ -196,7 +239,10 @@ The test suite (`tests/`) builds every fixture `.pptx` in-memory with
 fixture files, covering: font-name-variant matching, theme-color/tint
 remap, effects add/detect/remove, logo phash matching + replacement,
 severity mapping per rule, the non-destructive guarantee (source file
-byte-for-byte unchanged after `fix`), and `--dry-run` correctness.
+byte-for-byte unchanged after `fix`), `--dry-run` correctness, and
+(`test_web.py`) the web app's upload/audit/fix/download flow, error
+handling, download path-traversal guarding, and the password gate — via
+FastAPI's `TestClient`, no server process needed.
 
 ## Known Phase 1 limitations
 
