@@ -69,6 +69,11 @@ colors:
                            # Blue diagram element -- plain TextBoxes have no fill of
                            # their own, so the text_contrast rule can't see that
                            # background and correct it automatically; confirmed manually.
+    "#58AB27": "#AAE1C8"   # old green -> secondary green
+    "#C6D600": "#FFE141"   # old yellow-green -> secondary yellow
+    "#FFC627": "#FFE141"   # old gold -> secondary yellow
+    "#FFF5F7": "#FFCDD7"   # old pale pink -> secondary pink
+    "#8D9194": "#1450F5"   # old gray -> KONE Blue
     # Grow this list empirically: run `deckguard inspect` on legacy decks
     # and add mappings for old-blue tints and other legacy colors found.
 
