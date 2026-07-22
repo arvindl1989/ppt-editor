@@ -370,5 +370,72 @@ def migrate(deck: str, template: Optional[str], cover_slide: int, outro_slide: i
         console.print("[cyan]outro already on the template — left alone[/]")
 
 
+@main.command()
+@click.argument("deck", type=click.Path(exists=True, dir_okay=False))
+@click.option(
+    "--template", type=click.Path(exists=True, dir_okay=False), default=None,
+    help="Org template .pptx to migrate onto (default: the bundled KONE master template).",
+)
+@click.option("--all", "accept_all", is_flag=True, help="Rebuild every eligible slide (skip the review step).")
+@click.option(
+    "--accept", "accept_csv", default=None,
+    help="Comma-separated 1-based slide numbers to rebuild (e.g. 1,3,5). Ignored slides are left untouched.",
+)
+@click.option("--out", "out_dir", type=click.Path(file_okay=False), default=None, help="Output directory (default: alongside DECK).")
+def retemplate(deck: str, template: Optional[str], accept_all: bool, accept_csv: Optional[str], out_dir: Optional[str]):
+    """Rebuild DECK's slides onto the org template's own layouts, carrying
+    over title/body text and images.
+
+    Unlike `fix` (recolors/refonts in place) and `migrate` (cover/outro
+    only), this replaces a slide's entire structure -- for genuinely
+    outdated decks built on ad hoc layouts. Scoped to text and images
+    only: a slide with a table, chart, embedded object, media, or a
+    grouped shape is never guessed at, always left completely untouched.
+
+    Run with neither --all nor --accept to just see the proposed mapping
+    (a dry run, nothing written) -- review it, then re-run with --all or
+    --accept to actually generate the deck.
+    """
+    from deckguard.retemplate import apply_retemplate, propose_retemplate
+
+    deck_path = Path(deck)
+    prs = _open_presentation(str(deck_path))
+    proposals = propose_retemplate(prs, template_path=template)
+
+    table = Table(title=f"Retemplate proposal — {deck_path.name}")
+    table.add_column("Slide")
+    table.add_column("Eligible")
+    table.add_column("Layout / reason")
+    table.add_column("Title / preview")
+    for p in proposals:
+        if p.eligible:
+            table.add_row(str(p.slide_index), "[green]yes[/]", p.layout_name, p.title_preview or p.body_preview or "")
+        else:
+            table.add_row(str(p.slide_index), "[red]no[/]", p.reason, "")
+    console.print(table)
+
+    if not accept_all and not accept_csv:
+        console.print("[dim]Dry run only — nothing written. Re-run with --all or --accept 1,3,5 to generate the deck.[/]")
+        return
+
+    accepted = None
+    if accept_csv:
+        try:
+            accepted = {int(x.strip()) for x in accept_csv.split(",") if x.strip()}
+        except ValueError:
+            raise click.ClickException(f"--accept must be a comma-separated list of slide numbers, got: {accept_csv!r}")
+
+    out_directory = Path(out_dir) if out_dir else deck_path.parent
+    out_directory.mkdir(parents=True, exist_ok=True)
+    output_path = out_directory / f"{deck_path.stem}_retemplated.pptx"
+
+    result = apply_retemplate(str(deck_path), str(output_path), accepted_indexes=accepted, template_path=template)
+
+    console.print(f"[green]wrote:[/] {output_path}")
+    console.print(f"[cyan]rebuilt {len(result.transformed)} slide(s)[/]: {result.transformed}")
+    if result.skipped:
+        console.print(f"[dim]left {len(result.skipped)} slide(s) untouched[/]: {result.skipped}")
+
+
 if __name__ == "__main__":
     main()

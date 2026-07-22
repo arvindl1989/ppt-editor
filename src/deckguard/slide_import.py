@@ -339,6 +339,169 @@ def import_cover_and_outro_parts(
     return cover_new, outro_new
 
 
+def import_layouts(target_path, template_path, out_path, layout_names: list[str]) -> dict[str, str]:
+    """Copy the named layouts (by exact name) from `template_path` -- plus
+    a single shared master trimmed to just those layouts, that master's
+    theme, and every media file they reference -- into a copy of
+    `target_path`, written to `out_path`.
+
+    Unlike `import_cover_and_outro_parts`, this copies LAYOUT parts only,
+    no slide parts -- callers create slides on the imported layouts with
+    plain `prs.slides.add_slide(layout)` once the output is reopened,
+    rather than this module hand-building slide XML. That keeps this
+    generic (any number of layouts, any names) without duplicating
+    python-pptx's own slide-creation logic.
+
+    Returns {layout_name: new_layout_partname}. Raises KeyError if a
+    requested name isn't found among the template's layouts.
+    """
+    tmpl = _read_zip(template_path)
+    target = dict(_read_zip(target_path))
+
+    next_media_num = _next_part_number(target, "media", "image")
+    next_master_num = _next_part_number(target, "slideMasters", "slideMaster")
+    next_layout_num = _next_part_number(target, "slideLayouts", "slideLayout")
+    next_theme_num = _next_part_number(target, "theme", "theme")
+
+    next_id = _next_master_or_layout_id(target)
+    new_master_id = next_id
+
+    pres_rels_text = target["ppt/_rels/presentation.xml.rels"].decode()
+    next_rid = max((int(m) for m in re.findall(r'Id="rId(\d+)"', pres_rels_text)), default=0) + 1
+
+    tmpl_prs = Presentation(template_path)
+    layout_by_name = {layout.name: layout for master in tmpl_prs.slide_masters for layout in master.slide_layouts}
+    src_paths = []
+    for name in layout_names:
+        if name not in layout_by_name:
+            raise KeyError(f"template has no layout named {name!r}")
+        src_paths.append(str(layout_by_name[name].part.partname).lstrip("/"))
+
+    media_map: dict[str, str] = {}
+
+    def copy_media(tmpl_media_path: str) -> str:
+        nonlocal next_media_num
+        if tmpl_media_path in media_map:
+            return media_map[tmpl_media_path]
+        ext = tmpl_media_path.rsplit(".", 1)[-1]
+        new_path = f"ppt/media/image{next_media_num}.{ext}"
+        target[new_path] = tmpl[tmpl_media_path]
+        media_map[tmpl_media_path] = new_path
+        next_media_num += 1
+        return new_path
+
+    # --- theme ---
+    new_theme_path = f"ppt/theme/theme{next_theme_num}.xml"
+    target[new_theme_path] = tmpl["ppt/theme/theme1.xml"]
+
+    # --- layouts ---
+    layout_ids: list[int] = []
+    layout_new_paths: list[str] = []
+    for src_path in src_paths:
+        new_layout_path = f"ppt/slideLayouts/slideLayout{next_layout_num}.xml"
+        target[new_layout_path] = tmpl[src_path]
+
+        rels_bytes = tmpl.get(_rels_path(src_path))
+        rels_text = rels_bytes.decode() if rels_bytes else ""
+        for _rid, (rtype, rtarget) in _parse_rels(rels_bytes).items():
+            if rtype.endswith("/image"):
+                resolved = _resolve_relative(src_path, rtarget)
+                new_media_path = copy_media(resolved)
+                rels_text = rels_text.replace(
+                    f'Target="{rtarget}"', f'Target="../media/{new_media_path.rsplit("/", 1)[-1]}"'
+                )
+            elif rtype.endswith("/slideMaster"):
+                rels_text = rels_text.replace(
+                    f'Target="{rtarget}"', f'Target="../slideMasters/slideMaster{next_master_num}.xml"'
+                )
+        target[_rels_path(new_layout_path)] = rels_text.encode()
+        layout_ids.append(next_id + 1 + len(layout_new_paths))
+        layout_new_paths.append(new_layout_path)
+        next_layout_num += 1
+
+    # --- master (trimmed to just the imported layouts) ---
+    new_master_path = f"ppt/slideMasters/slideMaster{next_master_num}.xml"
+    master_xml = tmpl["ppt/slideMasters/slideMaster1.xml"].decode()
+    layout_entries = "".join(
+        f'<p:sldLayoutId id="{layout_id}" r:id="rId{101 + i}"/>' for i, layout_id in enumerate(layout_ids)
+    )
+    master_xml = re.sub(
+        r"<p:sldLayoutIdLst>.*?</p:sldLayoutIdLst>",
+        f"<p:sldLayoutIdLst>{layout_entries}</p:sldLayoutIdLst>",
+        master_xml,
+        flags=re.S,
+    )
+    target[new_master_path] = master_xml.encode()
+
+    master_rels = [
+        f'<Relationship Id="rId100" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" '
+        f'Target="../theme/theme{next_theme_num}.xml"/>'
+    ]
+    for i, new_layout_path in enumerate(layout_new_paths):
+        master_rels.append(
+            f'<Relationship Id="rId{101 + i}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" '
+            f'Target="../slideLayouts/{new_layout_path.rsplit("/", 1)[-1]}"/>'
+        )
+    target[_rels_path(new_master_path)] = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        + "".join(master_rels) + "</Relationships>"
+    ).encode()
+
+    # --- [Content_Types].xml ---
+    ct = target["[Content_Types].xml"].decode()
+    inserts = [
+        f'<Override PartName="/{new_master_path}" '
+        'ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml"/>',
+        *(
+            f'<Override PartName="/{p}" '
+            'ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/>'
+            for p in layout_new_paths
+        ),
+        f'<Override PartName="/{new_theme_path}" '
+        'ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>',
+    ]
+    ct = ct.replace("</Types>", "".join(inserts) + "</Types>")
+    media_content_types = {
+        "png": "image/png",
+        "jpg": "image/jpeg",
+        "jpeg": "image/jpeg",
+        "svg": "image/svg+xml",
+        "gif": "image/gif",
+        "bmp": "image/bmp",
+        "tiff": "image/tiff",
+        "wmf": "image/x-wmf",
+        "emf": "image/x-emf",
+    }
+    for new_media_path in media_map.values():
+        ext = new_media_path.rsplit(".", 1)[-1].lower()
+        content_type = media_content_types.get(ext)
+        if content_type and f'Extension="{ext}"' not in ct:
+            ct = ct.replace(
+                "<Default Extension=", f'<Default Extension="{ext}" ContentType="{content_type}"/><Default Extension=', 1
+            )
+    target["[Content_Types].xml"] = ct.encode()
+
+    # --- presentation.xml: add the master only (no slides yet) ---
+    pres_xml = target["ppt/presentation.xml"].decode()
+    master_rid = next_rid
+    pres_xml = pres_xml.replace(
+        "</p:sldMasterIdLst>",
+        f'<p:sldMasterId id="{new_master_id}" r:id="rId{master_rid}"/></p:sldMasterIdLst>',
+    )
+    target["ppt/presentation.xml"] = pres_xml.encode()
+
+    pres_rels_text = pres_rels_text.replace(
+        "</Relationships>",
+        f'<Relationship Id="rId{master_rid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster" '
+        f'Target="slideMasters/slideMaster{next_master_num}.xml"/></Relationships>',
+    )
+    target["ppt/_rels/presentation.xml.rels"] = pres_rels_text.encode()
+
+    _write_zip(target, out_path)
+    return dict(zip(layout_names, layout_new_paths))
+
+
 def _extract_lead_text(slide, placeholder_types: set[str]) -> Optional[str]:
     for shape in slide.shapes:
         if not shape.is_placeholder:

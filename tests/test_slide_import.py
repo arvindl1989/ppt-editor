@@ -21,6 +21,7 @@ from deckguard.slide_import import (
     _next_sld_id,
     default_template_path,
     import_cover_and_outro_parts,
+    import_layouts,
     replace_intro_outro,
 )
 from tests.helpers import add_slide, new_deck, title_run
@@ -242,3 +243,61 @@ def test_replace_intro_outro_survives_full_deckguard_fix_afterward(tmp_path):
 
     assert dupes == []
     assert _no_duplicate_zip_entries(fixed_path)
+
+
+def test_import_layouts_copies_multiple_named_layouts_into_one_shared_master(tmp_path):
+    target = new_deck()
+    add_slide(target, layout_idx=1)
+    target_path = tmp_path / "target.pptx"
+    target.save(str(target_path))
+
+    out_path = tmp_path / "out.pptx"
+    wanted = ["Two content A", "Text and picture A"]
+    result = import_layouts(str(target_path), str(TEMPLATE_PATH), str(out_path), wanted)
+
+    assert set(result.keys()) == set(wanted)
+    assert _no_duplicate_zip_entries(out_path)
+    assert _no_malformed_xml(out_path) == []
+
+    prs = Presentation(str(out_path))
+    assert len(prs.slides) == 1  # no slides added yet -- layouts only
+    imported_master = prs.slide_masters[-1]
+    imported_names = {l.name for l in imported_master.slide_layouts}
+    assert imported_names == set(wanted)
+
+
+def test_import_layouts_layouts_are_usable_with_add_slide(tmp_path):
+    """The whole point of import_layouts (vs. import_cover_and_outro_parts,
+    which copies existing template SLIDES) is that the imported layout is
+    a real, legitimate python-pptx SlideLayout afterward -- usable with
+    plain prs.slides.add_slide(), no further raw-XML work needed."""
+    target = new_deck()
+    add_slide(target, layout_idx=1)
+    target_path = tmp_path / "target.pptx"
+    target.save(str(target_path))
+
+    out_path = tmp_path / "out.pptx"
+    import_layouts(str(target_path), str(TEMPLATE_PATH), str(out_path), ["Two content A"])
+
+    prs = Presentation(str(out_path))
+    layout = next(l for l in prs.slide_masters[-1].slide_layouts if l.name == "Two content A")
+    new_slide = prs.slides.add_slide(layout)
+    assert new_slide.slide_layout.name == "Two content A"
+    placeholder_types = {ph.placeholder_format.type.name for ph in new_slide.placeholders}
+    assert placeholder_types == {"TITLE", "OBJECT"}
+
+    saved_path = tmp_path / "saved.pptx"
+    prs.save(str(saved_path))
+    reopened = Presentation(str(saved_path))
+    assert len(reopened.slides) == 2
+    assert _no_duplicate_zip_entries(saved_path)
+
+
+def test_import_layouts_raises_for_unknown_layout_name(tmp_path):
+    target = new_deck()
+    add_slide(target, layout_idx=1)
+    target_path = tmp_path / "target.pptx"
+    target.save(str(target_path))
+
+    with pytest.raises(KeyError):
+        import_layouts(str(target_path), str(TEMPLATE_PATH), str(tmp_path / "out.pptx"), ["Not A Real Layout"])
