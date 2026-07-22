@@ -2,18 +2,24 @@
 # build stage before running `pip install .`, which fails for this
 # src/-layout package (setuptools can't find `src/` because it isn't
 # copied in yet -- "error in 'egg_base' option: 'src' does not exist").
-# Sidestep it entirely: install third-party deps from a flat
-# requirements.txt (needs no source tree), then run uvicorn straight
-# against the checked-out source via PYTHONPATH instead of pip-installing
-# our own package.
+# Sidestep it: install third-party deps from a flat requirements.txt
+# (needs no source tree), then run uvicorn straight against the
+# checked-out source via PYTHONPATH instead of pip-installing our own
+# package.
+#
+# The bare `python311` nix package doesn't put a `pip` binary on PATH --
+# bootstrap one via `python -m venv` first (venv's built-in ensurepip is
+# what actually provides pip here), same as Nixpacks' own default flow
+# does before we override it.
 [phases.setup]
 nixPkgs = ["python311", "gcc"]
 
 [phases.install]
 cmds = [
-  "pip install --no-cache-dir --upgrade pip",
-  "pip install --no-cache-dir -r requirements.txt",
+  "python3.11 -m venv --copies /opt/venv",
+  ". /opt/venv/bin/activate && pip install --no-cache-dir --upgrade pip",
+  ". /opt/venv/bin/activate && pip install --no-cache-dir -r requirements.txt",
 ]
 
 [start]
-cmd = "PYTHONPATH=/app/src uvicorn deckguard.web:app --host 0.0.0.0 --port $PORT"
+cmd = ". /opt/venv/bin/activate && PYTHONPATH=/app/src uvicorn deckguard.web:app --host 0.0.0.0 --port $PORT"
