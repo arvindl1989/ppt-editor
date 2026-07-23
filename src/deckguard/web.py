@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pptx import Presentation
@@ -50,6 +51,21 @@ MAX_STORAGE_AGE_SECONDS = 2 * 60 * 60  # best-effort cleanup of anything older t
 
 app = FastAPI(title="deckguard")
 security = HTTPBasic(auto_error=False)
+
+
+@app.exception_handler(RequestValidationError)
+async def _friendly_validation_error(request: Request, exc: RequestValidationError):
+    # A malformed request (e.g. a form-data field sent as plain text where
+    # a file was expected) otherwise 422s with a raw, un-styled JSON body
+    # straight from FastAPI's own validation layer, before any route body
+    # runs -- the one place in this app a request could still surface a
+    # bare error instead of the friendly page every other failure path
+    # renders. Route to whichever form is relevant by request path.
+    form = tpl.compose_form if request.url.path == "/create" else tpl.upload_form
+    return HTMLResponse(
+        tpl.page_shell("deckguard", form("That request wasn't in the expected format — please use the form below.")),
+        status_code=422,
+    )
 
 
 def _require_auth(credentials: Optional[HTTPBasicCredentials] = Depends(security)) -> None:
@@ -346,11 +362,7 @@ async def learn_route(
 
 
 @app.post("/create", response_class=HTMLResponse)
-async def create_route(
-    request: Request,
-    existing_file: Optional[UploadFile] = None,
-    _auth: None = Depends(_require_auth),
-):
+async def create_route(request: Request, _auth: None = Depends(_require_auth)):
     _cleanup_old_uploads()
     form = await request.form()
     outline_text = str(form.get("outline", "")).strip()
@@ -363,8 +375,17 @@ async def create_route(
     outline_path = work_dir / "outline.yaml"
     outline_path.write_text(outline_text, encoding="utf-8")
 
+    # Read straight from the manually-parsed form rather than declaring
+    # `existing_file: UploadFile` as a bound parameter -- FastAPI validates
+    # a bound UploadFile parameter BEFORE this function body ever runs, so
+    # a client that sends this field as a plain string (some REST clients
+    # default a form-data field to "text" rather than "file") got a raw
+    # 422 JSON validation error instead of the friendly page every other
+    # error path here renders. Checking the type ourselves after the fact
+    # degrades a malformed field to "no file supplied" instead of crashing.
+    existing_file = form.get("existing_file")
     existing_path = None
-    if existing_file is not None and existing_file.filename:
+    if isinstance(existing_file, UploadFile) and existing_file.filename:
         if not existing_file.filename.lower().endswith(".pptx"):
             shutil.rmtree(work_dir, ignore_errors=True)
             return tpl.page_shell("deckguard", tpl.compose_form("The existing deck to append to must be a .pptx file."))
@@ -389,7 +410,7 @@ async def create_route(
         shutil.rmtree(work_dir, ignore_errors=True)
         return tpl.page_shell("deckguard", tpl.compose_form(f"Compose failed: {exc}"))
 
-    out_name = existing_file.filename if (existing_file is not None and existing_file.filename) else "new deck"
+    out_name = existing_file.filename if (isinstance(existing_file, UploadFile) and existing_file.filename) else "new deck"
     download_links = {"pptx": f"/download/{token}/composed.pptx"}
     body = tpl.compose_result_page(out_name, report_mod.compose_result_to_dict(result), download_links)
     return tpl.page_shell(f"Composed — {out_name}", body)

@@ -273,6 +273,23 @@ def test_create_flow_append_to_existing_deck(tmp_path, monkeypatch):
     assert "slides built" in resp.text or "2</b>" in resp.text
 
 
+def test_create_flow_tolerates_existing_file_sent_as_plain_text(tmp_path, monkeypatch):
+    """Some REST clients default a form-data field to "text" instead of
+    "file" -- sending existing_file as a plain filename string, not an
+    actual upload. That used to 422 with a raw FastAPI validation error
+    before the request body was ever read; it should degrade to "no
+    file supplied" and compose a fresh deck instead."""
+    client, _ = _client(tmp_path, monkeypatch)
+    resp = client.post(
+        "/create",
+        data={"outline": SAMPLE_OUTLINE, "existing_file": "some deck.pptx"},
+    )
+    assert resp.status_code == 200
+    assert "Composed" in resp.text
+    assert "Traceback" not in resp.text
+    assert "value_error" not in resp.text
+
+
 def test_create_flow_rejects_empty_outline(tmp_path, monkeypatch):
     client, _ = _client(tmp_path, monkeypatch)
     resp = client.post("/create", data={"outline": "   "})
