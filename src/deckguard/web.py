@@ -35,6 +35,7 @@ from pptx.exc import PackageNotFoundError
 from deckguard import learn as learn_mod
 from deckguard import report as report_mod
 from deckguard import webtemplates as tpl
+from deckguard.compose import ComposeError, build_deck, load_outline
 from deckguard.config import default_config_path, load_config, validate_config
 from deckguard.fixer import fix_deck
 from deckguard.fonts import normalize_key as font_normalize_key
@@ -106,7 +107,7 @@ def _open_presentation_or_error(path: Path) -> Presentation:
 
 @app.get("/", response_class=HTMLResponse)
 def index(_auth: None = Depends(_require_auth)):
-    return tpl.page_shell("deckguard", tpl.upload_form())
+    return tpl.page_shell("deckguard", tpl.upload_form() + tpl.compose_form())
 
 
 @app.post("/audit", response_class=HTMLResponse)
@@ -344,13 +345,63 @@ async def learn_route(
     return tpl.page_shell(f"Learned — {old_file.filename} -> {new_file.filename}", body)
 
 
+@app.post("/create", response_class=HTMLResponse)
+async def create_route(
+    request: Request,
+    existing_file: Optional[UploadFile] = None,
+    _auth: None = Depends(_require_auth),
+):
+    _cleanup_old_uploads()
+    form = await request.form()
+    outline_text = str(form.get("outline", "")).strip()
+    if not outline_text:
+        return tpl.page_shell("deckguard", tpl.compose_form("Please paste a YAML outline."))
+
+    token = uuid.uuid4().hex
+    work_dir = STORAGE_ROOT / token
+    work_dir.mkdir(parents=True, exist_ok=True)
+    outline_path = work_dir / "outline.yaml"
+    outline_path.write_text(outline_text, encoding="utf-8")
+
+    existing_path = None
+    if existing_file is not None and existing_file.filename:
+        if not existing_file.filename.lower().endswith(".pptx"):
+            shutil.rmtree(work_dir, ignore_errors=True)
+            return tpl.page_shell("deckguard", tpl.compose_form("The existing deck to append to must be a .pptx file."))
+        existing_path = await _save_upload(existing_file, work_dir, "existing.pptx")
+
+    try:
+        config = _load_engine_config()
+        outline = load_outline(outline_path)
+        output_path = work_dir / "composed.pptx"
+        result = build_deck(
+            outline, str(output_path),
+            existing_deck_path=str(existing_path) if existing_path else None,
+            rules_config=config,
+        )
+    except ComposeError as exc:
+        shutil.rmtree(work_dir, ignore_errors=True)
+        return tpl.page_shell("deckguard", tpl.compose_form(str(exc)))
+    except HTTPException as exc:
+        shutil.rmtree(work_dir, ignore_errors=True)
+        return tpl.page_shell("deckguard", tpl.compose_form(str(exc.detail)))
+    except Exception as exc:  # noqa: BLE001
+        shutil.rmtree(work_dir, ignore_errors=True)
+        return tpl.page_shell("deckguard", tpl.compose_form(f"Compose failed: {exc}"))
+
+    out_name = existing_file.filename if (existing_file is not None and existing_file.filename) else "new deck"
+    download_links = {"pptx": f"/download/{token}/composed.pptx"}
+    body = tpl.compose_result_page(out_name, report_mod.compose_result_to_dict(result), download_links)
+    return tpl.page_shell(f"Composed — {out_name}", body)
+
+
 @app.get("/download/{token}/{filename}")
 def download(token: str, filename: str, _auth: None = Depends(_require_auth)):
     # token is always a uuid4().hex we generated; filename must be one of
     # the exact names we ourselves wrote into that directory.
     allowed = (
         "audit.json", "fixed.pptx", "changelog.json", "changelog.md",
-        "brand_rules.yaml", "learn_report.json",
+        "brand_rules.yaml", "learn_report.json", "composed.pptx",
     )
     if not token.isalnum() or filename not in allowed:
         raise HTTPException(status_code=404, detail="Not found")

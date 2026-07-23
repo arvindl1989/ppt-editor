@@ -137,6 +137,81 @@ def upload_form(error: str | None = None) -> str:
 </div>"""
 
 
+SAMPLE_OUTLINE = """slides:
+  - kind: cover
+    title: "Deck title"
+    subtitle: "Subtitle line"
+
+  - kind: agenda
+    title: "Agenda"
+    bullets: ["First topic", "Second topic", "Third topic"]
+
+  - kind: content
+    title: "Three priorities"
+    columns:
+      - ["Reliability", {level: 1, text: "Supporting detail"}]
+      - ["Speed"]
+      - ["Simplicity"]
+
+  - kind: quote
+    title: "Customer voice"
+    quote_text: "A short, punchy quote goes here."
+    quote_author: "Attribution"
+
+  - kind: end
+    title: "Thank you"
+"""
+
+
+def compose_form(error: str | None = None) -> str:
+    error_html = f'<div class="error">{_esc(error)}</div><div style="height:1rem"></div>' if error else ""
+    return f"""{error_html}<div class="card">
+<h2 style="margin-top:0;font-size:1.05rem;">Compose a new deck</h2>
+<p style="color:var(--ink-muted);font-size:0.88rem;margin:0 0 1rem;">
+  Describe your slides as a YAML outline; every slide is built directly on
+  one of the org template's own approved layouts, so there's nothing to fix
+  afterward. See the README for the full outline schema (slide kinds: cover,
+  agenda, section, content, quote, statement, stat, timeline, end, blank).
+</p>
+<form method="post" action="/create">
+  <textarea name="outline" rows="16" style="width:100%;font-family:ui-monospace,'SF Mono',Consolas,monospace;
+    font-size:0.85rem;padding:0.75rem;border-radius:8px;border:1px solid var(--border);
+    background:var(--surface);color:var(--ink);" required>{_esc(SAMPLE_OUTLINE)}</textarea>
+  <div style="height:0.75rem"></div>
+  <label style="display:block;font-size:0.82rem;color:var(--ink-muted);margin-bottom:0.3rem;">
+    Optional: append these slides to an existing deck instead of starting a new one
+  </label>
+  <input type="file" name="existing_file" accept=".pptx" style="margin-bottom:1rem;">
+  <div class="btn-row">
+    <button type="submit" class="primary">Compose deck</button>
+  </div>
+</form>
+</div>"""
+
+
+def compose_result_page(out_name: str, result_dict: dict, download_links: dict) -> str:
+    stats = f"""<div class="stat-row">
+  <div class="stat"><b style="color:#1ED273">{result_dict['slide_count']}</b><span>slides built</span></div>
+  <div class="stat"><b>{len(result_dict['manual_review'])}</b><span>need review</span></div>
+</div>"""
+    dl = (
+        f'<a class="dl" href="{download_links["pptx"]}">Download composed .pptx</a>'
+        f'<a class="dl secondary" href="/">Compose another deck</a>'
+    )
+    layouts_used = ", ".join(sorted(set(result_dict["layouts_used"])))
+    body = f"""<div class="card"><h2 style="margin-top:0;font-size:1.05rem;">Composed — {_esc(out_name)}</h2>
+{stats}
+<p class="muted" style="margin:0.5rem 0 1rem;">Layouts used: {_esc(layouts_used)}</p>
+{dl}
+</div>
+<div class="card"><h3 style="margin-top:0;font-size:0.95rem;">Manual review ({len(result_dict['manual_review'])})</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Slide</th><th>Severity</th><th>Rule</th><th>Shape</th><th>Message</th><th>Fix?</th></tr></thead>
+<tbody>{_violation_rows(result_dict['manual_review'])}</tbody>
+</table></div></div>"""
+    return body
+
+
 def _violation_rows(violations: list[dict]) -> str:
     if not violations:
         return '<tr><td colspan="6" class="empty">No violations found.</td></tr>'

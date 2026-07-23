@@ -437,5 +437,55 @@ def retemplate(deck: str, template: Optional[str], accept_all: bool, accept_csv:
         console.print(f"[dim]left {len(result.skipped)} slide(s) untouched[/]: {result.skipped}")
 
 
+@main.command()
+@click.argument("outline_path", type=click.Path(exists=True, dir_okay=False))
+@click.option("--out", "out_path", type=click.Path(dir_okay=False), required=True, help="Where to write the composed .pptx.")
+@click.option(
+    "--append", "append_path", type=click.Path(exists=True, dir_okay=False), default=None,
+    help="Append the outline's slides onto a copy of this existing deck instead of starting a fresh one.",
+)
+@click.option(
+    "--template", type=click.Path(exists=True, dir_okay=False), default=None,
+    help="Org template .pptx to build on (default: the bundled KONE master template).",
+)
+@click.option("--rules", "rules_path", type=click.Path(exists=True, dir_okay=False), default=None)
+def create(outline_path: str, out_path: str, append_path: Optional[str], template: Optional[str], rules_path: Optional[str]):
+    """Generate an on-brand deck from OUTLINE_PATH (a YAML content outline), built directly on the org template's own layouts.
+
+    Every slide goes straight onto an approved master layout -- colors
+    and fonts come from the template's theme, never hand-set -- so a
+    composed deck needs no separate `fix` pass: the result is already
+    run through the same fixer `deckguard fix` uses before it's saved.
+    Pass --append to add the outline's slides onto a copy of an existing
+    deck instead of starting a new one; that deck's own pre-existing
+    slides are left completely untouched. See README for the outline
+    schema (slide kinds: cover, agenda, section, content, quote,
+    statement, stat, timeline, end, blank).
+    """
+    from deckguard.compose import ComposeError, build_deck, load_outline
+
+    config = _load_rules(rules_path)
+    try:
+        outline = load_outline(outline_path)
+    except ComposeError as exc:
+        console.print(f"[bold red]error:[/] {exc}")
+        sys.exit(1)
+
+    out = Path(out_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        result = build_deck(
+            outline, str(out), template_path=template, existing_deck_path=append_path, rules_config=config
+        )
+    except (ComposeError, KeyError) as exc:
+        console.print(f"[bold red]error:[/] {exc}")
+        sys.exit(1)
+
+    console.print(f"[green]wrote:[/] {out}")
+    console.print(f"[cyan]{result.slide_count} slide(s)[/] using layouts: {', '.join(sorted(set(result.layouts_used)))}")
+    if result.manual_review:
+        console.print(f"[yellow]{len(result.manual_review)} finding(s) need manual review[/] (e.g. all-caps content is flagged, never auto-rewritten)")
+
+
 if __name__ == "__main__":
     main()

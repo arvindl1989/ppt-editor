@@ -233,6 +233,61 @@ def test_download_rejects_path_traversal_and_unknown_token(tmp_path, monkeypatch
     assert resp2.status_code == 404
 
 
+SAMPLE_OUTLINE = """slides:
+  - kind: cover
+    title: "Composed via the web app"
+  - kind: content
+    title: "What's inside"
+    bullets: ["First point", "Second point"]
+"""
+
+
+def test_create_flow_fresh_deck_and_download(tmp_path, monkeypatch):
+    client, _ = _client(tmp_path, monkeypatch)
+    resp = client.post("/create", data={"outline": SAMPLE_OUTLINE})
+    assert resp.status_code == 200
+    assert "Composed" in resp.text
+
+    m = re.search(r'/download/([a-f0-9]+)/composed\.pptx', resp.text)
+    assert m, "no composed.pptx download link found in response"
+    dl = client.get(m.group(0))
+    assert dl.status_code == 200
+    assert dl.headers["content-type"].startswith("application/vnd.openxmlformats")
+
+
+def test_create_flow_append_to_existing_deck(tmp_path, monkeypatch):
+    client, _ = _client(tmp_path, monkeypatch)
+    legacy = tmp_path / "legacy.pptx"
+    prs = new_deck()
+    add_slide(prs)
+    prs.save(str(legacy))
+
+    with legacy.open("rb") as f:
+        resp = client.post(
+            "/create",
+            data={"outline": SAMPLE_OUTLINE},
+            files={"existing_file": ("legacy.pptx", f, "application/octet-stream")},
+        )
+    assert resp.status_code == 200
+    assert "Composed" in resp.text
+    assert "slides built" in resp.text or "2</b>" in resp.text
+
+
+def test_create_flow_rejects_empty_outline(tmp_path, monkeypatch):
+    client, _ = _client(tmp_path, monkeypatch)
+    resp = client.post("/create", data={"outline": "   "})
+    assert resp.status_code == 200
+    assert "paste a YAML outline" in resp.text
+
+
+def test_create_flow_invalid_outline_gives_clean_message(tmp_path, monkeypatch):
+    client, _ = _client(tmp_path, monkeypatch)
+    resp = client.post("/create", data={"outline": "slides:\n  - kind: not-a-real-kind\n"})
+    assert resp.status_code == 200
+    assert "unknown kind" in resp.text
+    assert "Traceback" not in resp.text
+
+
 def test_learn_flow_and_downloads(tmp_path, monkeypatch):
     client, _ = _client(tmp_path, monkeypatch)
     old_path = tmp_path / "old.pptx"

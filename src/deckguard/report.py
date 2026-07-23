@@ -155,6 +155,14 @@ def fix_report_to_dict(report) -> dict:
     }
 
 
+def compose_result_to_dict(result) -> dict:
+    return {
+        "slide_count": result.slide_count,
+        "layouts_used": result.layouts_used,
+        "manual_review": [_violation_dict(v) for v in result.manual_review],
+    }
+
+
 def remap_overrides_summary(report) -> dict:
     """Aggregate a fix run's applied color/font changes into unique
     old->new pairs, for the web UI's review-and-override table.

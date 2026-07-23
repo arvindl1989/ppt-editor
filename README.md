@@ -2,12 +2,18 @@
 
 `deckguard` is a Python tool that automates PowerPoint brand compliance for
 KONE's Marketing Hub — available as a CLI and as a small hostable web app.
-It has three capabilities:
+It both **corrects** existing decks and **creates** new ones, always
+against the same `brand_rules.yaml` and the same org master template:
 
+- **`create`** — generate a brand-new, on-brand deck from a YAML content
+  outline (or append on-brand slides to an existing deck), built directly
+  on the org template's own approved layouts
 - **`fix`** — auto-correct brand violations in a `.pptx` file
 - **`audit`** — scan one deck or a folder of decks and report violations
-- **`migrate`** — move an old-template deck onto a new template (**Phase 3,
-  not yet implemented**)
+- **`retemplate`** — rebuild an old deck's slides onto the org template's
+  own layouts, carrying over title/body text and images
+- **`migrate`** — replace just a deck's cover/outro with the org template's
+- **`learn`** — derive brand-rule color/font remaps from an old/new deck pair
 
 ## Architecture
 
@@ -30,6 +36,11 @@ It has three capabilities:
   anything the deterministic engine can't safely fix is left untouched
   and flagged as "manual review required" rather than risking XML
   surgery it can't be sure of.
+- **Generation reuses correction, not the other way around.** `create`
+  (see below) doesn't duplicate any brand logic: it picks a layout using
+  the exact same content-fit matcher `retemplate` uses to rebuild old
+  slides, and finishes every composed deck by running it through the
+  same `fix_deck` engine `fix` uses. A new capability, zero new rules.
 
 ## Install
 
@@ -61,7 +72,9 @@ uvicorn deckguard.web:app --reload
 # -> http://127.0.0.1:8000
 ```
 
-Routes: `GET /` (upload form), `POST /audit`, `POST /fix`,
+Routes: `GET /` (upload + compose forms), `POST /audit`, `POST /fix`,
+`POST /create` (compose a new deck from a pasted YAML outline, optionally
+appending onto an uploaded existing deck), `POST /learn`,
 `GET /download/{token}/{filename}`, `GET /health`.
 
 Set `DECKGUARD_WEB_PASSWORD` to require an HTTP Basic Auth password
@@ -92,6 +105,12 @@ files.
 ## Quickstart
 
 ```bash
+# Generate a brand-new deck from a YAML content outline
+deckguard create outline.yaml --out deck.pptx
+
+# ...or append its slides onto a copy of an existing deck instead
+deckguard create outline.yaml --out deck.pptx --append existing.pptx
+
 # Sanity-check the brand config
 deckguard validate-rules
 
@@ -120,17 +139,115 @@ merges on brand compliance.
 
 | Command | Purpose |
 |---|---|
+| `create <outline.yaml> --out <deck.pptx>` | Generates a new deck straight onto the org template's own layouts from a YAML content outline — see "Composing a new deck" below. `--append <deck.pptx>` appends onto a copy of an existing deck instead of starting fresh. |
 | `inspect <deck>` | Full structured inventory: shapes, fills, fonts (raw + normalized), sizes, alignment, images (with perceptual hash), effects, layout/master usage. The discovery tool for growing `brand_rules.yaml` from real decks. |
 | `fix <deck>` | Applies deterministic corrections: color remap (fills, gradients, text, lines, theme), font remap (run + theme/master/layout level), logo replacement by image hash, forbidden text-effect removal, forced left-alignment. |
 | `audit <deck\|folder>` | Reports violations (slide, element, rule, severity, auto-fixable). Folder mode writes a per-deck report plus a `summary.csv`. |
 | `hash-logo <image>` | Prints an image's perceptual hash, for `logo.old_logo_hashes`. |
 | `validate-rules [rules.yaml]` | Checks a brand config for syntax and semantic errors (hex format, remap targets in the approved list, logo file exists, etc). |
 | `learn <old> <new>` | Compares an off-brand deck against an already-on-brand reference deck and proposes `colors.remap`/`fonts.remap` additions — see below. |
-| `migrate <deck> --template <potx>` | Phase 3 stub — prints "not yet implemented". |
+| `migrate <deck> --template <potx>` | Replaces just the cover/outro slide with the org template's own. |
+| `retemplate <deck> --template <potx>` | Rebuilds every eligible slide's structure onto an org-template layout, carrying over text/images — see below. |
 
 Every command takes `--rules path/to/brand_rules.yaml` (defaults to the
-packaged KONE config). `fix` and `audit` also take `--out DIR` for where
-reports/output land.
+packaged KONE config). `fix`, `audit`, and `create` also take `--out
+DIR`/`--out FILE` for where reports/output land.
+
+## Composing a new deck from an outline
+
+`deckguard create` builds a deck straight onto the org template's own
+approved layouts from a YAML content outline — no separate `fix` pass is
+needed afterward, since every slide's color and font come from the
+template's theme by construction (the same `fix_deck` engine `deckguard
+fix` uses runs once, automatically, before the file is saved, to resolve
+any inherited-but-unresolved text color — see `compose.py`'s module
+docstring for why that step exists).
+
+```yaml
+# outline.yaml
+slides:
+  - kind: cover
+    title: "Q3 Modernization Review"
+    subtitle: "People Flow, reimagined"
+    variant: B                        # Cover A-F
+
+  - kind: agenda
+    title: "Agenda"
+    bullets: ["Where we are", "What changed", "What's next"]
+
+  - kind: section                     # chapter divider
+    title: "Where we are"
+    variant: plain                    # plain | numbered | A | B | C | D
+
+  - kind: content                     # 1-3 columns, picks the tightest layout
+    title: "Three priorities"
+    columns:
+      - ["Reliability", {level: 1, text: "99.98% uptime"}]
+      - ["Speed"]
+      - ["Scale"]
+
+  - kind: stat                        # KONE-numbers-style callouts
+    title: "KONE numbers"
+    stats:
+      - {number: "1.1M", label: "elevators & escalators maintained"}
+      - {number: "60,000", label: "employees worldwide"}
+
+  - kind: timeline                    # milestone-by-milestone roadmap
+    title: "Roadmap"
+    milestones:
+      - {label: "Q3 2026", text: "Predictive maintenance GA"}
+      - {label: "Q4 2026", text: "Full fleet rollout"}
+
+  - kind: quote
+    title: "Customer voice"
+    quote_text: "KONE's predictive maintenance cut our downtime in half."
+    quote_author: "Facilities Director, EU retail chain"
+    variant: A                        # Quote A-E
+
+  - kind: statement                   # one big centered message
+    title: "A single, unmissable point"
+
+  - kind: end
+    title: "Thank you"
+
+  - kind: blank                       # logo/footer only, for manual edits
+  - kind: content
+    layout: "Two content A"           # escape hatch: force an exact layout
+    columns: [["Left"], ["Right"]]
+```
+
+```bash
+deckguard create outline.yaml --out deck.pptx
+# -> wrote: deck.pptx
+#    11 slide(s) using layouts: Agenda A, Blank, Cover B, Outro, ...
+```
+
+`content`/`stat`/`timeline` slides don't name a layout directly — the
+number of columns/stats/milestones supplied picks the tightest-fitting
+layout automatically, via the identical `match_layout` algorithm
+`retemplate` uses to rebuild legacy slides (see Architecture above).
+`cover`/`quote`/`section` take an optional `variant` letter; anything can
+be overridden with an explicit `layout: "<name>"`.
+
+Pass `--append existing.pptx` to add the outline's slides onto a copy of
+an existing deck instead of starting fresh — that deck's own pre-existing
+slides, theme, and master are left completely untouched; only the new
+slides are ever touched or reported on.
+
+Two things `create` deliberately does not attempt:
+
+- **All-caps content isn't rewritten.** A quarter label like `"Q3 2026"`
+  or a unit-suffixed number like `"1.1M"` reads as ALL CAPS to the
+  `all_caps` rule (any text with an uppercase letter and no lowercase one
+  — the same heuristic that already flags a hand-typed deck's real
+  ALL-CAPS headings). `fix_deck` never auto-rewrites case for anyone, by
+  design, so these surface in `manual_review` rather than being silently
+  mangled.
+- **Per-slide date/footer/page-number chrome isn't restored.** Composed
+  slides get the logo/tagline (inherited straight from the layout — see
+  `compose.py`'s module docstring) but not a per-slide date/footer/page
+  number placeholder, the same as a slide added via python-pptx's own
+  `add_slide()`. A known gap, not a silent corruption.
 
 ## Config reference (`brand_rules.yaml`)
 
