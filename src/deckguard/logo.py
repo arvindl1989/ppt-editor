@@ -166,6 +166,34 @@ def find_shapes_in_region(shapes, region_emu: tuple) -> list:
     return matches
 
 
+def _next_shape_id_in_tree(spTree) -> int:
+    """Same contract as python-pptx's own `_next_shape_id` (smallest
+    positive integer not already used), but scoped to THIS shape tree's
+    own `p:cNvPr/@id` values only -- confirmed necessary the hard way: a
+    slide MASTER has a `p:sldLayoutIdLst` sibling (outside the shape
+    tree, listing the layouts that belong to it) whose `p:sldLayoutId`
+    elements use a completely different id namespace that starts at
+    2^31 by OOXML convention. python-pptx's own `_next_shape_id`
+    property does a document-WIDE `//@id` XPath scan (an absolute path,
+    so it searches from the document root no matter which element it's
+    called on) and picks those up too, handing back a shape id above
+    2^31 -- which overflows a signed 32-bit int and produced a .pptx
+    PowerPoint outright refused to open, confirmed by inspecting the
+    output directly. Safe to call on a slide's shape tree (nothing else
+    on a slide uses a bare, unprefixed `id` attribute); only actually
+    matters for a master, but used everywhere here for one code path
+    that's correct in both cases rather than two that silently diverge.
+    """
+    used_ids = {
+        int(el.get("id")) for el in spTree.iter(_p("cNvPr"))
+        if el.get("id") is not None and el.get("id").isdigit()
+    }
+    n = 1
+    while n in used_ids:
+        n += 1
+    return n
+
+
 def replace_shapes_in_region_with_logo(shape_container, matches: list, new_image_path: str, region_emu: tuple) -> None:
     """Delete every shape in `matches` from `shape_container` (a
     master/layout/slide's own `.shapes`) and insert the new logo image
@@ -185,6 +213,6 @@ def replace_shapes_in_region_with_logo(shape_container, matches: list, new_image
     left = r_left + (r_width - cx) // 2
     top = r_top + (r_height - cy) // 2
 
-    id_ = shape_container._next_shape_id
-    name = "Picture %d" % (id_ - 1)
+    id_ = _next_shape_id_in_tree(spTree)
+    name = "Picture %d" % id_
     spTree.add_pic(id_, name, image_part.desc, rId, left, top, cx, cy)

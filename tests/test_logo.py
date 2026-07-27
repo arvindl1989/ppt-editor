@@ -91,7 +91,7 @@ def test_replace_shapes_in_region_with_logo_removes_matches_and_inserts_sized_pi
     prs = new_deck()
     master = prs.slide_masters[0]
     spTree = master.shapes._spTree
-    id_ = master.shapes._next_shape_id
+    id_ = logo_mod._next_shape_id_in_tree(spTree)
     old_mark = spTree.add_textbox(id_, "OldMark", Inches(11), Inches(0.2), Inches(1), Inches(0.5))
     before_count = len(master.shapes)
 
@@ -111,6 +111,53 @@ def test_replace_shapes_in_region_with_logo_removes_matches_and_inserts_sized_pi
     r_left, r_top, r_width, r_height = region
     assert r_left <= pic.left and pic.left + pic.width <= r_left + r_width
     assert r_top <= pic.top and pic.top + pic.height <= r_top + r_height
+
+
+def test_replace_shapes_in_region_with_logo_on_a_master_never_assigns_a_layout_id(tmp_path):
+    """Regression test for a real report: PowerPoint outright refused to
+    open a .pptx this produced. Root cause -- confirmed by inspecting the
+    output XML directly -- was calling python-pptx's own `_next_shape_id`
+    on a MASTER's shape tree: a slide master always has a sibling
+    `p:sldLayoutIdLst` (listing the layouts that belong to it) whose
+    `p:sldLayoutId` elements use a completely different id namespace
+    starting at 2**31 by OOXML convention, and `_next_shape_id`'s
+    document-wide `//@id` XPath scan picks those up too, handing back an
+    id like 2147483687 -- past the signed-32-bit range PowerPoint's own
+    parser tolerates. Every stock python-pptx master has this sibling
+    list (it's how a master knows which layouts belong to it), so this
+    isn't specific to any one deck's quirks."""
+    new_logo = make_pattern_png(tmp_path / "new_logo.png", seed=5)
+
+    prs = new_deck()
+    master = prs.slide_masters[0]
+    assert len(master.shapes._spTree.xpath("//@id")) > 0  # sanity: sldLayoutIdLst ids are visible in this scan
+    spTree = master.shapes._spTree
+    id_ = logo_mod._next_shape_id_in_tree(spTree)
+    spTree.add_textbox(id_, "OldMark", Inches(11), Inches(0.2), Inches(1), Inches(0.5))
+
+    region = (Emu(Inches(10.5)), Emu(Inches(0)), Emu(Inches(2.8)), Emu(Inches(1.2)))
+    matches = logo_mod.find_shapes_in_region(master.shapes, region)
+
+    logo_mod.replace_shapes_in_region_with_logo(master.shapes, matches, str(new_logo), region)
+
+    pic = next(s for s in master.shapes if s.shape_type is not None and s.shape_type.name == "PICTURE")
+    assert pic.shape_id < 2**31
+
+
+def test_next_shape_id_in_tree_ignores_sibling_sldLayoutIdLst_ids():
+    """Unit-level version of the same regression: a master's own
+    _next_shape_id_in_tree must stay scoped to p:cNvPr ids and ignore
+    the 2**31+ range p:sldLayoutId elements use, unlike python-pptx's
+    own _next_shape_id (a document-wide XPath scan)."""
+    prs = new_deck()
+    master = prs.slide_masters[0]
+    spTree = master.shapes._spTree
+
+    buggy = master.shapes._next_shape_id  # python-pptx's own property
+    fixed = logo_mod._next_shape_id_in_tree(spTree)
+
+    assert buggy >= 2**31
+    assert fixed < 100  # a stock master's own placeholder ids are all small
 
 
 def test_find_background_blip_returns_none_when_no_bg_element(tmp_path):
