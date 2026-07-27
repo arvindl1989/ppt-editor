@@ -406,6 +406,65 @@ def test_default_config_replaces_the_known_old_logo_region(tmp_path):
     assert not any(s.name == "OldWordmark" for s in master.shapes)
 
 
+def _duplicate_a_shape_id(container_element):
+    """Simulate a real, confirmed defect: an old deck with the same
+    shape id used twice within one part (e.g. an embedded object
+    duplicated at some point in its edit history, both copies keeping
+    the original id). Deep-copies the first shape element found and
+    re-appends it with the SAME id -- python-pptx has no API for this
+    (it always assigns a fresh id), so it's built directly via lxml,
+    exactly the way a real malformed file would already have it."""
+    import copy
+
+    from pptx.oxml.ns import qn
+
+    first_sp = container_element.find(f".//{qn('p:sp')}")
+    clone = copy.deepcopy(first_sp)
+    container_element.find(f".//{qn('p:spTree')}").append(clone)
+    return clone.find(f".//{qn('p:cNvPr')}").get("id")
+
+
+def test_fix_deck_renumbers_a_duplicate_shape_id_on_a_slide():
+    from collections import Counter
+
+    from pptx.oxml.ns import qn
+
+    prs = new_deck()
+    slide = add_slide(prs)
+    dup_id = _duplicate_a_shape_id(slide._element)
+
+    report = fix_deck(prs, CONFIG, source_path="in.pptx", output_path=None, dry_run=True)
+
+    assert any(c.rule == "duplicate_shape_id" and c.scope == "slide" for c in report.changes)
+    ids = [el.get("id") for el in slide._element.findall(f".//{qn('p:cNvPr')}")]
+    assert len(ids) == len(set(ids))  # all unique now
+    assert ids.count(dup_id) == 1  # the original kept its id; only the clone moved
+
+
+def test_fix_deck_renumbers_a_duplicate_shape_id_on_a_master():
+    from pptx.oxml.ns import qn
+
+    prs = new_deck()
+    master = prs.slide_masters[0]
+    _duplicate_a_shape_id(master._element)
+    add_slide(prs)
+
+    report = fix_deck(prs, CONFIG, source_path="in.pptx", output_path=None, dry_run=True)
+
+    assert any(c.rule == "duplicate_shape_id" and c.scope == "master" for c in report.changes)
+    ids = [el.get("id") for el in master._element.findall(f".//{qn('p:cNvPr')}")]
+    assert len(ids) == len(set(ids))
+
+
+def test_fix_deck_leaves_unique_shape_ids_untouched():
+    prs = new_deck()
+    add_slide(prs)
+
+    report = fix_deck(prs, CONFIG, source_path="in.pptx", output_path=None, dry_run=True)
+
+    assert not any(c.rule == "duplicate_shape_id" for c in report.changes)
+
+
 def test_fix_replaces_old_logo_baked_into_a_slide_background_fill(tmp_path):
     """A logo can also be baked into a page-level background-FILL image
     (<p:cSld><p:bg>) rather than being a picture shape at all -- outside

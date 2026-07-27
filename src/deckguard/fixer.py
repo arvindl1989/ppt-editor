@@ -35,6 +35,12 @@ from deckguard.fonts import FontTables, normalize_key, remap_theme_fonts
 from deckguard.inventory import ALIGN_BY_NAME, build_inventory
 from deckguard.rules_engine import Violation, audit_deck, sort_violations, summarize
 
+P_NS = "http://schemas.openxmlformats.org/presentationml/2006/main"
+
+
+def _p(tag: str) -> str:
+    return f"{{{P_NS}}}{tag}"
+
 
 @dataclass
 class Change:
@@ -233,6 +239,66 @@ def _replace_old_logo_region_everywhere(prs, region_in, new_logo_path: Optional[
             )
         )
 
+    return changes
+
+
+def _dedupe_shape_ids_in_part(root_element) -> int:
+    """Renumber any `<p:cNvPr id=...>` value used more than once within
+    this single part's XML (a slide, a layout, or a master), keeping the
+    first occurrence and reassigning every later duplicate to the next
+    free id in that same part. Shape ids only need to be unique WITHIN a
+    part, not across the whole file, so this is scoped per-part on
+    purpose.
+
+    Exists to heal a real, if rare, defect found in a genuinely old deck:
+    an embedded object duplicated at some point in the deck's edit
+    history that kept the SAME id on both copies. PowerPoint's own
+    repair-on-open logic is often silently tolerant of this in a file it
+    opens directly -- but this project's own output shouldn't propagate
+    a source file's pre-existing XML defect unchanged, and a file
+    re-saved by python-pptx doesn't reliably get the same silent
+    auto-heal treatment (confirmed: PowerPoint refused to open a
+    redesign/rebrand output built from a deck with this exact defect).
+    Returns how many ids were renumbered.
+    """
+    cNvPr_els = root_element.findall(f".//{_p('cNvPr')}")
+    seen: set[int] = set()
+    next_id = 1
+    renumbered = 0
+    for el in cNvPr_els:
+        raw = el.get("id")
+        if raw is None or not raw.isdigit():
+            continue
+        id_ = int(raw)
+        if id_ not in seen:
+            seen.add(id_)
+            continue
+        while next_id in seen:
+            next_id += 1
+        el.set("id", str(next_id))
+        seen.add(next_id)
+        renumbered += 1
+        next_id += 1
+    return renumbered
+
+
+def _dedupe_shape_ids(prs) -> list[Change]:
+    changes: list[Change] = []
+    seen_masters = set()
+    for master in colors_mod.iter_slide_masters(prs):
+        if id(master.part) not in seen_masters:
+            seen_masters.add(id(master.part))
+            n = _dedupe_shape_ids_in_part(master._element)
+            if n:
+                changes.append(Change(scope="master", rule="duplicate_shape_id", field="id", old=None, new=None, location=f"{master.name} ({n} renumbered)"))
+        for layout in master.slide_layouts:
+            n = _dedupe_shape_ids_in_part(layout._element)
+            if n:
+                changes.append(Change(scope="layout", rule="duplicate_shape_id", field="id", old=None, new=None, location=f"{layout.name} ({n} renumbered)"))
+    for i, slide in enumerate(prs.slides, start=1):
+        n = _dedupe_shape_ids_in_part(slide._element)
+        if n:
+            changes.append(Change(scope="slide", rule="duplicate_shape_id", field="id", old=None, new=None, slide_index=i, location=f"({n} renumbered)"))
     return changes
 
 
@@ -526,6 +592,12 @@ def fix_deck(prs, config: dict, source_path: str, output_path: Optional[str], dr
     # unfixable violations, or (defensively) anything a fix attempt didn't
     # actually clear.
     manual_review = sort_violations(audit_deck(build_inventory(prs), config))
+
+    # Last, structural rather than brand-rule-driven: heal a duplicate
+    # shape id inherited from the source file (or introduced by any
+    # shape surgery earlier in this same run) before saving -- see
+    # _dedupe_shape_ids_in_part's own docstring for why this matters.
+    changes += _dedupe_shape_ids(prs)
 
     if not dry_run and output_path:
         prs.save(output_path)
