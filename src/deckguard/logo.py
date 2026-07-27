@@ -9,8 +9,10 @@ rewrites the `<a:blip r:embed>` reference only — the shape's `spPr`/
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 from io import BytesIO
+from typing import Optional
 
 import imagehash
 from PIL import Image
@@ -166,6 +168,44 @@ def find_shapes_in_region(shapes, region_emu: tuple) -> list:
     return matches
 
 
+def reference_logo_geometry(template_path) -> Optional[tuple]:
+    """The current org template's own standard corner-logo size and
+    position (left, top, width, height, in EMU) -- the ground truth for
+    how big and where a REPLACEMENT logo should render, as opposed to
+    however generously `old_logo_region_in` was drawn to reliably catch
+    the old mark regardless of its own (possibly very different) size.
+    Confirmed necessary the hard way: sizing a replacement to fill a
+    deliberately generous search region rendered a logo several times
+    too large next to every other layout's own actual logo.
+
+    Computed as the majority (left, top, width, height) across every
+    layout's own "Logo"/"Logo Placeholder"-named shape -- nearly all of
+    them agree by design (cover/section/agenda/outro/end layouts are the
+    outliers, using a different corner or a large centered mark, so
+    letting the vote naturally favor the far more numerous "ordinary
+    content layout" position is correct, not an arbitrary tiebreak).
+    Returns None if the template can't be read or has no such shape at
+    all -- callers should fall back to their own prior behavior.
+    """
+    from pptx import Presentation
+
+    try:
+        prs = Presentation(str(template_path))
+    except Exception:  # noqa: BLE001 -- missing/corrupt template, not fatal to the caller
+        return None
+
+    sizes: Counter = Counter()
+    for master in prs.slide_masters:
+        for layout in master.slide_layouts:
+            for shp in layout.shapes:
+                name = (shp.name or "").lower()
+                if "logo" in name and None not in (shp.left, shp.top, shp.width, shp.height):
+                    sizes[(shp.left, shp.top, shp.width, shp.height)] += 1
+    if not sizes:
+        return None
+    return sizes.most_common(1)[0][0]
+
+
 def _next_shape_id_in_tree(spTree) -> int:
     """Same contract as python-pptx's own `_next_shape_id` (smallest
     positive integer not already used), but scoped to THIS shape tree's
@@ -194,14 +234,24 @@ def _next_shape_id_in_tree(spTree) -> int:
     return n
 
 
-def replace_shapes_in_region_with_logo(shape_container, matches: list, new_image_path: str, region_emu: tuple) -> None:
+def replace_shapes_in_region_with_logo(
+    shape_container, matches: list, new_image_path: str, region_emu: tuple, target_emu: Optional[tuple] = None
+) -> None:
     """Delete every shape in `matches` from `shape_container` (a
     master/layout/slide's own `.shapes`) and insert the new logo image
-    in their place, sized to fit within `region_emu` preserving its
-    native aspect ratio (never stretched), anchored to the region's
-    top-left corner.
+    in their place, sized to fit within `target_emu` (or `region_emu`
+    when `target_emu` isn't given) preserving its native aspect ratio
+    (never stretched), centered within that box.
+
+    `region_emu` (the search region old shapes were matched against) is
+    usually NOT the right size to render the new logo at -- it's drawn
+    generously to reliably catch an old mark regardless of its own
+    size, so sizing the replacement to fill it renders an
+    oversized logo. Pass `target_emu` (see `reference_logo_geometry`)
+    for the actual correct size/position to use; the `region_emu`
+    fallback exists only for a caller with no better answer.
     """
-    r_left, r_top, r_width, r_height = region_emu
+    r_left, r_top, r_width, r_height = target_emu or region_emu
     spTree = shape_container._spTree
     for shape in matches:
         spTree.remove(shape._element)

@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+from lxml import etree
 from pptx.dml.color import RGBColor
 from pptx.enum.dml import MSO_COLOR_TYPE
 from pptx.enum.shapes import MSO_SHAPE_TYPE
@@ -32,7 +33,7 @@ from deckguard import effects as effects_mod
 from deckguard import fonts as fonts_mod
 from deckguard import logo as logo_mod
 from deckguard.fonts import FontTables, normalize_key, remap_theme_fonts
-from deckguard.inventory import ALIGN_BY_NAME, build_inventory
+from deckguard.inventory import ALIGN_BY_NAME, _has_explicit_run_color, build_inventory
 from deckguard.rules_engine import Violation, audit_deck, sort_violations, summarize
 
 P_NS = "http://schemas.openxmlformats.org/presentationml/2006/main"
@@ -220,7 +221,13 @@ def _replace_old_logo_region_everywhere(prs, region_in, new_logo_path: Optional[
 
     from pptx.util import Inches
 
+    from deckguard.slide_import import default_template_path
+
     region_emu = tuple(Inches(v) for v in region_in)
+    # The org template's own actual logo size/position -- NOT the (deliberately
+    # generous) search region -- is what the replacement should be sized to.
+    # See reference_logo_geometry's own docstring for why.
+    target_emu = logo_mod.reference_logo_geometry(default_template_path())
 
     seen_masters = set()
     for master in colors_mod.iter_slide_masters(prs):
@@ -231,7 +238,7 @@ def _replace_old_logo_region_everywhere(prs, region_in, new_logo_path: Optional[
         if not matches:
             continue
         shape_names = [s.name for s in matches]
-        logo_mod.replace_shapes_in_region_with_logo(master.shapes, matches, new_logo_path, region_emu)
+        logo_mod.replace_shapes_in_region_with_logo(master.shapes, matches, new_logo_path, region_emu, target_emu)
         changes.append(
             Change(
                 scope="master", rule="old_logo_region", field="image",
@@ -300,6 +307,118 @@ def _dedupe_shape_ids(prs) -> list[Change]:
         if n:
             changes.append(Change(scope="slide", rule="duplicate_shape_id", field="id", old=None, new=None, slide_index=i, location=f"({n} renumbered)"))
     return changes
+
+
+FOOTER_CHROME_PLACEHOLDER_TYPES = {"DATE", "FOOTER", "SLD_NUM", "SLIDE_NUMBER"}
+
+
+def _normalize_footer_chrome_text(prs, config: dict) -> list[Change]:
+    """Force date/footer/slide-number placeholder text onto brand values
+    when it has no explicit font/color of its own.
+
+    These three placeholder types are structurally different from
+    ordinary body/title text: PowerPoint auto-fields (date, slide
+    number) and short literal footer text almost never carry an
+    explicit run color, and almost never sit on a fill the `contrast`
+    rule can compute against (they sit directly on the page canvas) --
+    so `inventory.py`'s color resolver (deliberately conservative: an
+    unresolvable inherited color is recorded as `ColorInfo(kind="none")`
+    rather than guessed at) can never flag them as a violation in the
+    first place, and they silently keep whatever the OLD deck's own
+    master defined. Confirmed on a real reported deck: Arial, no color
+    override at all -- exactly what a brand-compliance pass exists to
+    catch, just invisible to the per-violation audit/fix loop below.
+
+    Rather than build a general inherited-color resolver just for this,
+    force these three placeholder types specifically onto the current
+    org template's own default for them (its master's own
+    `<p:otherStyle>`, which in the bundled template resolves to Inter /
+    `#141414` -- matching `typography_rules.text_colors`' own "black
+    first" fallback rule for text with no resolvable background) --
+    but only for a run that has no explicit font/color of its own. A
+    run that already sets one is a deliberate choice by whoever built
+    the deck, not this project's to override.
+    """
+    fonts_cfg = config.get("fonts", {}) or {}
+    typo = config.get("typography_rules", {}) or {}
+    font_name = (fonts_cfg.get("approved") or ["Inter"])[0]
+    color_hex = None
+    for candidate in typo.get("text_colors", {}).get(font_name, []) or []:
+        color_hex = colors_mod.normalize_hex(candidate)
+        break
+    if color_hex is None:
+        color_hex = "141414"
+
+    changes: list[Change] = []
+    for i, slide in enumerate(prs.slides, start=1):
+        for shp in slide.placeholders:
+            ph_type = shp.placeholder_format.type
+            if ph_type is None or ph_type.name not in FOOTER_CHROME_PLACEHOLDER_TYPES or not shp.has_text_frame:
+                continue
+            changed = False
+            for para in shp.text_frame.paragraphs:
+                for run in para.runs:
+                    if not run.font.name:
+                        run.font.name = font_name
+                        changed = True
+                    if not _has_explicit_run_color(run):
+                        run.font.color.rgb = RGBColor.from_string(color_hex)
+                        changed = True
+            # Date and slide-number placeholders are PowerPoint auto-fields
+            # (<a:fld>), not <a:r> runs at all -- python-pptx's own
+            # paragraph.runs never returns them, so they need their own
+            # raw-XML pass, via the exact same "only touch what's unset" rule.
+            for fld in shp.text_frame._txBody.iter(effects_mod.a_qn("fld")):
+                rPr = fld.find(effects_mod.a_qn("rPr"))
+                if rPr is None:
+                    rPr = etree.SubElement(fld, effects_mod.a_qn("rPr"))
+                    fld.insert(0, rPr)  # rPr must precede pPr/t per schema order
+                if _set_fld_rPr_defaults(rPr, font_name, color_hex):
+                    changed = True
+            if changed:
+                changes.append(
+                    Change(
+                        scope="slide", rule="footer_chrome_default", field="font/color",
+                        old=None, new=f"{font_name} / #{color_hex}", slide_index=i,
+                        shape_id=shp.shape_id, shape_name=shp.name,
+                    )
+                )
+    return changes
+
+
+def _set_fld_rPr_defaults(rPr, font_name: str, color_hex: str) -> bool:
+    """Add explicit color/font to an `<a:fld>`'s `<a:rPr>` if it doesn't
+    already have one of its own -- same "only touch what's unset" rule
+    `_normalize_footer_chrome_text` applies to ordinary runs, just via
+    raw XML since python-pptx doesn't wrap `<a:fld>` as a Run object at
+    all. `<a:rPr>`'s child order is schema-fixed (fill before latin), so
+    a new `solidFill` is inserted before any existing `latin`/`ea`/`cs`,
+    not just appended.
+    """
+    changed = False
+    has_fill = (
+        rPr.find(effects_mod.a_qn("solidFill")) is not None
+        or rPr.find(effects_mod.a_qn("noFill")) is not None
+    )
+    has_latin = rPr.find(effects_mod.a_qn("latin")) is not None
+
+    if not has_fill:
+        solid_fill = etree.Element(effects_mod.a_qn("solidFill"))
+        srgb_clr = etree.SubElement(solid_fill, effects_mod.a_qn("srgbClr"))
+        srgb_clr.set("val", color_hex)
+        ref = rPr.find(effects_mod.a_qn("latin"))
+        if ref is not None:
+            ref.addprevious(solid_fill)
+        else:
+            rPr.append(solid_fill)
+        changed = True
+
+    if not has_latin:
+        latin = etree.SubElement(rPr, effects_mod.a_qn("latin"))
+        latin.set("typeface", font_name)
+        changed = True
+
+    return changed
 
 
 def _remap_shapes_fills(shapes, remap: dict[str, str], min_area_emu2: float, scope: str, location: str) -> list[Change]:
@@ -598,6 +717,7 @@ def fix_deck(prs, config: dict, source_path: str, output_path: Optional[str], dr
     # shape surgery earlier in this same run) before saving -- see
     # _dedupe_shape_ids_in_part's own docstring for why this matters.
     changes += _dedupe_shape_ids(prs)
+    changes += _normalize_footer_chrome_text(prs, config)
 
     if not dry_run and output_path:
         prs.save(output_path)

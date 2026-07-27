@@ -1,5 +1,6 @@
 import hashlib
 
+from lxml import etree
 from pptx import Presentation
 from pptx.enum.text import PP_ALIGN
 
@@ -357,6 +358,53 @@ def test_fix_replaces_a_vector_logo_mark_via_old_logo_region_in(tmp_path):
     assert pictures[0].image.blob == new_logo.read_bytes()
 
 
+def test_fix_sizes_the_replacement_logo_from_the_template_not_the_search_region(tmp_path):
+    """Regression test for a real report: the replacement logo rendered
+    'super huge' because it was sized to fill old_logo_region_in (drawn
+    deliberately generous, to reliably catch the old mark regardless of
+    its own size) instead of the org template's own actual logo size.
+    The configured region here is intentionally much bigger than the
+    template's real logo -- the output picture must still come out at
+    the template's own size, not the region's."""
+    from pptx.util import Inches
+
+    from deckguard import logo as logo_mod
+    from deckguard.slide_import import default_template_path
+
+    if not default_template_path().exists():
+        pytest.skip("bundled template asset not present")
+
+    new_logo = make_pattern_png(tmp_path / "new.png", seed=11)
+
+    prs = new_deck()
+    master = prs.slide_masters[0]
+    spTree = master.shapes._spTree
+    id_ = logo_mod._next_shape_id_in_tree(spTree)
+    spTree.add_textbox(id_, "OldVectorMark", Inches(11), Inches(0.2), Inches(1), Inches(0.5))
+    add_slide(prs)
+
+    config = {
+        "colors": {"approved": ["#1450F5"], "remap": {}},
+        "fonts": {"approved": ["Inter"], "remap": {}},
+        "typography_rules": {},
+        # deliberately much larger than the template's real ~0.85 x 0.33in logo
+        "logo": {"old_logo_region_in": [9.0, 0.0, 4.0, 3.0], "new_logo_path": str(new_logo)},
+        "layout": {},
+        "audit": {"fail_on": []},
+    }
+
+    fix_deck(prs, config, source_path="in.pptx", output_path=None, dry_run=True)
+
+    pic = next(s for s in master.shapes if s.shape_type is not None and s.shape_type.name == "PICTURE")
+    expected = logo_mod.reference_logo_geometry(default_template_path())
+    assert expected is not None
+    _e_left, _e_top, e_width, e_height = expected
+    # aspect-fit within the template's own box -- at least one axis should
+    # land close to it (not blown up to fill the much bigger search region)
+    assert pic.width <= e_width + 1000  # a few EMU of rounding slack
+    assert pic.height <= e_height + 1000
+
+
 def test_fix_old_logo_region_in_unset_is_a_no_op():
     """Unset must never touch a master -- deleting shapes by position
     alone is only safe once a human has confirmed the region, so no
@@ -513,3 +561,112 @@ def test_fix_old_logo_replacement_is_a_no_op_without_configured_hashes():
     report = fix_deck(prs, CONFIG, source_path="in.pptx", output_path=None, dry_run=True)
 
     assert not any(c.rule == "old_logo" for c in report.changes)
+
+
+def _add_layout_placeholder_to_slide(slide, ph_type_name: str):
+    """Clone a DATE/FOOTER/SLIDE_NUMBER placeholder from the slide's own
+    layout onto the slide, the way PowerPoint's Insert Header & Footer
+    does -- python-pptx's add_slide() doesn't clone these by default
+    (only content placeholders), so a test needs to add one explicitly
+    to reproduce a real deck's footer chrome."""
+    import copy
+
+    layout = slide.slide_layout
+    src = next(
+        ph for ph in layout.placeholders
+        if ph.placeholder_format.type is not None and ph.placeholder_format.type.name == ph_type_name
+    )
+    clone = copy.deepcopy(src._element)
+    slide.shapes._spTree.append(clone)
+    return next(
+        ph for ph in slide.placeholders
+        if ph.placeholder_format.type is not None and ph.placeholder_format.type.name == ph_type_name
+    )
+
+
+def test_fix_forces_brand_font_and_color_onto_unstyled_footer_text():
+    """Regression test for a real report: footer/date/slide-number text
+    on a slide kept from an old deck (brand mode's own 'skipped slide'
+    path) stayed on whatever font/color the OLD master defined --
+    confirmed on a real deck: Arial, no color override -- because the
+    per-violation audit can't flag a run with no explicit color AND no
+    resolvable background to compute contrast against (footer text sits
+    directly on the page canvas, not a fill)."""
+    prs = new_deck()
+    slide = add_slide(prs)
+    footer_ph = _add_layout_placeholder_to_slide(slide, "FOOTER")
+    footer_ph.text_frame.text = "Confidential | © Some Corp"
+    run = footer_ph.text_frame.paragraphs[0].runs[0]
+    assert run.font.name is None  # sanity: no explicit override to start with
+    assert run.font.color.type is None
+
+    report = fix_deck(prs, CONFIG, source_path="in.pptx", output_path=None, dry_run=True)
+
+    assert any(c.rule == "footer_chrome_default" for c in report.changes)
+    run = footer_ph.text_frame.paragraphs[0].runs[0]
+    assert run.font.name == "Inter"
+    assert str(run.font.color.rgb) == "141414"
+
+
+def test_fix_never_overrides_a_footer_run_with_an_explicit_color_already():
+    """Font isn't a fair test of "leave a deliberate choice alone" --
+    every non-approved font gets corrected to Inter regardless (that's
+    the whole point of the tool), so an already-Calibri run would be
+    fixed by the ordinary font-compliance pass either way. Color is
+    the real test: white is an equally brand-approved choice to black
+    for footer text with no resolvable background (see
+    typography_rules.text_colors' "Inter": [black, white] list), so an
+    explicit white must survive, not get silently forced to the "black
+    first" default."""
+    prs = new_deck()
+    slide = add_slide(prs)
+    footer_ph = _add_layout_placeholder_to_slide(slide, "FOOTER")
+    footer_ph.text_frame.text = "Confidential"
+    run = footer_ph.text_frame.paragraphs[0].runs[0]
+    run.font.name = "Inter SemiBold"  # already approved -- the general font pass has nothing to fix
+    from pptx.dml.color import RGBColor
+
+    run.font.color.rgb = RGBColor.from_string("FFFFFF")
+
+    fix_deck(prs, CONFIG, source_path="in.pptx", output_path=None, dry_run=True)
+
+    run = footer_ph.text_frame.paragraphs[0].runs[0]
+    assert run.font.name == "Inter SemiBold"
+    assert str(run.font.color.rgb) == "FFFFFF"
+
+
+def test_fix_forces_brand_font_and_color_onto_date_and_slide_number_fields():
+    """Date/slide-number placeholders are PowerPoint auto-fields
+    (<a:fld>), not <a:r> runs -- python-pptx's own paragraph.runs never
+    returns them, so they need their own handling entirely separate
+    from ordinary text runs."""
+    prs = new_deck()
+    slide = add_slide(prs)
+    date_ph = _add_layout_placeholder_to_slide(slide, "DATE")
+    from pptx.oxml.ns import qn
+
+    fld = etree.SubElement(date_ph.text_frame.paragraphs[0]._p, qn("a:fld"))
+    fld.set("id", "{00000000-0000-0000-0000-000000000000}")
+    fld.set("type", "datetime1")
+    rPr = etree.SubElement(fld, qn("a:rPr"))
+    rPr.set("lang", "en-US")
+    t = etree.SubElement(fld, qn("a:t"))
+    t.text = "1 January 2026"
+
+    report = fix_deck(prs, CONFIG, source_path="in.pptx", output_path=None, dry_run=True)
+
+    assert any(c.rule == "footer_chrome_default" and c.shape_name == date_ph.name for c in report.changes)
+    latin = fld.find(qn("a:rPr")).find(qn("a:latin"))
+    solid_fill = fld.find(qn("a:rPr")).find(qn("a:solidFill"))
+    assert latin.get("typeface") == "Inter"
+    assert solid_fill.find(qn("a:srgbClr")).get("val") == "141414"
+
+
+def test_fix_footer_chrome_leaves_ordinary_body_placeholders_alone():
+    prs = new_deck()
+    slide = add_slide(prs)
+    body_run(slide).text = "Ordinary body text"
+
+    report = fix_deck(prs, CONFIG, source_path="in.pptx", output_path=None, dry_run=True)
+
+    assert not any(c.rule == "footer_chrome_default" for c in report.changes)

@@ -144,6 +144,38 @@ def test_replace_shapes_in_region_with_logo_on_a_master_never_assigns_a_layout_i
     assert pic.shape_id < 2**31
 
 
+def test_reference_logo_geometry_matches_the_bundled_template():
+    """The bundled KONE template's own logo shapes agree on one
+    size/position across the overwhelming majority of its layouts --
+    reference_logo_geometry should return exactly that, in EMU."""
+    from deckguard.slide_import import default_template_path
+
+    if not default_template_path().exists():
+        import pytest
+
+        pytest.skip("bundled template asset not present")
+
+    geometry = logo_mod.reference_logo_geometry(default_template_path())
+    assert geometry is not None
+    left, top, width, height = geometry
+    # known-good values confirmed by direct inspection of the bundled template
+    assert abs(Emu(left).inches - 12.013) < 0.05
+    assert abs(Emu(top).inches - 0.472) < 0.05
+    assert abs(Emu(width).inches - 0.846) < 0.05
+    assert abs(Emu(height).inches - 0.328) < 0.05
+
+
+def test_reference_logo_geometry_returns_none_for_a_template_with_no_logo_shape():
+    prs = new_deck()  # a plain default python-pptx template, no shape named "logo"
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as d:
+        path = Path(d) / "blank.pptx"
+        prs.save(str(path))
+        assert logo_mod.reference_logo_geometry(path) is None
+
+
 def test_next_shape_id_in_tree_ignores_sibling_sldLayoutIdLst_ids():
     """Unit-level version of the same regression: a master's own
     _next_shape_id_in_tree must stay scoped to p:cNvPr ids and ignore

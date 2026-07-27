@@ -45,7 +45,14 @@ colors:
 
   remap:
     "#005EB8": "#1450F5"   # old KONE Blue -> new KONE Blue
-    "#0071B9": "#7296F9"   # old KONE Blue (variant) -> KONE Blue 60% tint (corrected: 15 exact shape-matched instances vs New_Test_Slides.pptx)
+    "#0071B9": "#1450F5"   # old KONE Blue (variant) -> new KONE Blue (was KONE Blue 60% tint -- changed on
+                           # explicit direction after a real deck's rebuilt panels (theme dk2, used as a fill
+                           # on content-box header strips) read as a washed-out two-tone next to the same
+                           # box's already-#1450F5 body -- the brand-correct look is solid KONE Blue
+                           # throughout. NOTE: an earlier pass had mapped this to the 60% tint specifically
+                           # to match 15 shape instances in a different reference deck (New_Test_Slides.pptx)
+                           # -- if that deck is reprocessed and those panels need to stay a tint, this is
+                           # the value to revisit.
     "#93C0E2": "#1450F5"   # old light blue -> new KONE Blue
     "#306FB3": "#7296F9"   # old mid blue -> KONE Blue 60% tint
     "#002060": "#1450F5"   # old dark navy -> new KONE Blue
