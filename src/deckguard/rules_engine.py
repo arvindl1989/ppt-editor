@@ -46,6 +46,60 @@ class Violation:
     target: object = field(default=None, repr=False, compare=False)
 
 
+def _own_fill_hex(shape: ShapeRecord) -> Optional[str]:
+    if shape.fill and shape.fill.type == "solid" and shape.fill.colors:
+        first = shape.fill.colors[0]
+        if first.hex:
+            return first.hex
+    return None
+
+
+def _bbox_mostly_contained(inner: ShapeRecord, outer: ShapeRecord, tolerance_in: float = 0.05) -> bool:
+    """True if `inner`'s bounding box sits inside `outer`'s, within a small
+    tolerance -- the common "color panel behind a plain textbox" pattern,
+    where the textbox is the same size as or slightly smaller than the
+    panel it sits on."""
+    if None in (inner.left_in, inner.top_in, inner.width_in, inner.height_in):
+        return False
+    if None in (outer.left_in, outer.top_in, outer.width_in, outer.height_in):
+        return False
+    return (
+        inner.left_in >= outer.left_in - tolerance_in
+        and inner.top_in >= outer.top_in - tolerance_in
+        and inner.left_in + inner.width_in <= outer.left_in + outer.width_in + tolerance_in
+        and inner.top_in + inner.height_in <= outer.top_in + outer.height_in + tolerance_in
+    )
+
+
+def _resolve_effective_bg_hex(
+    shape: ShapeRecord, top_shapes: list, top_shape_index: dict[int, int]
+) -> Optional[str]:
+    """A shape's own resolved fill is always the first choice. Failing
+    that -- e.g. a plain textbox with no fill of its own, sitting on top
+    of a separately-drawn color panel, a very common authoring pattern --
+    look for the nearest shape BELOW it in z-order (document order is
+    paint order in OOXML) whose bounding box contains this one's, and use
+    that shape's fill as the effective background.
+
+    Only searches top-level (non-grouped) shapes, where geometry is
+    unambiguous in slide-absolute coordinates. A shape nested in a group
+    is left exactly as conservative as before -- background resolved only
+    from its own fill -- rather than risk getting group-transform
+    coordinate math wrong.
+    """
+    own = _own_fill_hex(shape)
+    if own:
+        return own
+    idx = top_shape_index.get(shape.shape_id)
+    if idx is None:
+        return None
+    for candidate in reversed(top_shapes[:idx]):
+        candidate_hex = _own_fill_hex(candidate)
+        if candidate_hex and _bbox_mostly_contained(shape, candidate):
+            return candidate_hex
+    return None
+
+
 def _is_heading(shape: ShapeRecord) -> bool:
     return shape.placeholder_type in HEADING_PLACEHOLDER_TYPES
 
@@ -197,6 +251,7 @@ def _check_shape(
     approved_hexes: set[str],
     remap: dict[str, str],
     tolerance: float,
+    bg_hex: Optional[str] = None,
 ) -> list[Violation]:
     violations: list[Violation] = []
     colors_cfg = config.get("colors", {}) or {}
@@ -300,15 +355,11 @@ def _check_shape(
     # since it's not about legibility per background, it's a fixed
     # editorial choice for that role.
     heading_always_dark = bool(contrast_cfg.get("heading_always_dark", False))
-    # Only checkable when the shape has its own resolved solid background --
-    # text sitting on an inherited/layout/no-fill background can't be
-    # evaluated here without full z-order resolution, so it's left alone
-    # rather than guessed at.
-    bg_hex = None
-    if shape.fill and shape.fill.type == "solid" and shape.fill.colors:
-        first = shape.fill.colors[0]
-        if first.hex:
-            bg_hex = first.hex
+    # `bg_hex` is resolved by the caller (`audit_deck`) via
+    # `_resolve_effective_bg_hex` -- the shape's own fill first, falling
+    # back to the nearest same-slide shape behind it in z-order for a
+    # plain textbox sitting on a separately-drawn color panel. Still
+    # `None` (left alone rather than guessed at) when neither resolves.
 
     for para in shape.paragraphs:
         full_text = "".join(r.text for r in para.runs).strip()
@@ -656,6 +707,7 @@ def audit_deck(inventory: DeckInventory, config: dict) -> list[Violation]:
     for slide in inventory.slides:
         top_shapes = slide.shapes
         all_shapes = list(iter_shapes_recursive(top_shapes))
+        top_shape_index = {s.shape_id: i for i, s in enumerate(top_shapes)}
 
         # A slide built on a layout outside the sanctioned template (e.g. a
         # bespoke layout an agency/team added on the side) isn't something
@@ -700,8 +752,9 @@ def audit_deck(inventory: DeckInventory, config: dict) -> list[Violation]:
                 )
 
         for shape in all_shapes:
+            bg_hex = _resolve_effective_bg_hex(shape, top_shapes, top_shape_index)
             violations += _check_shape(
-                shape, slide.index, slide_height_in, config, font_tables, approved_hexes, remap, tolerance
+                shape, slide.index, slide_height_in, config, font_tables, approved_hexes, remap, tolerance, bg_hex
             )
 
     return violations

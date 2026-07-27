@@ -10,6 +10,8 @@ philosophy for anything that doesn't require a live account.
 
 import json
 
+import anthropic
+import httpx
 import pytest
 from pptx import Presentation
 from pptx.util import Inches
@@ -82,6 +84,27 @@ class _FakeMessages:
 class _FakeClient:
     def __init__(self, response):
         self.messages = _FakeMessages(response)
+
+
+def _fake_api_status_error(status_code: int, message: str) -> anthropic.APIStatusError:
+    body = {"type": "error", "error": {"type": "overloaded_error", "message": message}}
+    resp = httpx.Response(
+        status_code, request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"), json=body
+    )
+    return anthropic.APIStatusError(message, response=resp, body=body)
+
+
+class _RaisingMessages:
+    def __init__(self, exc):
+        self._exc = exc
+
+    def stream(self, **kwargs):
+        raise self._exc
+
+
+class _RaisingClient:
+    def __init__(self, exc):
+        self.messages = _RaisingMessages(exc)
 
 
 def _outline_json(*items):
@@ -251,6 +274,30 @@ def test_call_claude_for_outline_raises_on_refusal():
 
     client = _FakeClient(_FakeResponse(None, stop_reason="refusal"))
     with pytest.raises(RedesignError, match="declined"):
+        call_claude_for_outline(eligible, client=client)
+
+
+def test_call_claude_for_outline_raises_clean_message_on_overloaded_error():
+    prs = new_deck()
+    slide = add_slide(prs)
+    title_run(slide).text = "T"
+    body_run(slide).text = "B"
+    eligible, _ = extract_eligible_slides(prs)
+
+    client = _RaisingClient(_fake_api_status_error(529, "Overloaded"))
+    with pytest.raises(RedesignError, match="temporarily rate-limited or overloaded"):
+        call_claude_for_outline(eligible, client=client)
+
+
+def test_call_claude_for_outline_raises_clean_message_on_bad_request_error():
+    prs = new_deck()
+    slide = add_slide(prs)
+    title_run(slide).text = "T"
+    body_run(slide).text = "B"
+    eligible, _ = extract_eligible_slides(prs)
+
+    client = _RaisingClient(_fake_api_status_error(400, "adaptive thinking is not supported on this model"))
+    with pytest.raises(RedesignError, match="Claude API error"):
         call_claude_for_outline(eligible, client=client)
 
 

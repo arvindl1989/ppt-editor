@@ -1,5 +1,6 @@
 from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN
+from pptx.util import Emu
 
 from deckguard.config import load_config, default_config_path
 from deckguard.inventory import build_inventory
@@ -462,8 +463,8 @@ def test_text_contrast_heading_already_dark_is_not_flagged():
 
 
 def test_text_contrast_not_checked_without_a_resolved_shape_background():
-    """No shape-level solid fill (plain text on the page canvas) -- can't
-    compute contrast without full z-order resolution, so it's skipped
+    """No shape-level solid fill (plain text on the page canvas), and
+    nothing behind it either -- can't compute contrast, so it's skipped
     rather than guessed at; the generic allowed-colors check still applies."""
     prs = new_deck()
     slide = add_slide(prs)
@@ -473,6 +474,45 @@ def test_text_contrast_not_checked_without_a_resolved_shape_background():
     # white isn't the fallback list's first choice, but it IS an allowed
     # color for Inter (black or white) -- so no text_color violation either
     assert by_rule(violations_for(prs), "text_color") == []
+
+
+def test_text_contrast_resolves_background_from_a_separate_shape_behind_it():
+    """Regression test for a real bug report: a plain textbox with no fill
+    of its own, drawn on top of a separately-drawn KONE Blue rectangle
+    (the common "color panel + textbox" authoring pattern), kept its
+    dark/inherited body text -- illegible on blue -- because contrast was
+    only ever checked against a shape's OWN fill. The textbox's effective
+    background must resolve to the panel behind it in z-order."""
+    prs = new_deck()
+    slide = add_slide(prs)
+    add_rectangle(slide, name="Blue panel", fill_hex="1450F5", left_in=1, top_in=1, width_in=3, height_in=2)
+    # Added after the panel -- later in document order = on top of it.
+    textbox = slide.shapes.add_textbox(Emu(int(914400 * 1.2)), Emu(int(914400 * 1.2)), Emu(int(914400 * 2)), Emu(int(914400 * 1)))
+    textbox.text_frame.text = "Principaux avantages"
+    run = textbox.text_frame.paragraphs[0].runs[0]
+    run.font.name = "Inter"
+    run.font.color.rgb = RGBColor.from_string("595959")  # the illegible grey from the report
+
+    viol = by_rule(violations_for(prs), "text_contrast")
+    assert len(viol) == 1
+    assert viol[0].shape_name == textbox.name
+    assert viol[0].details["target"] == "#FFFFFF"
+    assert viol[0].auto_fixable is True
+
+
+def test_text_contrast_background_lookup_ignores_a_non_overlapping_shape():
+    """A shape elsewhere on the slide -- not behind this textbox -- must
+    never be mistaken for its background, even if it has a solid fill."""
+    prs = new_deck()
+    slide = add_slide(prs)
+    add_rectangle(slide, name="Unrelated blue shape", fill_hex="1450F5", left_in=5, top_in=5, width_in=1, height_in=1)
+    textbox = slide.shapes.add_textbox(Emu(int(914400 * 1)), Emu(int(914400 * 1)), Emu(int(914400 * 2)), Emu(int(914400 * 1)))
+    textbox.text_frame.text = "Body copy"
+    run = textbox.text_frame.paragraphs[0].runs[0]
+    run.font.name = "Inter"
+    run.font.color.rgb = RGBColor.from_string("FFFFFF")
+
+    assert by_rule(violations_for(prs), "text_contrast") == []
 
 
 def test_unlisted_grey_panel_fill_defaults_to_secondary_off_white():

@@ -86,6 +86,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+import anthropic
 from pptx import Presentation
 
 from deckguard.compose import ComposeError, ComposeResult, Outline, build_deck, outline_from_list
@@ -302,6 +303,28 @@ class RedesignError(ComposeError):
     model response)."""
 
 
+def _stream_final_message(client, **stream_kwargs):
+    """Call `client.messages.stream(...)` and return the final message,
+    translating Anthropic's own error types into a clean `RedesignError`
+    instead of letting a raw API error dict reach the user -- a
+    `rate_limit_error`/`overloaded_error`/5xx is transient on Anthropic's
+    end and worth retrying as-is; anything else is a real request problem.
+    """
+    try:
+        with client.messages.stream(**stream_kwargs) as stream:
+            return stream.get_final_message()
+    except anthropic.APIStatusError as exc:
+        if exc.status_code == 429 or exc.status_code >= 500:
+            raise RedesignError(
+                f"Claude's API is temporarily rate-limited or overloaded (HTTP {exc.status_code}) -- "
+                "this isn't a problem with your deck, just Anthropic's servers being busy right now. "
+                "Wait a moment and try again."
+            ) from exc
+        raise RedesignError(f"Claude API error (HTTP {exc.status_code}): {exc.message}") from exc
+    except anthropic.APIConnectionError as exc:
+        raise RedesignError(f"Could not reach the Anthropic API: {exc}") from exc
+
+
 @dataclass
 class SkippedSlide:
     slide_index: int  # 1-based, original deck numbering
@@ -425,26 +448,20 @@ def call_claude_for_outline(
     exposing `.messages.stream(...)` in the Anthropic SDK shape.
     """
     if client is None:
-        try:
-            import anthropic
-        except ImportError as exc:
-            raise RedesignError(
-                "the 'anthropic' package is required for `redesign` -- run `pip install -e .` (or `pip install -r requirements.txt`)"
-            ) from exc
         key = api_key or os.environ.get("ANTHROPIC_API_KEY")
         if not key:
             raise RedesignError("ANTHROPIC_API_KEY is not set -- redesign needs an Anthropic API key")
         client = anthropic.Anthropic(api_key=key)
 
     messages = _build_messages(eligible, blank_count, brief, notes, target_slides)
-    with client.messages.stream(
+    response = _stream_final_message(
+        client,
         model=model,
         max_tokens=32000,
         thinking={"type": "adaptive"},
         output_config={"effort": effort, "format": {"type": "json_schema", "schema": OUTLINE_SCHEMA}},
         messages=messages,
-    ) as stream:
-        response = stream.get_final_message()
+    )
 
     if response.stop_reason == "refusal":
         raise RedesignError("Claude declined the redesign request (safety refusal) -- try again or adjust the brief/source deck")
@@ -581,19 +598,14 @@ def call_claude_for_brand_review(
         return [], Usage(input_tokens=0, output_tokens=0, model=model)
 
     if client is None:
-        try:
-            import anthropic
-        except ImportError as exc:
-            raise RedesignError(
-                "the 'anthropic' package is required for --review -- run `pip install -e .` (or `pip install -r requirements.txt`)"
-            ) from exc
         key = api_key or os.environ.get("ANTHROPIC_API_KEY")
         if not key:
             raise RedesignError("ANTHROPIC_API_KEY is not set -- --review needs an Anthropic API key")
         client = anthropic.Anthropic(api_key=key)
 
     messages = _build_review_messages(skipped_proposals)
-    with client.messages.stream(
+    response = _stream_final_message(
+        client,
         model=model,
         max_tokens=4000,
         # REVIEW_MODEL (Haiku 4.5) doesn't support adaptive thinking or the
@@ -601,8 +613,7 @@ def call_claude_for_brand_review(
         # the structured-output schema, unlike the outline call above.
         output_config={"format": {"type": "json_schema", "schema": REVIEW_SCHEMA}},
         messages=messages,
-    ) as stream:
-        response = stream.get_final_message()
+    )
 
     if response.stop_reason == "refusal":
         raise RedesignError("Claude declined the review request (safety refusal)")
