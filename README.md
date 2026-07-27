@@ -301,13 +301,13 @@ deckguard redesign --out from_scratch.pptx \
 
 **What's deterministic and what's AI-judged is a hard line, not a
 blur, in every one of those three modes.** Content extraction reuses
-`retemplate.py`'s own `classify_slide` verbatim — the exact same
-eligibility rules that already govern `retemplate` decide what's safe
-to touch here too, so a slide with a table, chart, embedded object, or
-more content than any layout can hold is never sent to the model at
-all, brief or no brief — it's skipped and reported, same as
-`retemplate`. The model makes exactly two kinds of judgment call, kept
-explicitly separate in its instructions:
+`retemplate.py`'s own shape-safety rules (a table, chart, embedded
+object, media, or grouped shape is never sent to the model, brief or
+no brief — skipped and reported, same as `retemplate`), but applies
+`redesign`'s own, more permissive text/image caps on top — see below
+for why those caps are shaped differently from `retemplate`'s. The
+model makes exactly two kinds of judgment call, kept explicitly
+separate in its instructions:
 
 - For a slide **with real source content**: which `kind`
   (cover/agenda/section/content/quote/statement/stat/timeline/end/
@@ -344,6 +344,20 @@ count measured.) The rules that DO stay hard skips regardless — a
 table, chart, embedded object, media, or grouped shape — are exactly
 the ones no amount of rewriting can safely reinterpret; a brief never
 overrides them.
+
+**Images are carried over, not just text.** The model is never shown
+the actual pixels — its outline schema doesn't have an `images`
+field, only an `image_count` — so which images survive is decided
+deterministically, not by the model: each output slide gets its own
+source slide's images (up to `REDESIGN_IMAGES_PER_SLIDE`, capped to
+what the org template's picture-carrying layouts actually support)
+attached back in after the model call, keyed by `source_slide_index`.
+This closes a real gap: earlier versions dropped every image from
+every redesigned slide silently, since nothing downstream had a path
+to carry raw image bytes into a layout's picture placeholder at all —
+`compose.py`'s content-layout candidates now include the org
+template's picture-carrying layouts (e.g. "Two pictures and text B"),
+and `SlideSpec.images` accepts raw bytes as well as file paths.
 
 Either way, the model's output is validated against a JSON schema
 shaped exactly like `create`'s own outline format (see

@@ -64,6 +64,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from io import BytesIO
 from pathlib import Path
 from typing import Optional
 
@@ -111,6 +112,15 @@ CONTENT_LAYOUT_CANDIDATES = [
     "Title and content A", "Title and content B",
     "Two content A", "Two content B", "Two content C", "Two content D",
     "Three content A", "Three content B", "Three content C", "Three content D",
+    # Picture-carrying candidates -- only ever picked over the text-only
+    # ones above when the slide actually needs images: match_layout scores
+    # by wasted body/picture slots, and a text-only slide with n_images=0
+    # always scores strictly better on a text-only layout (0 unused
+    # picture slots) than on any of these, so this list is additive, not a
+    # change in behavior for slides that don't carry images.
+    "Text and picture B", "Text and picture C", "Text and picture G", "Text and picture H",
+    "Text and picture A", "Text and picture F",
+    "Two pictures and text B", "Two pictures and text C", "Two pictures and text A",
 ]
 
 STAT_LAYOUT_CANDIDATES = [
@@ -137,7 +147,7 @@ class SlideSpec:
     quote_label: Optional[str] = None
     stats: list = field(default_factory=list)  # [{"number": "40M", "label": "..."}]
     milestones: list = field(default_factory=list)  # [{"label": "2024", "text": "..."}]
-    images: list = field(default_factory=list)  # file paths, filled into PICTURE placeholders in reading order
+    images: list = field(default_factory=list)  # file paths or raw image bytes, filled into PICTURE placeholders in reading order
     variant: Optional[str] = None  # picks among Cover A-F / Quote A-E / Section variants
     layout: Optional[str] = None  # escape hatch: force an exact layout name, bypassing kind-based selection
 
@@ -270,9 +280,9 @@ def _fill_title_subtitle(slide, chrome_idxs, title, subtitle) -> None:
             ph.text_frame.text = subtitle
 
 
-def _fill_images(slide, chrome_idxs, image_paths) -> None:
-    for ph, path in zip(_content_pictures(slide, chrome_idxs), image_paths):
-        ph.insert_picture(str(path))
+def _fill_images(slide, chrome_idxs, images) -> None:
+    for ph, image in zip(_content_pictures(slide, chrome_idxs), images):
+        ph.insert_picture(BytesIO(image) if isinstance(image, (bytes, bytearray)) else str(image))
 
 
 def _fill_columns(slide, chrome_idxs, blocks: list) -> None:

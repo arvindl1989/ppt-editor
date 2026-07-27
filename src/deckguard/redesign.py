@@ -45,6 +45,13 @@ logic lives:
   the model, in any of the three modes. That's exactly the split this
   project has used since Phase 1: deterministic first, AI second, and
   AI only for the one judgment call a shape-count heuristic can't make.
+- A source slide's own images are carried into its redesigned replacement
+  by `_attach_source_images`, keyed off `source_slide_index` -- this is
+  deliberately NOT something the model decides. The outline schema the
+  model fills in has no field for images at all: the model is never shown
+  the actual pixels (only an `image_count`), so it has no basis to choose
+  among them. Which images survive is a deterministic backfill after the
+  model call, capped per slide at `REDESIGN_IMAGES_PER_SLIDE`.
 
 Three ways to call `redesign_deck`, matched to the three starting points:
 
@@ -84,6 +91,17 @@ DEFAULT_MODEL = "claude-opus-5"
 # corrupted file, not to second-guess an ordinary hand-built slide.
 REDESIGN_MAX_TEXT_CHARS = 20_000
 REDESIGN_MAX_IMAGES = 12
+
+# How many of a source slide's own images get carried into its redesigned
+# replacement. Not the same cap as REDESIGN_MAX_IMAGES above (that's an
+# eligibility ceiling -- how many images before a slide is refused
+# entirely); this is a per-slide output cap, set to the most any
+# picture-carrying candidate layout in compose.py's CONTENT_LAYOUT_CANDIDATES
+# actually has PICTURE placeholders for ("Two pictures and text *" tops out
+# at 2). Keeping every image the model never even sees the pixels of and
+# has no way to curate isn't the goal here -- just not silently discarding
+# all of them, which is what happened before this existed.
+REDESIGN_IMAGES_PER_SLIDE = 2
 
 # As of this writing (see the claude-api skill's cached pricing table) --
 # used only to give the caller a rough, clearly-labeled cost estimate
@@ -427,6 +445,25 @@ def _strip_ai_only_fields(raw_slides: list) -> list:
     return [{k: v for k, v in s.items() if k != "source_slide_index"} for s in raw_slides]
 
 
+def _attach_source_images(raw_slides: list, eligible: list) -> list:
+    """Carry each source slide's own images into the outline entry built
+    from it. Which images belong to which output slide is a fact already
+    known from source_slide_index (compose.py's outline schema has no
+    field for the model to report images itself -- it's never shown the
+    pixels, so it isn't in a position to choose among them anyway); this
+    is a deterministic backfill, not a judgment call, done after the
+    model call rather than asking the model to round-trip image data it
+    never needed to see. Capped per slide at REDESIGN_IMAGES_PER_SLIDE so
+    a slide that had many images still lands on a layout match_layout can
+    actually find (see that constant's own comment)."""
+    images_by_source_index = {i: profile.images[:REDESIGN_IMAGES_PER_SLIDE] for i, profile in eligible}
+    for slide in raw_slides:
+        images = images_by_source_index.get(slide.get("source_slide_index"))
+        if images:
+            slide["images"] = images
+    return raw_slides
+
+
 def redesign_deck(
     deck_path=None,
     out_path=None,
@@ -493,6 +530,7 @@ def redesign_deck(
         api_key=api_key,
         client=client,
     )
+    raw_slides = _attach_source_images(raw_slides, eligible)
     outline = outline_from_list(_strip_ai_only_fields(raw_slides))
 
     compose_result = build_deck(outline, out_path, template_path=template_path, rules_config=rules_config)

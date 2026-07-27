@@ -11,6 +11,7 @@ philosophy for anything that doesn't require a live account.
 import json
 
 import pytest
+from pptx import Presentation
 from pptx.util import Inches
 
 from deckguard.redesign import (
@@ -22,7 +23,7 @@ from deckguard.redesign import (
     redesign_deck,
 )
 from deckguard.slide_import import default_template_path
-from tests.helpers import add_slide, body_run, new_deck, title_run
+from tests.helpers import add_picture, add_slide, body_run, make_pattern_png, new_deck, title_run
 
 TEMPLATE_PATH = default_template_path()
 pytestmark = pytest.mark.skipif(not TEMPLATE_PATH.exists(), reason="bundled template asset not present")
@@ -311,10 +312,43 @@ def test_redesign_deck_builds_a_valid_composed_deck(tmp_path):
     assert redesign_result.skipped[0].slide_index == 3
     assert redesign_result.usage.input_tokens == 2000
 
-    from pptx import Presentation
-
     out_prs = Presentation(str(out_path))
     assert len(out_prs.slides) == 2
+
+
+def test_redesign_deck_carries_source_images_into_the_redesigned_slide(tmp_path):
+    """Regression test: the model's outline schema has no field for images
+    at all (it's never shown the pixels), so images used to be silently
+    dropped for every redesigned slide -- a real bug reported against a
+    genuinely image-heavy source deck. Images should now survive, backfilled
+    deterministically by source_slide_index after the model call."""
+    prs = new_deck()
+    content = add_slide(prs)
+    title_run(content).text = "Highlights"
+    body_run(content).text = "Grew nicely"
+    img_path = make_pattern_png(tmp_path / "img.png", seed=3)
+    add_picture(content, str(img_path))
+
+    src_path = tmp_path / "source.pptx"
+    prs.save(str(src_path))
+
+    response_json = _outline_json(
+        _slide_item(1, kind="content", title="Highlights", bullets=["Grew nicely"]),
+    )
+    client = _FakeClient(_FakeResponse(response_json))
+
+    out_path = tmp_path / "redesigned.pptx"
+    compose_result, _redesign_result = redesign_deck(str(src_path), str(out_path), client=client)
+
+    assert compose_result.slide_count == 1
+    out_prs = Presentation(str(out_path))
+    blobs = []
+    for shp in out_prs.slides[0].shapes:
+        try:
+            blobs.append(shp.image.blob)
+        except (AttributeError, ValueError):
+            continue
+    assert img_path.read_bytes() in blobs
 
 
 def test_redesign_deck_raises_when_nothing_is_eligible_and_no_brief(tmp_path):

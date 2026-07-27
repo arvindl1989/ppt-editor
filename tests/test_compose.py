@@ -23,6 +23,7 @@ from deckguard.config import default_config_path, load_config
 from deckguard.inventory import build_inventory
 from deckguard.rules_engine import audit_deck
 from deckguard.slide_import import default_template_path
+from tests.helpers import make_pattern_png
 
 TEMPLATE_PATH = default_template_path()
 pytestmark = pytest.mark.skipif(not TEMPLATE_PATH.exists(), reason="bundled template asset not present")
@@ -165,6 +166,30 @@ def test_select_layout_stat_falls_back_when_more_blocks_than_any_candidate_holds
         _select_layout(huge, layouts, {})
 
 
+def test_select_layout_content_with_images_picks_a_picture_capable_layout():
+    """A plain content slide (no images) never needs a picture placeholder,
+    so it should keep picking the same text-only layout as always -- adding
+    picture-carrying candidates to CONTENT_LAYOUT_CANDIDATES must not change
+    that. Once images are present, though, a layout with enough PICTURE
+    placeholders needs to actually be selected (this used to be impossible:
+    no candidate had any picture placeholder at all, so any content-kind
+    slide with images raised "no layout fits")."""
+    layouts = _layouts_by_name()
+    no_images = _select_layout(SlideSpec(kind="content", title="T", bullets=["a", "b"]), layouts, {})
+    assert no_images == "Title and content A"
+
+    with_images = _select_layout(
+        SlideSpec(kind="content", title="T", bullets=["a", "b"], images=[b"x", b"y"]), layouts, {}
+    )
+    assert with_images in layouts
+    assert layouts[with_images].placeholders
+    pic_count = sum(
+        1 for ph in layouts[with_images].placeholders
+        if ph.placeholder_format.type is not None and ph.placeholder_format.type.name == "PICTURE"
+    )
+    assert pic_count >= 2
+
+
 # --------------------------------------------------------------------------
 # _chrome_idxs — logo/tagline placeholders are identified, not populated
 # --------------------------------------------------------------------------
@@ -220,6 +245,28 @@ def test_build_deck_populates_title_and_bullets(tmp_path):
     texts = [shp.text_frame.text for shp in slide.shapes if shp.has_text_frame and shp.text_frame.text.strip()]
     assert "Three priorities" in texts
     assert "Fast" in texts and "Safe" in texts and "Simple" in texts
+
+
+def test_build_deck_places_raw_image_bytes_not_just_file_paths(tmp_path):
+    """SlideSpec.images has always accepted file paths (what a human-written
+    YAML outline gives it); redesign.py's image carryover instead has raw
+    image bytes on hand (straight from the source deck's shapes, no temp
+    file involved) -- _fill_images needs to accept both."""
+    png_bytes = make_pattern_png(tmp_path / "src.png", seed=7).read_bytes()
+    outline = _outline(
+        SlideSpec(kind="content", title="Has pictures", bullets=["a"], images=[png_bytes]),
+    )
+    out_path = tmp_path / "deck.pptx"
+    build_deck(outline, str(out_path))
+
+    prs = Presentation(str(out_path))
+    blobs = []
+    for shp in prs.slides[0].shapes:
+        try:
+            blobs.append(shp.image.blob)
+        except (AttributeError, ValueError):
+            continue
+    assert png_bytes in blobs
 
 
 def test_build_deck_quote_slide_places_quote_and_author(tmp_path):
