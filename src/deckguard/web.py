@@ -124,43 +124,15 @@ def _open_presentation_or_error(path: Path) -> Presentation:
         raise HTTPException(status_code=400, detail=f"Could not open the file: {exc}")
 
 
-def _section(anchor: str, num: str, title: str, description: str, body: str) -> str:
-    return f"""<div class="section-head" id="{anchor}">
-  <h2><span class="kicker">{num}</span>{title}<span class="badge-working">Working</span></h2>
-  <p>{description}</p>
-</div>
-{body}"""
-
-
 @app.get("/", response_class=HTMLResponse)
 def index(_auth: None = Depends(_require_auth)):
     ai_enabled = bool(os.environ.get("ANTHROPIC_API_KEY"))
-    body = (
-        _section(
-            "fix", "1", "Fix &amp; audit",
-            "Deterministic color/font/layout/effects compliance against the org template — audit-only or "
-            "fully rewritten, with a change log either way.",
-            tpl.upload_form(),
-        )
-        + _section(
-            "learn", "2", "Learn from a reference",
-            "Hand it an old deck and an already-on-brand version of it, and it infers the color/font remap "
-            "rules to apply to other decks like it.",
-            tpl.learn_form(),
-        )
-        + _section(
-            "create", "3", "Create from an outline",
-            "Describe slides as a short YAML outline; every slide is built directly on an approved org "
-            "template layout, so there's nothing to fix afterward.",
-            tpl.compose_form(),
-        )
-        + _section(
-            "redesign", "4", "AI redesign",
-            "Re-lay-out an existing deck's own content onto approved layouts, or author a new deck from a "
-            "brief — deterministic brand mode needs no API key at all.",
-            tpl.redesign_form(ai_enabled=ai_enabled),
-        )
-    )
+    body = f"""<div class="section-head" id="tool">
+  <h2>Deck tool<span class="badge-working">Working</span></h2>
+  <p>Fix an existing deck, learn from a reference and transform onto it, compose from an outline, or let
+  Claude redesign one end to end — one dropdown picks the method.</p>
+</div>
+{tpl.unified_tool_card(ai_enabled)}"""
     return tpl.page_shell("deckguard", body, home=True)
 
 

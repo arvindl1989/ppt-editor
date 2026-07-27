@@ -68,6 +68,25 @@ def test_index_renders(tmp_path, monkeypatch):
     assert "deckguard" in resp.text
 
 
+def test_index_consolidates_all_four_methods_into_one_tool(tmp_path, monkeypatch):
+    """The landing page is one unified tool (a method dropdown + one
+    pane per method), not four separate cards -- each pane still posts
+    to its own existing route with the fields that route expects."""
+    client, _ = _client(tmp_path, monkeypatch)
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert 'id="method-select"' in resp.text
+    for method, action, field in (
+        ("fix", "/fix", 'name="file"'),
+        ("learn", "/learn", 'name="old_file"'),
+        ("create", "/create", 'name="outline"'),
+        ("redesign", "/redesign", 'name="brief"'),
+    ):
+        assert f'data-method="{method}"' in resp.text
+        assert f'action="{action}"' in resp.text
+        assert field in resp.text
+
+
 def test_audit_flow(tmp_path, monkeypatch):
     client, _ = _client(tmp_path, monkeypatch)
     deck = tmp_path / "d.pptx"

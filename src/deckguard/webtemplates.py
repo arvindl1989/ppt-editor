@@ -135,6 +135,12 @@ BASE_CSS = """
     font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
     color: var(--ok); background: var(--ok-soft); padding: 0.15rem 0.5rem; border-radius: 999px;
   }
+  .method-select-wrap { margin-bottom: 1.5rem; }
+  .method-select-wrap select {
+    font-size: 0.95rem; font-weight: 600; padding: 0.6rem 0.75rem; width: 100%; max-width: 480px;
+  }
+  .method-pane { display: none; padding-top: 0.25rem; border-top: 1px solid var(--border); }
+  .method-pane.active { display: block; }
 """
 
 KONE_LOGO_SVG = (
@@ -158,18 +164,19 @@ def _esc(v) -> str:
 def page_shell(title: str, body: str, home: bool = False) -> str:
     nav = (
         '<nav class="jump">'
-        '<a href="#fix">Fix &amp; audit</a>'
-        '<a href="#learn">Learn from reference</a>'
-        '<a href="#create">Create new</a>'
-        '<a href="#redesign">AI redesign</a>'
+        '<a href="#tool" data-method="fix">Fix &amp; audit</a>'
+        '<a href="#tool" data-method="learn">Learn from reference</a>'
+        '<a href="#tool" data-method="create">Create new</a>'
+        '<a href="#tool" data-method="redesign">AI redesign</a>'
         "</nav>"
         if home else
         '<a href="/" style="font-size:0.85rem;font-weight:600;">&larr; deckguard</a>'
     )
     lede = (
-        '<p class="lede">Every tool below is fully working. Fix or audit an existing deck, '
-        "learn new brand rules from a reference pair, compose a new deck from an outline straight "
-        "onto approved layouts, or let Claude redesign one end to end.</p>"
+        '<p class="lede">One tool, four fully working methodologies: fix or audit an existing deck, '
+        "learn new brand rules from a reference pair and transform onto them, compose a new deck from "
+        "an outline straight onto approved layouts, or let Claude redesign one end to end. Pick a method "
+        "below.</p>"
         if home else ""
     )
     return f"""<!doctype html>
@@ -187,7 +194,166 @@ def page_shell(title: str, body: str, home: bool = False) -> str:
 {body}
 <footer>Deterministic engine by default — colors, fonts, effects, alignment, layout. No content is sent to
 any AI model unless you explicitly use AI redesign, which needs its own API key set by the operator.</footer>
-</div></body></html>"""
+</div>
+<script>
+(function () {{
+  var select = document.getElementById('method-select');
+  var panes = document.querySelectorAll('#unified-tool .method-pane');
+  if (!select || !panes.length) return;
+  function show(method) {{
+    panes.forEach(function (p) {{ p.classList.toggle('active', p.dataset.method === method); }});
+  }}
+  select.addEventListener('change', function () {{ show(this.value); }});
+  document.querySelectorAll('nav.jump a[data-method]').forEach(function (a) {{
+    a.addEventListener('click', function () {{
+      select.value = a.dataset.method;
+      show(a.dataset.method);
+    }});
+  }});
+  show(select.value);
+}})();
+</script>
+</body></html>"""
+
+
+def unified_tool_card(ai_enabled: bool = True) -> str:
+    """The home page's single consolidated tool: one dropdown picks which
+    of the four working methodologies to run, each still submitting to
+    its own existing route (`/fix`, `/audit`, `/learn`, `/create`,
+    `/redesign`) with exactly the fields that route already expects --
+    this is a presentation-only consolidation, not a new backend. Each
+    method is its own independent `<form>`; showing/hiding one via CSS
+    (see `page_shell`'s script) means only the visible form's fields are
+    ever submitted or required-validated, so there's no need to toggle
+    `required` attributes by hand.
+
+    Kept entirely separate from `upload_form`/`learn_form`/
+    `compose_form`/`redesign_form` below, which stay in use for each
+    route's own error-redisplay page after a failed submission.
+    """
+    mode_options = (
+        '<option value="rewrite" selected>AI rewrite — Claude picks each slide\'s layout and lays out its '
+        "existing wording verbatim, splitting dense slides across several if needed</option>"
+        '<option value="brand">Brand only — deterministic, no API call, wording and images kept exactly as written</option>'
+    ) if ai_enabled else (
+        '<option value="brand" selected>Brand only — deterministic, no API call, wording and images kept exactly as written</option>'
+    )
+    ai_note = "" if ai_enabled else (
+        '<p class="muted" style="margin:0 0 1rem;">AI rewrite mode isn\'t enabled on this server — set '
+        '<code>ANTHROPIC_API_KEY</code> to turn it on. Brand mode below needs no key: it never touches your '
+        "wording, it just carries the deck's own text and images onto approved, on-brand layouts.</p>"
+    )
+    review_row = (
+        """<label class="checkbox-row">
+    <input type="checkbox" name="review" value="1">
+    <span><strong>AI review</strong> (brand only, needs an API key) — one small extra call that rebuilds any
+    slide reading as a divider/transition page onto the org template's Section Divider layout, and flags
+    (never auto-fixes) leftover placeholder text or an odd confidentiality notice.</span>
+  </label>"""
+        if ai_enabled else ""
+    )
+
+    return f"""<div class="card" id="unified-tool">
+<h2 style="margin-top:0;font-size:1.1rem;">The deck tool</h2>
+<p style="color:var(--ink-muted);font-size:0.88rem;margin:0 0 1.1rem;">
+  One tool, four methodologies — pick how you want to work. Everything below runs the same
+  deterministic brand-compliance engine underneath.
+</p>
+<div class="method-select-wrap">
+  <label class="field-label">Method</label>
+  <select id="method-select">
+    <option value="fix">Fix &amp; audit an existing deck</option>
+    <option value="learn">Learn from a reference, then transform</option>
+    <option value="create">Create from a YAML outline</option>
+    <option value="redesign">AI redesign (rebuild or author from a brief)</option>
+  </select>
+</div>
+
+<form class="method-pane" data-method="fix" method="post" action="/fix" enctype="multipart/form-data">
+  <p class="muted" style="margin:0 0 0.9rem;">Deterministic color/font/layout/effects compliance against the
+    org template — audit-only or fully rewritten, with a change log either way.</p>
+  <div class="drop">
+    <p>Choose a .pptx deck (max 50&nbsp;MB)</p>
+    <input type="file" name="file" accept=".pptx" required>
+    <div class="btn-row">
+      <button type="submit" class="primary" formaction="/fix">Fix deck</button>
+      <button type="submit" class="secondary" formaction="/audit">Audit only</button>
+    </div>
+  </div>
+</form>
+
+<form class="method-pane" data-method="learn" method="post" action="/learn" enctype="multipart/form-data">
+  <p class="muted" style="margin:0 0 0.9rem;">Hand it an old deck and an already-on-brand version of it: it
+    learns the color/font differences, then rebuilds the old deck onto the org's own approved layouts with
+    those changes applied — its own wording and images carried over verbatim.</p>
+  <label class="field-label">Old deck (to be fixed)</label>
+  <input type="file" name="old_file" accept=".pptx" required style="margin-bottom:1rem;">
+  <label class="field-label">Reference deck (already on-brand)</label>
+  <input type="file" name="new_file" accept=".pptx" required style="margin-bottom:1rem;">
+  <div class="btn-row"><button type="submit" class="primary">Learn &amp; transform</button></div>
+</form>
+
+<form class="method-pane" data-method="create" method="post" action="/create">
+  <p class="muted" style="margin:0 0 0.9rem;">Describe your slides as a YAML outline; every slide is built
+    directly on one of the org template's own approved layouts, so there's nothing to fix afterward. See the
+    README for the full outline schema (slide kinds: cover, agenda, section, content, quote, statement, stat,
+    timeline, end, blank). Don't want to hand-write YAML? Switch to "AI redesign" above and just describe
+    the deck in plain English instead.</p>
+  <textarea name="outline" rows="14" style="width:100%;font-family:ui-monospace,'SF Mono',Consolas,monospace;
+    font-size:0.85rem;padding:0.75rem;border-radius:8px;border:1px solid var(--border);
+    background:var(--surface);color:var(--ink);" required>{_esc(SAMPLE_OUTLINE)}</textarea>
+  <div style="height:0.75rem"></div>
+  <label class="field-label">Optional: append these slides to an existing deck instead of starting a new one</label>
+  <input type="file" name="existing_file" accept=".pptx" style="margin-bottom:1rem;">
+  <div class="btn-row"><button type="submit" class="primary">Compose deck</button></div>
+</form>
+
+<form class="method-pane" data-method="redesign" method="post" action="/redesign" enctype="multipart/form-data">
+  <p class="muted" style="margin:0 0 0.9rem;">
+    Two modes, neither ever rewords your existing content. <strong>AI rewrite</strong> works from any starting
+    point (an existing deck, a brief to fill its blank slides, or a brief alone with no deck at all) — for a
+    slide with real content, Claude only decides which layout fits it. <strong>Brand only</strong> needs an
+    existing deck and is fully deterministic. A table, chart, or embedded media is always left alone and
+    reported, never guessed at, in either mode.
+  </p>
+  {ai_note}
+  <label class="field-label">
+    Existing deck (required for Brand only; optional for AI rewrite — omit to build a new deck from just the brief below)
+  </label>
+  <input type="file" name="file" accept=".pptx" style="margin-bottom:1rem;">
+  <label class="field-label">Mode</label>
+  <select name="mode" style="display:block;margin-bottom:1rem;">{mode_options}</select>
+  {review_row}
+  <label class="field-label">Brief (AI rewrite only — required if no deck is uploaded; also authors any blank slides in an uploaded deck)</label>
+  <textarea name="brief" rows="2" placeholder="e.g. a short deck on predictive maintenance for facilities managers"
+    style="width:100%;font-size:0.85rem;padding:0.6rem;border-radius:8px;border:1px solid var(--border);
+    background:var(--surface);color:var(--ink);margin-bottom:1rem;"></textarea>
+  <label class="field-label">Optional steering notes for the model (AI rewrite only)</label>
+  <textarea name="notes" rows="2" placeholder="e.g. prefer stat slides for anything with a percentage"
+    style="width:100%;font-size:0.85rem;padding:0.6rem;border-radius:8px;border:1px solid var(--border);
+    background:var(--surface);color:var(--ink);margin-bottom:1rem;"></textarea>
+  <div style="display:flex;gap:1rem;margin-bottom:1rem;flex-wrap:wrap;">
+    <label style="font-size:0.82rem;color:var(--ink-muted);">Model (AI rewrite only)
+      <select name="model" style="display:block;margin-top:0.3rem;">
+        <option value="claude-opus-5" selected>claude-opus-5 (recommended)</option>
+        <option value="claude-sonnet-5">claude-sonnet-5 (cheaper)</option>
+      </select>
+    </label>
+    <label style="font-size:0.82rem;color:var(--ink-muted);">Effort (AI rewrite only)
+      <select name="effort" style="display:block;margin-top:0.3rem;">
+        <option value="low">low</option>
+        <option value="medium">medium</option>
+        <option value="high" selected>high</option>
+        <option value="xhigh">xhigh</option>
+      </select>
+    </label>
+    <label style="font-size:0.82rem;color:var(--ink-muted);">Target slide count (AI rewrite only)
+      <input type="number" name="slides" min="1" max="60" style="display:block;margin-top:0.3rem;width:6rem;">
+    </label>
+  </div>
+  <div class="btn-row"><button type="submit" class="primary">Redesign</button></div>
+</form>
+</div>"""
 
 
 def upload_form(error: str | None = None) -> str:
