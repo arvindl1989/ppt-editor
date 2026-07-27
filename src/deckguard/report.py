@@ -172,6 +172,7 @@ def redesign_result_to_dict(result) -> dict:
             "model": result.usage.model,
             "estimated_cost_usd": result.usage.estimated_cost_usd,
         },
+        "review_notes": list(getattr(result, "review_notes", []) or []),
     }
 
 

@@ -395,6 +395,7 @@ def _fake_redesign_deck_factory(compose_result, redesign_result):
     def fake_redesign_deck(
         deck_path, out_path, brief=None, target_slides=None, model="claude-opus-5", effort="high",
         notes=None, template_path=None, rules_config=None, api_key=None, client=None, mode="rewrite",
+        review=False, review_model=None, review_effort="low",
     ):
         from pptx import Presentation as _P
         prs = _P()

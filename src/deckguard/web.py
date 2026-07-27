@@ -62,7 +62,9 @@ async def _friendly_validation_error(request: Request, exc: RequestValidationErr
     # runs -- the one place in this app a request could still surface a
     # bare error instead of the friendly page every other failure path
     # renders. Route to whichever form is relevant by request path.
-    form = tpl.compose_form if request.url.path == "/create" else tpl.upload_form
+    form = {"/create": tpl.compose_form, "/learn": tpl.learn_form, "/redesign": tpl.redesign_form}.get(
+        request.url.path, tpl.upload_form
+    )
     return HTMLResponse(
         tpl.page_shell("deckguard", form("That request wasn't in the expected format — please use the form below.")),
         status_code=422,
@@ -122,11 +124,44 @@ def _open_presentation_or_error(path: Path) -> Presentation:
         raise HTTPException(status_code=400, detail=f"Could not open the file: {exc}")
 
 
+def _section(anchor: str, num: str, title: str, description: str, body: str) -> str:
+    return f"""<div class="section-head" id="{anchor}">
+  <h2><span class="kicker">{num}</span>{title}<span class="badge-working">Working</span></h2>
+  <p>{description}</p>
+</div>
+{body}"""
+
+
 @app.get("/", response_class=HTMLResponse)
 def index(_auth: None = Depends(_require_auth)):
     ai_enabled = bool(os.environ.get("ANTHROPIC_API_KEY"))
-    body = tpl.upload_form() + tpl.compose_form() + tpl.redesign_form(ai_enabled=ai_enabled)
-    return tpl.page_shell("deckguard", body)
+    body = (
+        _section(
+            "fix", "1", "Fix &amp; audit",
+            "Deterministic color/font/layout/effects compliance against the org template — audit-only or "
+            "fully rewritten, with a change log either way.",
+            tpl.upload_form(),
+        )
+        + _section(
+            "learn", "2", "Learn from a reference",
+            "Hand it an old deck and an already-on-brand version of it, and it infers the color/font remap "
+            "rules to apply to other decks like it.",
+            tpl.learn_form(),
+        )
+        + _section(
+            "create", "3", "Create from an outline",
+            "Describe slides as a short YAML outline; every slide is built directly on an approved org "
+            "template layout, so there's nothing to fix afterward.",
+            tpl.compose_form(),
+        )
+        + _section(
+            "redesign", "4", "AI redesign",
+            "Re-lay-out an existing deck's own content onto approved layouts, or author a new deck from a "
+            "brief — deterministic brand mode needs no API key at all.",
+            tpl.redesign_form(ai_enabled=ai_enabled),
+        )
+    )
+    return tpl.page_shell("deckguard", body, home=True)
 
 
 @app.post("/audit", response_class=HTMLResponse)
@@ -311,7 +346,7 @@ async def learn_route(
     _cleanup_old_uploads()
     for f in (old_file, new_file):
         if not f.filename or not f.filename.lower().endswith(".pptx"):
-            return tpl.page_shell("deckguard", tpl.upload_form("Please upload two .pptx files."))
+            return tpl.page_shell("deckguard", tpl.learn_form("Please upload two .pptx files."))
 
     token = uuid.uuid4().hex
     work_dir = STORAGE_ROOT / token
@@ -344,10 +379,10 @@ async def learn_route(
         )
     except HTTPException as exc:
         shutil.rmtree(work_dir, ignore_errors=True)
-        return tpl.page_shell("deckguard", tpl.upload_form(str(exc.detail)))
+        return tpl.page_shell("deckguard", tpl.learn_form(str(exc.detail)))
     except Exception as exc:  # noqa: BLE001
         shutil.rmtree(work_dir, ignore_errors=True)
-        return tpl.page_shell("deckguard", tpl.upload_form(f"Learn failed: {exc}"))
+        return tpl.page_shell("deckguard", tpl.learn_form(f"Learn failed: {exc}"))
 
     result_dict = report_mod.learn_result_to_dict(result)
     (work_dir / "learn_report.json").write_text(report_mod.to_json(result_dict), encoding="utf-8")
@@ -436,14 +471,17 @@ async def redesign_route(request: Request, _auth: None = Depends(_require_auth))
     mode = str(form.get("mode") or "rewrite")
     if mode not in ("rewrite", "brand"):
         return tpl.page_shell("deckguard", tpl.redesign_form("Invalid mode.", ai_enabled=ai_enabled))
-    # Server-opt-in only for AI rewrite: it's the one route in the app that
-    # spends the operator's own money on every request, so it never runs
-    # unless the operator has set ANTHROPIC_API_KEY themselves -- never
-    # accept a key from the client, and never let an unconfigured server
-    # silently bill anyone. Brand mode makes no API call at all, so it has
-    # no such gate.
-    if mode == "rewrite" and not ai_enabled:
+    review = str(form.get("review") or "") == "1"
+    # Server-opt-in only for anything that calls the model: it's the one part
+    # of the app that spends the operator's own money on every request, so it
+    # never runs unless the operator has set ANTHROPIC_API_KEY themselves --
+    # never accept a key from the client, and never let an unconfigured
+    # server silently bill anyone. Brand mode without --review makes no API
+    # call at all, so it has no such gate.
+    if (mode == "rewrite" or review) and not ai_enabled:
         return tpl.page_shell("deckguard", tpl.redesign_form(ai_enabled=False))
+    if review and mode != "brand":
+        return tpl.page_shell("deckguard", tpl.redesign_form("The AI review option only applies to brand mode.", ai_enabled=ai_enabled))
 
     file = form.get("file")
     has_file = isinstance(file, _FormUploadFile) and bool(file.filename)
@@ -477,7 +515,7 @@ async def redesign_route(request: Request, _auth: None = Depends(_require_auth))
         output_path = work_dir / "redesigned.pptx"
         compose_result, redesign_result = redesign_deck(
             source_path, str(output_path), brief=brief, target_slides=target_slides,
-            model=model, effort=effort, notes=notes, rules_config=config, mode=mode,
+            model=model, effort=effort, notes=notes, rules_config=config, mode=mode, review=review,
         )
     except RedesignError as exc:
         shutil.rmtree(work_dir, ignore_errors=True)
