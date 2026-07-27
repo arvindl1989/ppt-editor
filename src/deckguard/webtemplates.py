@@ -678,7 +678,8 @@ def learn_result_page(
     old_name: str,
     new_name: str,
     result_dict: dict,
-    fix_summary: dict,
+    compose_dict: dict,
+    redesign_dict: dict,
     applied_count: int,
     download_links: dict,
 ) -> str:
@@ -692,8 +693,9 @@ def learn_result_page(
     stats = f"""<div class="stat-row">
   <div class="stat"><b style="color:#1ED273">{n_high}</b><span>high-confidence</span></div>
   <div class="stat"><b style="color:#FFA023">{n_low}</b><span>low-confidence</span></div>
-  <div class="stat"><b style="color:#1ED273">{fix_summary['changes_applied']}</b><span>changes applied</span></div>
-  <div class="stat"><b>{fix_summary['manual_review_required']}</b><span>need review</span></div>
+  <div class="stat"><b style="color:#1ED273">{compose_dict['slide_count']}</b><span>slides rebuilt</span></div>
+  <div class="stat"><b>{len(redesign_dict['skipped'])}</b><span>skipped</span></div>
+  <div class="stat"><b>{len(compose_dict['manual_review'])}</b><span>need review</span></div>
 </div>"""
 
     dl = (
@@ -711,11 +713,44 @@ def learn_result_page(
             f"review them below and re-run with the CLI's <code>--min-confidence low</code> if they're correct.</p>"
         )
 
+    layouts_used = ", ".join(sorted(set(compose_dict["layouts_used"])))
+    note = (
+        f'<p class="muted" style="margin:0.5rem 0 0;">The old deck\'s own wording and images were carried over '
+        f"verbatim, rebuilt onto the org template's approved layouts (used: {_esc(layouts_used)}) with the "
+        f"color/font differences learned above applied on top.</p>"
+    )
+
+    review_notes = redesign_dict.get("review_notes") or []
+    review_section = ""
+    if review_notes:
+        items = "".join(f"<li>{_esc(n)}</li>" for n in review_notes)
+        review_section = f"""<div class="card"><h3 style="margin-top:0;font-size:0.95rem;">AI review findings ({len(review_notes)})</h3>
+<p class="muted" style="margin:0 0 0.5rem;">Flagged for a human to look at — nothing here was auto-fixed beyond divider/transition slides.</p>
+<ul style="margin:0;padding-left:1.2rem;font-size:0.88rem;">{items}</ul>
+</div>"""
+
+    skipped_rows = "".join(
+        f"<tr><td>{_esc(s['slide_index'])}</td><td>{_esc(s['reason'])}</td></tr>" for s in redesign_dict["skipped"]
+    ) or '<tr><td colspan="2" class="empty">Every slide was eligible.</td></tr>'
+
     body = f"""<div class="card"><h2 style="margin-top:0;font-size:1.05rem;">Learned — {_esc(old_name)} → {_esc(new_name)}</h2>
 {stats}
 {dl}
+{note}
 {low_note}
 </div>
+{review_section}
+<div class="card"><h3 style="margin-top:0;font-size:0.95rem;">Skipped slides ({len(redesign_dict['skipped'])})</h3>
+<p class="muted" style="margin:0 0 0.5rem;">Left untouched — carry a table, chart, embedded media, or too much text to migrate verbatim.</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Slide</th><th>Reason</th></tr></thead>
+<tbody>{skipped_rows}</tbody>
+</table></div></div>
+<div class="card"><h3 style="margin-top:0;font-size:0.95rem;">Manual review ({len(compose_dict['manual_review'])})</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Slide</th><th>Severity</th><th>Rule</th><th>Shape</th><th>Message</th><th>Fix?</th></tr></thead>
+<tbody>{_violation_rows(compose_dict['manual_review'])}</tbody>
+</table></div></div>
 <div class="card"><h3 style="margin-top:0;font-size:0.95rem;">Color differences</h3>
 <div class="table-wrap"><table>
 <thead><tr><th>Confidence</th><th>Role</th><th>Old</th><th>New</th><th>Old count</th><th>New count</th></tr></thead>

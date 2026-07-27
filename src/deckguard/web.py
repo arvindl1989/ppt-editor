@@ -353,7 +353,10 @@ async def learn_route(
     old_path = await _save_upload(old_file, work_dir, "old.pptx")
     new_path = await _save_upload(new_file, work_dir, "new.pptx")
 
+    ai_enabled = bool(os.environ.get("ANTHROPIC_API_KEY"))
     try:
+        from deckguard.redesign import redesign_deck
+
         config = _load_engine_config()
         old_prs = _open_presentation_or_error(old_path)
         new_prs = _open_presentation_or_error(new_path)
@@ -368,14 +371,18 @@ async def learn_route(
         applied = learn_mod.write_learned_to_yaml(rules_copy, result, min_confidence="high")
         updated_config = load_config(rules_copy)
 
-        old_prs_for_fix = _open_presentation_or_error(old_path)
-        output_path = work_dir / "fixed.pptx"
-        fix_report = fix_deck(
-            old_prs_for_fix,
-            updated_config,
-            source_path=old_file.filename,
-            output_path=str(output_path),
-            dry_run=False,
+        # Not just a recolor-in-place: run the SAME brand-mode engine
+        # `/redesign` uses, with the just-learned colors/fonts, so this
+        # deck lands on the org template's own approved layouts too --
+        # cover/content/end alike -- with its own wording and images
+        # carried over verbatim. `review=True` (only when an API key is
+        # configured) adds the one small AI pass for the one thing pure
+        # color/font remap can't catch -- a leftover divider/transition
+        # slide, or placeholder/confidentiality text worth a human's
+        # attention -- same as `--review` everywhere else in this app.
+        output_path = work_dir / "transformed.pptx"
+        compose_result, redesign_result = redesign_deck(
+            str(old_path), str(output_path), rules_config=updated_config, mode="brand", review=ai_enabled,
         )
     except HTTPException as exc:
         shutil.rmtree(work_dir, ignore_errors=True)
@@ -386,15 +393,16 @@ async def learn_route(
 
     result_dict = report_mod.learn_result_to_dict(result)
     (work_dir / "learn_report.json").write_text(report_mod.to_json(result_dict), encoding="utf-8")
-    fix_report_dict = report_mod.fix_report_to_dict(fix_report)
+    compose_dict = report_mod.compose_result_to_dict(compose_result)
+    redesign_dict = report_mod.redesign_result_to_dict(redesign_result)
 
     download_links = {
-        "pptx": f"/download/{token}/fixed.pptx",
+        "pptx": f"/download/{token}/transformed.pptx",
         "yaml": f"/download/{token}/brand_rules.yaml",
         "json": f"/download/{token}/learn_report.json",
     }
     body = tpl.learn_result_page(
-        old_file.filename, new_file.filename, result_dict, fix_report_dict["summary"], applied, download_links
+        old_file.filename, new_file.filename, result_dict, compose_dict, redesign_dict, applied, download_links
     )
     return tpl.page_shell(f"Learned — {old_file.filename} -> {new_file.filename}", body)
 
@@ -543,7 +551,7 @@ def download(token: str, filename: str, _auth: None = Depends(_require_auth)):
     # the exact names we ourselves wrote into that directory.
     allowed = (
         "audit.json", "fixed.pptx", "changelog.json", "changelog.md",
-        "brand_rules.yaml", "learn_report.json", "composed.pptx", "redesigned.pptx",
+        "brand_rules.yaml", "learn_report.json", "composed.pptx", "redesigned.pptx", "transformed.pptx",
     )
     if not token.isalnum() or filename not in allowed:
         raise HTTPException(status_code=404, detail="Not found")

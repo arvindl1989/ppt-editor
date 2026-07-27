@@ -491,16 +491,16 @@ def test_learn_flow_and_downloads(tmp_path, monkeypatch):
     assert "high-confidence" in resp.text
     assert "AABBCC" in resp.text and "1450F5" in resp.text.upper()
 
-    m = re.search(r'/download/([a-f0-9]+)/fixed\.pptx', resp.text)
-    assert m, "no fixed.pptx download link found in response"
+    m = re.search(r'/download/([a-f0-9]+)/transformed\.pptx', resp.text)
+    assert m, "no transformed.pptx download link found in response"
     dl_pptx = client.get(m.group(0))
     assert dl_pptx.status_code == 200
 
-    dl_yaml = client.get(m.group(0).replace("fixed.pptx", "brand_rules.yaml"))
+    dl_yaml = client.get(m.group(0).replace("transformed.pptx", "brand_rules.yaml"))
     assert dl_yaml.status_code == 200
     assert b"AABBCC" in dl_yaml.content.upper() or b"aabbcc" in dl_yaml.content.lower()
 
-    dl_json = client.get(m.group(0).replace("fixed.pptx", "learn_report.json"))
+    dl_json = client.get(m.group(0).replace("transformed.pptx", "learn_report.json"))
     assert dl_json.status_code == 200
 
 

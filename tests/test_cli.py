@@ -214,3 +214,69 @@ def test_redesign_review_rejects_rewrite_mode(tmp_path, monkeypatch):
 
     assert result.exit_code == 1
     assert "--review only applies to --mode brand" in result.output
+
+
+def _write_deck_pair_for_learn(old_path, new_path):
+    from tests.helpers import body_run
+
+    old_prs = new_deck()
+    slide = add_slide(old_prs)
+    set_run(body_run(slide), text="Body copy", font="Arial", color_hex="AABBCC")
+    old_prs.save(str(old_path))
+
+    new_prs = new_deck()
+    slide2 = add_slide(new_prs)
+    set_run(body_run(slide2), text="Body copy", font="Inter", color_hex="1450F5")
+    new_prs.save(str(new_path))
+
+
+def test_learn_transform_writes_a_rebuilt_deck(tmp_path, monkeypatch):
+    """--transform rebuilds OLD_DECK onto the org template's own approved
+    layouts using the just-learned colors/fonts -- the same engine
+    `redesign --mode brand` uses -- not just a proposals report."""
+    from deckguard.slide_import import default_template_path
+
+    if not default_template_path().exists():
+        pytest.skip("bundled template asset not present")
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    old_path = tmp_path / "old.pptx"
+    new_path = tmp_path / "new.pptx"
+    _write_deck_pair_for_learn(old_path, new_path)
+    transform_path = tmp_path / "transformed.pptx"
+
+    runner = CliRunner()
+    result = runner.invoke(
+        main, ["learn", str(old_path), str(new_path), "--transform", str(transform_path)]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert transform_path.exists()
+    assert "wrote:" in result.output
+
+
+def test_learn_review_requires_transform(tmp_path):
+    old_path = tmp_path / "old.pptx"
+    new_path = tmp_path / "new.pptx"
+    _write_deck_pair_for_learn(old_path, new_path)
+
+    runner = CliRunner()
+    result = runner.invoke(main, ["learn", str(old_path), str(new_path), "--review"])
+
+    assert result.exit_code == 1
+    assert "--review only applies together with --transform" in result.output
+
+
+def test_learn_review_requires_api_key(tmp_path, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    old_path = tmp_path / "old.pptx"
+    new_path = tmp_path / "new.pptx"
+    _write_deck_pair_for_learn(old_path, new_path)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        main, ["learn", str(old_path), str(new_path), "--transform", str(tmp_path / "out.pptx"), "--review"]
+    )
+
+    assert result.exit_code == 1
+    assert "ANTHROPIC_API_KEY is not set" in result.output

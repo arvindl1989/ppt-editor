@@ -599,21 +599,35 @@ deckguard learn legacy_deck.pptx reference_deck.pptx
 
 deckguard learn legacy_deck.pptx reference_deck.pptx --apply
 # -> writes high-confidence proposals into brand_rules.yaml (preserving
-#    its comments/formatting), then re-run `fix` to apply them
+#    its comments/formatting)
+
+deckguard learn legacy_deck.pptx reference_deck.pptx --transform out.pptx
+# -> ALSO rebuilds legacy_deck.pptx itself: same engine `redesign --mode
+#    brand` uses, so it lands on the org template's own approved layouts
+#    (cover/content/end alike), its own wording and images carried over
+#    verbatim, with the just-learned colors/fonts applied on top. Add
+#    --review for the one small AI pass (needs ANTHROPIC_API_KEY) that
+#    also catches a leftover divider slide or placeholder/confidentiality
+#    text -- same --review as `redesign --mode brand`.
 ```
 
-Low-confidence proposals are never auto-applied — re-run with
-`--min-confidence low` once you've manually confirmed one is correct.
-The web app's "Make an old deck look like a reference deck" form does
-this in one step: upload both decks, high-confidence differences are
-applied automatically, and you get back the transformed deck plus the
-updated `brand_rules.yaml` to download (the *server's* config is never
-mutated by a web request — proposals are applied to a scratch copy).
+Low-confidence proposals are never auto-applied to `--apply`/the config
+file — re-run with `--min-confidence low` once you've manually confirmed
+one is correct (this also affects which proposals `--transform` uses).
+The web app's "Learn from a reference" form does the full pipeline in
+one step: upload both decks and you get back the old deck rebuilt onto
+the org's approved layouts with the learned colors/fonts applied, plus
+the updated `brand_rules.yaml` to download (the *server's* config is
+never mutated by a web request — proposals are applied to a scratch
+copy). AI review runs automatically there whenever the server has an
+`ANTHROPIC_API_KEY` configured.
 
-This only handles color/font *styling*, not layout or structure — real
-deck revisions rarely have 1:1-matching shape names/ids between old and
-new versions, so no attempt is made to match or transplant individual
-shapes.
+The *proposal* step (plain `learn`, no `--transform`) only ever reasons
+about color/font *usage counts* — it doesn't try to match individual
+shapes between the old and new deck. `--transform`'s layout rebuild
+comes from the same deterministic `retemplate`/`redesign --mode brand`
+matching every other command in this project uses, not from anything
+learned by comparing the two input decks' structure.
 
 ## Worked example
 

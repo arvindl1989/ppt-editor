@@ -286,12 +286,36 @@ def validate_rules_cmd(rules_path: Optional[str]):
 @click.option("--min-confidence", type=click.Choice(["high", "low"]), default="high", help="Minimum confidence level to --apply.")
 @click.option("--out", "out_path", type=click.Path(dir_okay=False), default=None)
 @click.option("--format", "fmt", type=click.Choice(["json", "md"]), default="md")
-def learn(old_deck: str, new_deck: str, rules_path: Optional[str], apply_flag: bool, min_confidence: str, out_path: Optional[str], fmt: str):
+@click.option(
+    "--transform", "transform_path", type=click.Path(dir_okay=False), default=None,
+    help="Also write OLD_DECK rebuilt with the learned colors/fonts applied, onto the org template's own "
+    "approved layouts (same engine `redesign --mode brand` uses) -- its own wording and images carried over "
+    "verbatim, cover/content/end alike. Uses --min-confidence proposals regardless of whether --apply is set.",
+)
+@click.option(
+    "--review", is_flag=True, default=False,
+    help="--transform only: adds one small AI pass that rebuilds a leftover divider/transition slide onto the "
+    "org template's Section Divider layout, and flags leftover placeholder/confidentiality text. Needs an "
+    "ANTHROPIC_API_KEY.",
+)
+def learn(
+    old_deck: str, new_deck: str, rules_path: Optional[str], apply_flag: bool, min_confidence: str,
+    out_path: Optional[str], fmt: str, transform_path: Optional[str], review: bool,
+):
     """Compare OLD_DECK against an already-on-brand NEW_DECK and propose
     colors.remap/fonts.remap additions, based on usage-count correlation
     (a color/font that vanishes from OLD while a new one appears at a
     similar count is proposed as a replacement). Layout/structure is not
-    analyzed -- only color and font usage."""
+    analyzed for the proposals themselves -- only color and font usage
+    -- but --transform rebuilds OLD_DECK onto the org's own approved
+    layouts too, using the same engine `redesign --mode brand` does."""
+    if review and not transform_path:
+        console.print("[bold red]error:[/] --review only applies together with --transform.")
+        sys.exit(1)
+    if review and not os.environ.get("ANTHROPIC_API_KEY"):
+        console.print("[bold red]error:[/] ANTHROPIC_API_KEY is not set — --review needs an Anthropic API key.")
+        sys.exit(1)
+
     config = _load_rules(rules_path)
     old_prs = _open_presentation(old_deck)
     new_prs = _open_presentation(new_deck)
@@ -325,6 +349,37 @@ def learn(old_deck: str, new_deck: str, rules_path: Optional[str], apply_flag: b
             sys.exit(1)
         applied = learn_mod.write_learned_to_yaml(target_path, result, min_confidence=min_confidence)
         console.print(f"[green]applied {applied} proposal(s) to {target_path}[/]")
+
+    if transform_path:
+        from deckguard.redesign import RedesignError, redesign_deck
+
+        candidate = learn_mod.apply_learned(config, result, min_confidence=min_confidence)
+        out = Path(transform_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            compose_result, redesign_result = redesign_deck(
+                old_deck, str(out), rules_config=candidate, mode="brand", review=review,
+            )
+        except RedesignError as exc:
+            console.print(f"[bold red]error:[/] {exc}")
+            sys.exit(1)
+        console.print(
+            f"[green]wrote:[/] {out} — [cyan]{compose_result.slide_count} slide(s)[/] using layouts: "
+            f"{', '.join(sorted(set(compose_result.layouts_used)))}"
+        )
+        if redesign_result.skipped:
+            table = Table(title="Skipped (needs manual handling)")
+            table.add_column("Slide")
+            table.add_column("Reason")
+            for s in redesign_result.skipped:
+                table.add_row(str(s.slide_index), s.reason)
+            console.print(table)
+        if compose_result.manual_review:
+            console.print(f"[yellow]{len(compose_result.manual_review)} finding(s) need manual review[/]")
+        if redesign_result.review_notes:
+            console.print("[yellow]--review findings:[/]")
+            for note in redesign_result.review_notes:
+                console.print(f"  [yellow]-[/] {note}")
 
 
 @main.command()
