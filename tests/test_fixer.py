@@ -358,15 +358,52 @@ def test_fix_replaces_a_vector_logo_mark_via_old_logo_region_in(tmp_path):
 
 
 def test_fix_old_logo_region_in_unset_is_a_no_op():
-    """Unset (the default) must never touch a master -- deleting shapes
-    by position alone is only safe once a human has confirmed the
-    region, so no region configured means no shapes are ever removed."""
+    """Unset must never touch a master -- deleting shapes by position
+    alone is only safe once a human has confirmed the region, so no
+    region configured means no shapes are ever removed."""
+    from pptx.util import Inches
+
     prs = new_deck()
+    master = prs.slide_masters[0]
+    spTree = master.shapes._spTree
+    id_ = master.shapes._next_shape_id
+    spTree.add_textbox(id_, "SomeShape", Inches(11.9), Inches(0.0), Inches(1), Inches(0.5))
+    add_slide(prs)
+
+    config = {
+        "colors": {"approved": ["#1450F5"], "remap": {}},
+        "fonts": {"approved": ["Inter"], "remap": {}},
+        "typography_rules": {},
+        "logo": {"old_logo_region_in": None, "new_logo_path": str(default_config_path().parent / "assets" / "kone_logo.png")},
+        "layout": {},
+        "audit": {"fail_on": []},
+    }
+
+    report = fix_deck(prs, config, source_path="in.pptx", output_path=None, dry_run=True)
+
+    assert not any(c.rule == "old_logo_region" for c in report.changes)
+    assert any(s.name == "SomeShape" for s in master.shapes)  # left untouched
+
+
+def test_default_config_replaces_the_known_old_logo_region(tmp_path):
+    """The shipped brand_rules.yaml now ships old_logo_region_in with a
+    region confirmed against a real legacy KONE deck (see logo.py's
+    module comment) -- exercise it end to end against the same shape
+    layout that deck's master actually has, using the real default
+    config rather than a hand-built one."""
+    from pptx.util import Inches
+
+    prs = new_deck()
+    master = prs.slide_masters[0]
+    spTree = master.shapes._spTree
+    id_ = master.shapes._next_shape_id
+    spTree.add_textbox(id_, "OldWordmark", Inches(12.0), Inches(0.1), Inches(1), Inches(0.5))
     add_slide(prs)
 
     report = fix_deck(prs, CONFIG, source_path="in.pptx", output_path=None, dry_run=True)
 
-    assert not any(c.rule == "old_logo_region" for c in report.changes)
+    assert any(c.rule == "old_logo_region" and c.scope == "master" for c in report.changes)
+    assert not any(s.name == "OldWordmark" for s in master.shapes)
 
 
 def test_fix_replaces_old_logo_baked_into_a_slide_background_fill(tmp_path):

@@ -29,6 +29,25 @@ def load_config(path: str | Path) -> dict:
         raise ConfigError(f"invalid YAML in {path}: {exc}") from exc
     if not isinstance(data, dict):
         raise ConfigError(f"{path} must contain a YAML mapping at the top level")
+
+    # logo.new_logo_path is written relative to the rules file itself (see
+    # brand_rules.yaml), but every consumer downstream (fixer.py's logo
+    # replacement, both the hash-matched and region-matched paths) just
+    # does Path(new_logo_path).exists() with no base_dir of its own to
+    # resolve against -- so a relative path silently depended on the
+    # PROCESS's own current working directory at runtime, not the config
+    # file's location. That happens to match on a local checkout (cwd ==
+    # repo root) but has no reason to hold in a deployed environment,
+    # and a mismatch fails this completely silently: no error, the logo
+    # replacement step just no-ops. Resolving to absolute here, once, at
+    # load time, makes every downstream consumer's behavior independent
+    # of the process's cwd.
+    logo_cfg = data.get("logo")
+    if isinstance(logo_cfg, dict):
+        logo_path = logo_cfg.get("new_logo_path")
+        if logo_path and not Path(logo_path).is_absolute():
+            logo_cfg["new_logo_path"] = str((path.parent / logo_path).resolve())
+
     return data
 
 
