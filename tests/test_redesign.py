@@ -17,13 +17,14 @@ from pptx.util import Inches
 from deckguard.redesign import (
     RedesignError,
     Usage,
+    call_claude_for_brand_review,
     call_claude_for_outline,
     extract_eligible_slides,
     partition_skipped,
     redesign_deck,
 )
 from deckguard.slide_import import default_template_path
-from tests.helpers import add_picture, add_slide, body_run, make_pattern_png, new_deck, title_run
+from tests.helpers import add_picture, add_rectangle, add_slide, body_run, make_pattern_png, new_deck, title_run
 
 TEMPLATE_PATH = default_template_path()
 pytestmark = pytest.mark.skipif(not TEMPLATE_PATH.exists(), reason="bundled template asset not present")
@@ -515,3 +516,128 @@ def test_redesign_deck_brand_mode_rejects_a_brief(tmp_path):
 def test_redesign_deck_rejects_unknown_mode(tmp_path):
     with pytest.raises(RedesignError, match="mode must be"):
         redesign_deck(str(tmp_path / "x.pptx"), str(tmp_path / "out.pptx"), mode="bogus")
+
+
+# --------------------------------------------------------------------------
+# redesign_deck(mode="brand", review=True) -- the small, optional AI pass
+# --------------------------------------------------------------------------
+
+
+def _review_json(*items):
+    return json.dumps({"slides": list(items)})
+
+
+def _decorative_overload_deck(tmp_path, title="Appendix"):
+    """A slide with too many free-form decorative shapes to verbatim-carry
+    (retemplate's own MAX_DECORATIVE_SHAPES cap) -- disqualified regardless
+    of how little real content it has, exactly the shape a genuine
+    divider/transition slide takes in a real deck: a short title and
+    little else besides decoration."""
+    prs = new_deck()
+    slide = add_slide(prs)
+    title_run(slide).text = title
+    for _ in range(6):
+        add_rectangle(slide)
+    path = tmp_path / "source.pptx"
+    prs.save(str(path))
+    return path
+
+
+def test_call_claude_for_brand_review_parses_response():
+    from deckguard.retemplate import SlideProposal
+
+    proposal = SlideProposal(
+        slide_index=3, eligible=False, reason="too many free-form shapes to safely reflow",
+        title_preview="Appendix", body_preview=None, image_count=0,
+    )
+    response_json = _review_json({"slide_index": 3, "is_divider": True, "divider_title": "Appendix", "note": None})
+    client = _FakeClient(_FakeResponse(response_json, input_tokens=200, output_tokens=50))
+
+    raw_slides, usage = call_claude_for_brand_review([proposal], client=client)
+
+    assert raw_slides == [{"slide_index": 3, "is_divider": True, "divider_title": "Appendix", "note": None}]
+    assert usage.input_tokens == 200
+
+
+def test_call_claude_for_brand_review_no_op_with_nothing_to_review():
+    raw_slides, usage = call_claude_for_brand_review([], client=_FakeClient(_FakeResponse("{}")))
+    assert raw_slides == []
+    assert usage.input_tokens == 0
+
+
+def test_redesign_deck_brand_review_rebuilds_a_divider_slide_with_ai_suggested_title(tmp_path):
+    src_path = _decorative_overload_deck(tmp_path)
+    response_json = _review_json({"slide_index": 1, "is_divider": True, "divider_title": "Appendix", "note": None})
+    client = _FakeClient(_FakeResponse(response_json))
+
+    out_path = tmp_path / "reviewed.pptx"
+    compose_result, redesign_result = redesign_deck(
+        str(src_path), str(out_path), mode="brand", review=True, client=client
+    )
+
+    assert compose_result.slide_count == 1
+    assert "Section divider A" in compose_result.layouts_used
+    assert redesign_result.skipped == []  # rebuilt, no longer reported as skipped
+
+    out_prs = Presentation(str(out_path))
+    assert len(out_prs.slides) == 1
+    assert out_prs.slides[0].shapes.title.text_frame.text == "Appendix"
+
+
+def test_redesign_deck_brand_review_leaves_a_non_divider_slide_skipped(tmp_path):
+    """A slide with real substantial content, still ineligible for
+    verbatim carryover -- the model correctly says it's not a divider,
+    so it should stay reported as skipped, untouched."""
+    prs = new_deck()
+    slide = add_slide(prs)
+    title_run(slide).text = "Quarterly results"
+    for i in range(20):
+        box = slide.shapes.add_textbox(Inches(1), Inches(0.3 * i), Inches(3), Inches(0.25))
+        box.text_frame.text = f"Line {i}: real detailed content"
+    from deckguard.retemplate import MAX_TEXT_BLOCKS
+
+    assert 20 > MAX_TEXT_BLOCKS  # sanity: this really is ineligible for verbatim carryover
+    src_path = tmp_path / "source.pptx"
+    prs.save(str(src_path))
+
+    response_json = _review_json(
+        {"slide_index": 1, "is_divider": False, "divider_title": None, "note": "looks like a real content slide"}
+    )
+    client = _FakeClient(_FakeResponse(response_json))
+
+    out_path = tmp_path / "reviewed.pptx"
+    compose_result, redesign_result = redesign_deck(
+        str(src_path), str(out_path), mode="brand", review=True, client=client
+    )
+
+    assert compose_result.slide_count == 0
+    assert [s.slide_index for s in redesign_result.skipped] == [1]
+    assert redesign_result.review_notes == ["slide 1: looks like a real content slide"]
+
+
+def test_redesign_deck_brand_review_skips_genuinely_blank_slides():
+    """A truly empty slide has nothing for the model to judge (and
+    nothing to derive a title from without inventing one), so it's
+    excluded from the review call entirely rather than wasting a slide
+    on a guaranteed-uninteresting judgment."""
+    prs = new_deck()
+    add_slide(prs)  # genuinely blank -- EMPTY_SLIDE_REASON
+
+    class _ExplodingClient:
+        @property
+        def messages(self):
+            raise AssertionError("a genuinely blank slide should never reach the review call")
+
+    import tempfile
+    from pathlib import Path as _Path
+
+    with tempfile.TemporaryDirectory() as d:
+        src_path = _Path(d) / "source.pptx"
+        prs.save(str(src_path))
+        out_path = _Path(d) / "out.pptx"
+        redesign_deck(str(src_path), str(out_path), mode="brand", review=True, client=_ExplodingClient())
+
+
+def test_redesign_deck_review_rejects_rewrite_mode(tmp_path):
+    with pytest.raises(RedesignError, match="only applies to mode='brand'"):
+        redesign_deck(str(tmp_path / "x.pptx"), str(tmp_path / "out.pptx"), mode="rewrite", review=True)

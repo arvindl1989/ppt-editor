@@ -158,7 +158,7 @@ merges on brand compliance.
 | Command | Purpose |
 |---|---|
 | `create <outline.yaml> --out <deck.pptx>` | Generates a new deck straight onto the org template's own layouts from a YAML content outline — see "Composing a new deck" below. `--append <deck.pptx>` appends onto a copy of an existing deck instead of starting fresh. |
-| `redesign [deck] --out <deck.pptx> [--brief TEXT] [--mode rewrite\|brand]` | Two modes, see "AI-assisted redesign" below. `--mode rewrite` (default): AI-assisted counterpart to `create`, from any starting point — redesigns an existing deck's content, fills its blank slides from `--brief`, or (with no deck at all) builds one from just a brief. Needs `ANTHROPIC_API_KEY`. `--mode brand`: fully deterministic, no API key — carries `deck`'s own text/images over verbatim onto approved layouts (picked for variety) and swaps its cover/closing slide onto the current brand look. |
+| `redesign [deck] --out <deck.pptx> [--brief TEXT] [--mode rewrite\|brand] [--review]` | Two modes, see "AI-assisted redesign" below. `--mode rewrite` (default): AI-assisted counterpart to `create`, from any starting point — redesigns an existing deck's content, fills its blank slides from `--brief`, or (with no deck at all) builds one from just a brief. Needs `ANTHROPIC_API_KEY`. `--mode brand`: fully deterministic, no API key — carries `deck`'s own text/images over verbatim onto approved layouts (picked for variety) and swaps its cover/closing slide onto the current brand look. `--mode brand --review` adds one small, optional AI call that rebuilds a skipped divider/transition-style slide (e.g. "Appendix") onto the org template's own Section Divider layout — needs `ANTHROPIC_API_KEY` just for that one call. |
 | `inspect <deck>` | Full structured inventory: shapes, fills, fonts (raw + normalized), sizes, alignment, images (with perceptual hash), effects, layout/master usage. The discovery tool for growing `brand_rules.yaml` from real decks. |
 | `fix <deck>` | Applies deterministic corrections: color remap (fills, gradients, text, lines, theme), font remap (run + theme/master/layout level), logo replacement by image hash, forbidden text-effect removal, forced left-alignment. |
 | `audit <deck\|folder>` | Reports violations (slide, element, rule, severity, auto-fixable). Folder mode writes a per-deck report plus a `summary.csv`. |
@@ -451,6 +451,36 @@ mode never does, so a dense hand-built slide that `--mode rewrite`
 would happily condense stays a hard skip here, reported the same way.
 Color/font brand compliance is finished by running the same `fix_deck`
 engine `deckguard fix` uses over the whole result before returning.
+
+### `--review`: one small, optional AI call on top of `--mode brand`
+
+```bash
+export ANTHROPIC_API_KEY=sk-...   # only --review needs this; --mode brand alone doesn't
+
+deckguard redesign old_deck.pptx --out rebranded.pptx --mode brand --review
+```
+
+Brand mode's own skip list can include a real, common case it has no
+deterministic way to handle: a short divider/transition page (an
+"Appendix", "Q&A", or "Thank You" break between sections) that happens
+to be built with more decoration or shape complexity than retemplate's
+own verbatim-carryover rules allow — correctly left alone, since
+nothing in that hard-skip list is something a heuristic should guess
+its way around.
+
+`--review` adds exactly one narrowly-scoped judgment call for this:
+it looks only at slides `--mode brand` already left untouched (never a
+rebuilt slide), asks Claude a single yes/no question per slide — "does
+this read as a short divider page, and if so what should its title
+say" — and for anything answered yes, rebuilds that ONE slide onto the
+org template's own Section Divider layout with that title, taken
+verbatim from the slide's own text (never invented). Nothing else
+about the deck changes, and no other kind of edit is made — this is
+deliberately not a second `--mode rewrite`. Anything else the model
+notices worth a human's attention comes back as plain-text findings
+(`RedesignResult.review_notes`, printed by the CLI) rather than being
+silently applied — the model is shown a text preview, not a rendering,
+so its judgment there is necessarily limited to what the text reveals.
 
 ## Config reference (`brand_rules.yaml`)
 

@@ -218,10 +218,17 @@ def classify_slide(slide, slide_height_in: Optional[float] = None) -> SlideProfi
         return SlideProfile(None, [], [], False, reason)
     if title is None and not text_blocks and not images:
         return SlideProfile(None, [], [], False, EMPTY_SLIDE_REASON)
+    # Unlike the two branches above (genuinely nothing usable was ever
+    # extracted), title/text_blocks/images ARE preserved here even though
+    # the slide is ineligible -- a caller reporting *why* a slide was
+    # skipped (e.g. a title/body preview for a human, or brand mode's
+    # --review judgment call) needs to see what's actually on it, not a
+    # blanked-out profile. Nothing downstream mistakes this for
+    # "safe to transplant": every caller gates on `.eligible` first.
     if len(text_blocks) > MAX_TEXT_BLOCKS:
-        return SlideProfile(None, [], [], False, "more body text blocks than any template layout can hold")
+        return SlideProfile(title, text_blocks, images, False, "more body text blocks than any template layout can hold")
     if len(images) > MAX_IMAGES:
-        return SlideProfile(None, [], [], False, "more images than any template layout can hold")
+        return SlideProfile(title, text_blocks, images, False, "more images than any template layout can hold")
 
     return SlideProfile(title=title, text_blocks=text_blocks, images=images, eligible=True)
 
@@ -333,7 +340,13 @@ def propose_retemplate(prs, template_path=None) -> list[SlideProposal]:
     for i, slide in enumerate(prs.slides, start=1):
         profile = classify_slide(slide, slide_height_in)
         if not profile.eligible:
-            proposals.append(SlideProposal(slide_index=i, eligible=False, reason=profile.reason))
+            body_preview = _preview(profile.text_blocks[0][0][1]) if profile.text_blocks and profile.text_blocks[0] else None
+            proposals.append(
+                SlideProposal(
+                    slide_index=i, eligible=False, reason=profile.reason,
+                    title_preview=_preview(profile.title), body_preview=body_preview, image_count=len(profile.images),
+                )
+            )
             continue
         match = match_layout(profile, layout_profiles)
         if match is None:
@@ -433,14 +446,24 @@ def apply_retemplate(
 
 
 def _rebuild_accepted_slides(
-    deck_path, out_path, template_path, accepted: set, layout_by_index: dict
+    deck_path, out_path, template_path, accepted: set, layout_by_index: dict,
+    profile_overrides: Optional[dict] = None,
 ) -> None:
     """Shared slide-surgery for `apply_retemplate` and `apply_rebrand`:
     rebuild every slide index in `accepted` on the layout named in
     `layout_by_index[index]`, carrying its content over verbatim, in the
     original slide's own position -- every other slide in the deck is
     left byte-for-byte untouched. Saves to `out_path` itself.
+
+    `profile_overrides` (optional, `{index: SlideProfile}`): for an
+    index present here, this SlideProfile is used verbatim instead of
+    the one `classify_slide` would derive from that slide's own
+    content -- the one case that needs this today is rebuilding a
+    divider-like slide onto a Section Divider layout with a short
+    AI-suggested title, where the ORIGINAL content is deliberately not
+    what should end up on the new slide.
     """
+    profile_overrides = profile_overrides or {}
     needed_layouts = sorted(set(layout_by_index[i] for i in accepted))
     tmp_path = Path(out_path).with_suffix(".layouts.pptx")
     import_layouts(deck_path, str(template_path), str(tmp_path), needed_layouts)
@@ -472,7 +495,10 @@ def _rebuild_accepted_slides(
         for orig_idx in sorted(accepted):
             old_partname = original_partnames[orig_idx - 1]
             old_slide = next(s for s in prs2.slides if str(s.part.partname).lstrip("/") == old_partname)
-            profile = classify_slide(old_slide, slide_height_in)  # re-derive from the still-intact original (bytes are unchanged from `prs`)
+            if orig_idx in profile_overrides:
+                profile = profile_overrides[orig_idx]
+            else:
+                profile = classify_slide(old_slide, slide_height_in)  # re-derive from the still-intact original (bytes are unchanged from `prs`)
             layout = layout_by_name[layout_by_index[orig_idx]]
 
             new_slide = prs2.slides.add_slide(layout)
@@ -494,6 +520,31 @@ def _rebuild_accepted_slides(
         prs2.save(out_path)
     finally:
         tmp_path.unlink(missing_ok=True)
+
+
+def rebuild_slides_as_dividers(deck_path, out_path, template_path, title_by_index: dict) -> list:
+    """Rebuild specific slides (already chosen by the caller -- this
+    does no eligibility checking of its own) onto the org template's
+    Section Divider layout, bearing only a short title, discarding
+    whatever the original slide's own content was. Alternates between
+    "Section divider A" and "Section divider B" for a little visual
+    variety across multiple dividers in one deck, same anti-repeat
+    spirit as `apply_rebrand`'s own layout matching.
+
+    `title_by_index`: `{1-based slide index: title text}`. Returns the
+    sorted list of indices actually rebuilt (every key, since this
+    function doesn't second-guess the caller's choice of which slides
+    are divider-like -- that judgment already happened upstream).
+    """
+    variants = ["Section divider A", "Section divider B"]
+    layout_by_index = {idx: variants[i % len(variants)] for i, idx in enumerate(sorted(title_by_index))}
+    profile_overrides = {
+        idx: SlideProfile(title=title, text_blocks=[], images=[], eligible=True)
+        for idx, title in title_by_index.items()
+    }
+    accepted = set(title_by_index)
+    _rebuild_accepted_slides(deck_path, out_path, template_path, accepted, layout_by_index, profile_overrides)
+    return sorted(accepted)
 
 
 # The org template's current title/closing layouts -- what a confidently
@@ -564,7 +615,13 @@ def apply_rebrand(deck_path, out_path, template_path=None, rules_config: Optiona
     for i, slide in enumerate(prs.slides, start=1):
         profile = classify_slide(slide, slide_height_in)
         if not profile.eligible:
-            proposals.append(SlideProposal(slide_index=i, eligible=False, reason=profile.reason))
+            body_preview = _preview(profile.text_blocks[0][0][1]) if profile.text_blocks and profile.text_blocks[0] else None
+            proposals.append(
+                SlideProposal(
+                    slide_index=i, eligible=False, reason=profile.reason,
+                    title_preview=_preview(profile.title), body_preview=body_preview, image_count=len(profile.images),
+                )
+            )
             continue
 
         layout_name = None

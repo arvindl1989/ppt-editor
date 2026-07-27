@@ -22,6 +22,7 @@ from deckguard.retemplate import (
     classify_slide,
     match_layout,
     propose_retemplate,
+    rebuild_slides_as_dividers,
 )
 from deckguard.slide_import import default_template_path
 from tests.helpers import add_picture, add_rectangle, add_slide, body_run, make_pattern_png, new_deck, title_run
@@ -510,3 +511,53 @@ def test_apply_rebrand_runs_fix_deck_for_color_and_font_compliance(tmp_path):
 
     assert retemplate_contrast  # confirms the premise: retemplate alone leaves this unresolved
     assert not rebrand_contrast  # apply_rebrand's fix_deck pass resolves it
+
+
+# --------------------------------------------------------------------------
+# rebuild_slides_as_dividers -- brand mode's --review divider rebuild
+# --------------------------------------------------------------------------
+
+
+def test_rebuild_slides_as_dividers_replaces_content_with_just_a_title(tmp_path):
+    prs = new_deck()
+    slide1 = add_slide(prs)
+    title_run(slide1).text = "Highlights"
+    body_run(slide1).text = "Real content that must not survive"
+    slide2 = add_slide(prs)
+    title_run(slide2).text = "Appendix"
+    path = tmp_path / "src.pptx"
+    prs.save(str(path))
+    out_path = tmp_path / "out.pptx"
+
+    rebuilt = rebuild_slides_as_dividers(str(path), str(out_path), TEMPLATE_PATH, {2: "Appendix"})
+
+    assert rebuilt == [2]
+    prs2 = Presentation(str(out_path))
+    assert len(prs2.slides) == 2
+    # slide 1 completely untouched
+    assert prs2.slides[0].shapes.title.text_frame.text == "Highlights"
+    body_texts = [
+        s.text_frame.text for s in prs2.slides[0].shapes
+        if s.has_text_frame and s.text_frame.text.strip()
+    ]
+    assert "Real content that must not survive" in body_texts
+    # slide 2 rebuilt as a divider with only the given title
+    assert prs2.slides[1].slide_layout.name in ("Section divider A", "Section divider B")
+    assert prs2.slides[1].shapes.title.text_frame.text == "Appendix"
+
+
+def test_rebuild_slides_as_dividers_alternates_variants_across_multiple_dividers(tmp_path):
+    prs = new_deck()
+    for title in ("Appendix", "Q&A", "Thank You"):
+        slide = add_slide(prs)
+        title_run(slide).text = title
+    path = tmp_path / "src.pptx"
+    prs.save(str(path))
+    out_path = tmp_path / "out.pptx"
+
+    rebuilt = rebuild_slides_as_dividers(str(path), str(out_path), TEMPLATE_PATH, {1: "Appendix", 2: "Q&A", 3: "Thank You"})
+
+    assert rebuilt == [1, 2, 3]
+    prs2 = Presentation(str(out_path))
+    layouts_used = [s.slide_layout.name for s in prs2.slides]
+    assert layouts_used == ["Section divider A", "Section divider B", "Section divider A"]

@@ -505,13 +505,19 @@ def create(outline_path: str, out_path: str, append_path: Optional[str], templat
     "'brand': fully deterministic, no API key needed -- text/images carry over verbatim, only layout/variant and the cover/closing slide change.",
 )
 @click.option(
+    "--review", is_flag=True, default=False,
+    help="--mode brand only: adds one small, optional AI call that looks at slides brand mode left untouched and "
+    "rebuilds any that read as a short divider/transition page (e.g. \"Appendix\") onto the org template's own "
+    "Section Divider layout. Needs an ANTHROPIC_API_KEY (unlike the rest of --mode brand).",
+)
+@click.option(
     "--template", type=click.Path(exists=True, dir_okay=False), default=None,
     help="Org template .pptx to build on (default: the bundled KONE master template).",
 )
 @click.option("--rules", "rules_path", type=click.Path(exists=True, dir_okay=False), default=None)
 def redesign(
     deck: Optional[str], out_path: str, brief: Optional[str], target_slides: Optional[int],
-    model: str, effort: str, notes: Optional[str], mode: str, template: Optional[str], rules_path: Optional[str],
+    model: str, effort: str, notes: Optional[str], mode: str, review: bool, template: Optional[str], rules_path: Optional[str],
 ):
     """Build a deck onto the org template, from any starting point: an
     existing DECK (redesigns its real content), DECK plus --brief (also
@@ -537,15 +543,21 @@ def redesign(
 
     --mode rewrite requires an ANTHROPIC_API_KEY (the `anthropic`
     package is a base dependency) and prints the API's real token usage
-    and a rough cost estimate when done.
+    and a rough cost estimate when done. --mode brand --review also
+    needs one, for that one small extra call; --mode brand alone does not.
     """
     from deckguard.redesign import RedesignError, redesign_deck
 
-    if mode == "rewrite" and not os.environ.get("ANTHROPIC_API_KEY"):
-        console.print("[bold red]error:[/] ANTHROPIC_API_KEY is not set — `redesign` needs an Anthropic API key (or pass --mode brand, which doesn't).")
+    needs_api_key = mode == "rewrite" or review
+    if needs_api_key and not os.environ.get("ANTHROPIC_API_KEY"):
+        reason = "`redesign` needs an Anthropic API key" if mode == "rewrite" else "--review needs an Anthropic API key"
+        console.print(f"[bold red]error:[/] ANTHROPIC_API_KEY is not set — {reason}.")
         sys.exit(1)
     if mode == "brand" and not deck:
         console.print("[bold red]error:[/] --mode brand needs a DECK to work from (it never authors content).")
+        sys.exit(1)
+    if review and mode != "brand":
+        console.print("[bold red]error:[/] --review only applies to --mode brand.")
         sys.exit(1)
     if not deck and not brief:
         console.print("[bold red]error:[/] pass a DECK to redesign, --brief to build from scratch, or both.")
@@ -558,7 +570,7 @@ def redesign(
     try:
         compose_result, redesign_result = redesign_deck(
             deck, str(out), brief=brief, target_slides=target_slides, model=model, effort=effort, notes=notes,
-            template_path=template, rules_config=config, mode=mode,
+            template_path=template, rules_config=config, mode=mode, review=review,
         )
     except RedesignError as exc:
         console.print(f"[bold red]error:[/] {exc}")
@@ -578,8 +590,12 @@ def redesign(
         console.print(table)
     if compose_result.manual_review:
         console.print(f"[yellow]{len(compose_result.manual_review)} finding(s) need manual review[/]")
+    if redesign_result.review_notes:
+        console.print("[yellow]--review findings:[/]")
+        for note in redesign_result.review_notes:
+            console.print(f"  [yellow]-[/] {note}")
 
-    if mode == "brand":
+    if mode == "brand" and not review:
         console.print("[dim]mode: brand — fully deterministic, no API call made[/]")
     else:
         u = redesign_result.usage

@@ -78,12 +78,15 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
 
 from pptx import Presentation
 
 from deckguard.compose import ComposeError, ComposeResult, Outline, build_deck, outline_from_list
+from deckguard.config import default_config_path, load_config
+from deckguard.fixer import fix_deck
 from deckguard.retemplate import EMPTY_SLIDE_REASON, SlideProfile, _extract_slide_content
 
 DEFAULT_MODEL = "claude-opus-5"
@@ -307,6 +310,7 @@ class RedesignResult:
     outline: Outline
     skipped: list  # list[SkippedSlide] -- unsafe-to-touch slides, never sent to the model
     usage: Usage
+    review_notes: list = field(default_factory=list)  # brand mode --review's free-text findings, "slide N: ..."
 
 
 def _slide_height_in(prs) -> Optional[float]:
@@ -446,6 +450,150 @@ def call_claude_for_outline(
     return raw_slides, usage
 
 
+# --------------------------------------------------------------------------
+# Brand-mode's optional --review pass: a deliberately small, narrowly-scoped
+# AI call, NOT the full redesign pipeline above. It looks only at slides
+# brand mode already left untouched (real content it can't safely condense,
+# not blank/empty ones), and only ever answers one question per slide: does
+# this read as a short divider/transition/section-break page (an Appendix,
+# a Q&A break, etc.) that the org template has a purpose-built layout for,
+# and if so what should its title say. It never rewrites content, never
+# authors new slides, and never touches a slide with real body content --
+# see REVIEW_RULES below for the exact instruction.
+# --------------------------------------------------------------------------
+
+REVIEW_MODEL = "claude-haiku-4-5"
+
+REVIEW_ITEM_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "slide_index": {"type": "integer"},
+        "is_divider": {
+            "type": "boolean",
+            "description": "true only if this slide is a short section-divider/transition page (a single "
+            "short heading and little/no other real content) -- never true for a slide with real body content.",
+        },
+        "divider_title": {
+            "type": ["string", "null"],
+            "description": "Required if is_divider is true: a short title (a few words) taken from this "
+            "slide's own text -- never invented. Null if is_divider is false.",
+        },
+        "note": {
+            "type": ["string", "null"],
+            "description": "A short (one sentence) note on anything else about this slide's text that reads "
+            "as off-brand -- e.g. leftover placeholder text, a stray internal comment. Null if nothing stands out. "
+            "This is a text-only judgment call (no visual rendering is shown), so only flag what the text itself reveals.",
+        },
+    },
+    "required": ["slide_index", "is_divider", "divider_title", "note"],
+    "additionalProperties": False,
+}
+
+REVIEW_SCHEMA = {
+    "type": "object",
+    "properties": {"slides": {"type": "array", "items": REVIEW_ITEM_SCHEMA}},
+    "required": ["slides"],
+    "additionalProperties": False,
+}
+
+REVIEW_RULES = """\
+Each slide below was left untouched by a deterministic brand-compliance pass
+because it has real content that can't be safely rewritten (see its "reason"
+field for why -- e.g. more text than any layout could hold, or a genuinely
+short heading with nothing else on the slide). Your only job is to spot the
+second case: a slide that is actually a short section-divider or transition
+page -- like an "Appendix", "Q&A", "Next Steps", or "Thank You" break
+between sections -- which the org template has a purpose-built divider
+layout for, currently unused because this slide instead kept its old,
+off-brand structure.
+
+Rules:
+- Mark is_divider true ONLY for a slide whose entire real content is a
+  single short heading/label with nothing else of substance -- if it has
+  any real body paragraph, bullet list, or table/chart, is_divider is
+  always false, no matter how short the reason field's preview looks.
+- divider_title must be taken verbatim (or lightly trimmed, e.g. dropping
+  a "Subject:" prefix) from that slide's own extracted text -- never
+  invent or guess a title for a slide that doesn't already have one.
+- note is optional and text-only: you are given a text preview, not a
+  rendering of the slide, so only flag something the text itself reveals
+  (e.g. obvious leftover placeholder copy) -- never guess at colors,
+  fonts, or layout you can't see.
+- Return exactly one entry per slide listed, in the same order.
+"""
+
+
+def _describe_skipped_slide_for_review(proposal) -> dict:
+    return {
+        "slide_index": proposal.slide_index,
+        "reason": proposal.reason,
+        "title_preview": proposal.title_preview,
+        "body_preview": proposal.body_preview,
+    }
+
+
+def _build_review_messages(skipped_proposals: list) -> list:
+    slides_json = json.dumps([_describe_skipped_slide_for_review(p) for p in skipped_proposals], indent=2)
+    content = f"{REVIEW_RULES}\n\nSlides to review:\n\n{slides_json}"
+    return [{"role": "user", "content": content}]
+
+
+def call_claude_for_brand_review(
+    skipped_proposals: list,
+    model: str = REVIEW_MODEL,
+    effort: str = "low",
+    api_key: Optional[str] = None,
+    client=None,
+) -> tuple[list, "Usage"]:
+    """Send brand mode's skipped-slide previews to Claude for the narrow
+    divider-detection judgment call described above. Returns (list of
+    per-slide review dicts, Usage). `client` is the same test-injection
+    point `call_claude_for_outline` uses.
+    """
+    if not skipped_proposals:
+        return [], Usage(input_tokens=0, output_tokens=0, model=model)
+
+    if client is None:
+        try:
+            import anthropic
+        except ImportError as exc:
+            raise RedesignError(
+                "the 'anthropic' package is required for --review -- run `pip install -e .` (or `pip install -r requirements.txt`)"
+            ) from exc
+        key = api_key or os.environ.get("ANTHROPIC_API_KEY")
+        if not key:
+            raise RedesignError("ANTHROPIC_API_KEY is not set -- --review needs an Anthropic API key")
+        client = anthropic.Anthropic(api_key=key)
+
+    messages = _build_review_messages(skipped_proposals)
+    with client.messages.stream(
+        model=model,
+        max_tokens=4000,
+        thinking={"type": "adaptive"},
+        output_config={"effort": effort, "format": {"type": "json_schema", "schema": REVIEW_SCHEMA}},
+        messages=messages,
+    ) as stream:
+        response = stream.get_final_message()
+
+    if response.stop_reason == "refusal":
+        raise RedesignError("Claude declined the review request (safety refusal)")
+
+    text = next((b.text for b in response.content if b.type == "text"), None)
+    if not text:
+        raise RedesignError(f"no text content in the review response (stop_reason={response.stop_reason!r})")
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise RedesignError(f"review response was not valid JSON: {exc}") from exc
+
+    raw_slides = parsed.get("slides")
+    if not isinstance(raw_slides, list):
+        raise RedesignError("review response had no 'slides' array")
+
+    usage = Usage(input_tokens=response.usage.input_tokens, output_tokens=response.usage.output_tokens, model=model)
+    return raw_slides, usage
+
+
 def _strip_ai_only_fields(raw_slides: list) -> list:
     """source_slide_index is for our own traceability; compose.py's
     SlideSpec doesn't take it, and unknown keys are otherwise harmless
@@ -473,28 +621,86 @@ def _attach_source_images(raw_slides: list, eligible: list) -> list:
     return raw_slides
 
 
-def _rebrand_deck(deck_path, out_path, template_path=None, rules_config: Optional[dict] = None):
-    """mode='brand' path: no LLM call at all, so wrap `apply_rebrand`'s
-    result into the same `(ComposeResult, RedesignResult)` shape the
-    rewrite path returns, for a single consistent return type regardless
-    of mode. `Usage` is all zeros with `model="none"` -- there's no API
-    call to report, and `Usage.estimated_cost_usd` is already defined to
-    read as $0 for an unrecognized model."""
-    from deckguard.retemplate import apply_rebrand
+def _rebrand_deck(
+    deck_path, out_path, template_path=None, rules_config: Optional[dict] = None,
+    review: bool = False, review_model: str = REVIEW_MODEL, review_effort: str = "low",
+    api_key: Optional[str] = None, client=None,
+):
+    """mode='brand' path: no LLM call at all by default, so wrap
+    `apply_rebrand`'s result into the same `(ComposeResult,
+    RedesignResult)` shape the rewrite path returns, for a single
+    consistent return type regardless of mode. `Usage` is all zeros
+    with `model="none"` -- there's no API call to report, and
+    `Usage.estimated_cost_usd` is already defined to read as $0 for an
+    unrecognized model.
+
+    `review=True` adds the one deliberately small, optional AI step:
+    see `call_claude_for_brand_review`'s own module-level comment for
+    what it does and doesn't do. It only ever looks at slides
+    `apply_rebrand` already left untouched (never a rebuilt slide), and
+    its only possible structural action is rebuilding a divider-like
+    slide onto the org template's own Section Divider layout with a
+    short, verbatim-derived title -- nothing it finds is silently
+    discarded either: anything else worth a human's attention comes
+    back in `RedesignResult.review_notes`.
+    """
+    from deckguard.retemplate import EMPTY_SLIDE_REASON, apply_rebrand, rebuild_slides_as_dividers
+    from deckguard.slide_import import default_template_path
 
     rebrand_result = apply_rebrand(str(deck_path), out_path, template_path=template_path, rules_config=rules_config)
 
     layouts_used = [p.layout_name for p in rebrand_result.proposals if p.eligible and p.layout_name]
+    ineligible = [p for p in rebrand_result.proposals if not p.eligible]
+    skipped_indices = {p.slide_index for p in ineligible}
+    manual_review = rebrand_result.manual_review
+    usage = Usage(input_tokens=0, output_tokens=0, model="none")
+    review_notes: list = []
+    rebuilt_divider_count = 0
+
+    if review:
+        reviewable = [p for p in ineligible if p.reason != EMPTY_SLIDE_REASON]
+        if reviewable:
+            raw_review, usage = call_claude_for_brand_review(
+                reviewable, model=review_model, effort=review_effort, api_key=api_key, client=client,
+            )
+            title_by_index: dict = {}
+            for item in raw_review:
+                idx = item.get("slide_index")
+                if not isinstance(idx, int):
+                    continue
+                if item.get("is_divider") and item.get("divider_title"):
+                    title_by_index[idx] = str(item["divider_title"]).strip()
+                note = item.get("note")
+                if note:
+                    review_notes.append(f"slide {idx}: {note}")
+
+            if title_by_index:
+                effective_template = Path(template_path) if template_path else default_template_path()
+                rebuilt = rebuild_slides_as_dividers(out_path, out_path, effective_template, title_by_index)
+                rebuilt_divider_count = len(rebuilt)
+                variants = ["Section divider A", "Section divider B"]
+                layouts_used += [variants[i % len(variants)] for i in range(rebuilt_divider_count)]
+                skipped_indices -= set(rebuilt)
+
+                # The new divider slides' freshly-written title text has no
+                # explicit run color yet (same "inherited, therefore
+                # unresolved" situation apply_rebrand's own fix_deck pass
+                # already resolved once for its first rebuild round) --
+                # re-run it so these get the same brand-color guarantee.
+                config = rules_config if rules_config is not None else load_config(default_config_path())
+                reopened = Presentation(str(out_path))
+                fix_report = fix_deck(reopened, config, source_path=str(out_path), output_path=str(out_path), dry_run=False)
+                manual_review = fix_report.manual_review
+
     compose_result = ComposeResult(
-        slide_count=len(rebrand_result.transformed), layouts_used=layouts_used, manual_review=rebrand_result.manual_review
+        slide_count=len(rebrand_result.transformed) + rebuilt_divider_count,
+        layouts_used=layouts_used, manual_review=manual_review,
     )
     skipped = [
         SkippedSlide(slide_index=p.slide_index, reason=p.reason or "not eligible")
-        for p in rebrand_result.proposals if not p.eligible
+        for p in ineligible if p.slide_index in skipped_indices
     ]
-    redesign_result = RedesignResult(
-        outline=Outline(slides=[]), skipped=skipped, usage=Usage(input_tokens=0, output_tokens=0, model="none")
-    )
+    redesign_result = RedesignResult(outline=Outline(slides=[]), skipped=skipped, usage=usage, review_notes=review_notes)
     return compose_result, redesign_result
 
 
@@ -511,6 +717,9 @@ def redesign_deck(
     api_key: Optional[str] = None,
     client=None,
     mode: str = "rewrite",
+    review: bool = False,
+    review_model: str = REVIEW_MODEL,
+    review_effort: str = "low",
 ) -> tuple[ComposeResult, RedesignResult]:
     """One entry point for all three starting points:
 
@@ -544,6 +753,12 @@ def redesign_deck(
     `api_key`/`client` are all rewrite-mode-only and are rejected if
     `mode="brand"`; `deck_path` is required in brand mode since there's
     no content to rework without one.
+
+    `review` (mode='brand' only): adds one small, optional AI call --
+    see `call_claude_for_brand_review`'s own comment for exactly what
+    it does (and deliberately doesn't do). Needs an API key, unlike the
+    rest of brand mode; `api_key`/`client` are reused for it the same
+    way rewrite mode uses them.
     """
     if out_path is None:
         raise RedesignError("out_path is required")
@@ -556,7 +771,12 @@ def redesign_deck(
             raise RedesignError("mode='brand' needs a source deck (it never authors content, only re-lays-out what's there)")
         if brief is not None:
             raise RedesignError("mode='brand' never authors content, so --brief doesn't apply -- use mode='rewrite' instead")
-        return _rebrand_deck(deck_path, out_path, template_path=template_path, rules_config=rules_config)
+        return _rebrand_deck(
+            deck_path, out_path, template_path=template_path, rules_config=rules_config,
+            review=review, review_model=review_model, review_effort=review_effort, api_key=api_key, client=client,
+        )
+    if review:
+        raise RedesignError("--review only applies to mode='brand' -- mode='rewrite' already sends every eligible slide to the model")
 
     eligible: list = []
     blank_indices: list = []

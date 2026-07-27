@@ -186,3 +186,31 @@ def test_redesign_mode_brand_without_deck_errors_cleanly(tmp_path, monkeypatch):
 
     assert result.exit_code == 1
     assert "needs a DECK" in result.output
+
+
+def test_redesign_mode_brand_with_review_requires_api_key(tmp_path, monkeypatch):
+    """Unlike plain --mode brand, --review makes one small API call and
+    needs a key even though the rest of brand mode doesn't."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    deck = tmp_path / "d.pptx"
+    _write_violating_deck(deck)
+    runner = CliRunner()
+    result = runner.invoke(
+        main, ["redesign", str(deck), "--out", str(tmp_path / "out.pptx"), "--mode", "brand", "--review"]
+    )
+
+    assert result.exit_code == 1
+    assert "ANTHROPIC_API_KEY is not set" in result.output
+
+
+def test_redesign_review_rejects_rewrite_mode(tmp_path, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    deck = tmp_path / "d.pptx"
+    _write_violating_deck(deck)
+    runner = CliRunner()
+    result = runner.invoke(
+        main, ["redesign", str(deck), "--out", str(tmp_path / "out.pptx"), "--mode", "rewrite", "--review"]
+    )
+
+    assert result.exit_code == 1
+    assert "--review only applies to --mode brand" in result.output
