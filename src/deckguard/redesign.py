@@ -15,19 +15,19 @@ logic lives:
   `retemplate` -- the model never sees a slide this project's own rules
   already consider unsafe to reinterpret, no matter what mode redesign
   is running in.
-- What's DIFFERENT from `retemplate` on purpose: the cap on how much
-  TEXT a slide can carry before redesign gives up on it is much higher
-  than retemplate's own cap (`REDESIGN_MAX_TEXT_BLOCKS` vs.
-  `retemplate.MAX_TEXT_BLOCKS`). retemplate carries content over
-  VERBATIM, so its cap is the literal max placeholder count any layout
-  offers -- a real ceiling, not a style choice. redesign is already
-  trusted to rewrite/condense wording, so a slide with more raw text
-  boxes than any layout has placeholders isn't unsafe here the way it
-  is for retemplate; it's just asked to condense to the essential
-  points instead of being skipped. (An earlier version of this file
-  reused retemplate's cap unmodified, which meant real, redesignable
-  content-heavy slides were being skipped for no reason that applied to
-  redesign's own capabilities -- see `_classify_slide_for_redesign`.)
+- What's DIFFERENT from `retemplate` on purpose: retemplate caps a
+  slide at `MAX_TEXT_BLOCKS` (3) separate text boxes, because it
+  carries content over VERBATIM -- that's the literal max placeholder
+  count any layout offers, a real ceiling, not a style choice. redesign
+  has no such cap on block *count* at all: it's already trusted to
+  rewrite/condense wording, so how many boxes the original text was
+  split across is irrelevant to whether it's safe to redesign. What it
+  caps instead is total text *volume* (`REDESIGN_MAX_TEXT_CHARS`), and
+  generously -- a sanity ceiling against a pathological/corrupted file,
+  not a second-guess of an ordinary dense slide. (Two earlier versions
+  of this file got this wrong: first reusing retemplate's block-count
+  cap unmodified, then replacing it with a *higher* block-count cap
+  that was still the wrong metric -- see `_classify_slide_for_redesign`.)
 - The LLM call decides two things, and only two: per slide WITH source
   content, which `compose.py` slide *kind* best fits it (a light
   copy-edit, never inventing facts); and, for a blank slide or a bare
@@ -72,14 +72,18 @@ from deckguard.retemplate import EMPTY_SLIDE_REASON, SlideProfile, _extract_slid
 
 DEFAULT_MODEL = "claude-opus-5"
 
-# Much more permissive than retemplate.MAX_TEXT_BLOCKS/MAX_IMAGES (3/4) --
-# see the module docstring for why: redesign condenses/rewrites, it
-# doesn't carry content over verbatim, so a slide isn't unsafe here just
-# because it has more raw text boxes than any layout has placeholders.
-# These are a sanity ceiling ("even summarized, this is too much for one
-# slide"), not a literal per-layout placeholder count.
-REDESIGN_MAX_TEXT_BLOCKS = 10
-REDESIGN_MAX_IMAGES = 8
+# Deliberately NOT a cap on text-block *count* (a first cut at this used
+# one, at 10 -- still wrong, and for the same reason a cap of 3 was
+# wrong: block count doesn't measure how much there is to condense. A
+# slide split across 20 tiny caption boxes has less actual content than
+# one with 3 paragraph-sized text boxes, and redesign condenses either
+# way regardless of how the original was carved up. What actually bounds
+# the work (and the cost) is total text VOLUME, so that's what's capped
+# here -- generously, since even a genuinely dense slide is a few
+# thousand characters at most; this exists to catch a pathological or
+# corrupted file, not to second-guess an ordinary hand-built slide.
+REDESIGN_MAX_TEXT_CHARS = 20_000
+REDESIGN_MAX_IMAGES = 12
 
 # As of this writing (see the claude-api skill's cached pricing table) --
 # used only to give the caller a rough, clearly-labeled cost estimate
@@ -95,16 +99,20 @@ PRICE_PER_MTOK_USD = {
 def _classify_slide_for_redesign(slide, slide_height_in: Optional[float] = None) -> SlideProfile:
     """Same shape-safety rules as retemplate.classify_slide (a table,
     chart, embedded object, media, group, or decorative-shape overload
-    is still a hard skip -- never touched, brief or no brief), but a
-    much higher cap on text/image *count*, since redesign condenses
-    rather than carrying content over verbatim."""
+    is still a hard skip -- never touched, brief or no brief). No cap on
+    text-block *count* at all -- redesign condenses rather than carrying
+    content over verbatim, so how many boxes the original text happened
+    to be split across is irrelevant; only total text *volume* is capped
+    (generously), and image count gets a higher ceiling than
+    retemplate's, since redesign is allowed to select a subset."""
     title, text_blocks, images, reason = _extract_slide_content(slide, slide_height_in)
     if reason:
         return SlideProfile(None, [], [], False, reason)
     if title is None and not text_blocks and not images:
         return SlideProfile(None, [], [], False, EMPTY_SLIDE_REASON)
-    if len(text_blocks) > REDESIGN_MAX_TEXT_BLOCKS:
-        return SlideProfile(None, [], [], False, "far more body text than any layout could hold even condensed")
+    total_chars = sum(len(text) for block in text_blocks for _level, text in block)
+    if total_chars > REDESIGN_MAX_TEXT_CHARS:
+        return SlideProfile(None, [], [], False, "far more text than can be reasonably condensed onto one slide")
     if len(images) > REDESIGN_MAX_IMAGES:
         return SlideProfile(None, [], [], False, "far more images than any layout could hold")
     return SlideProfile(title=title, text_blocks=text_blocks, images=images, eligible=True)

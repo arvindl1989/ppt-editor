@@ -43,6 +43,19 @@ from deckguard.slide_import import (
 # and a group can hide arbitrary complexity behind a single shape.
 DISQUALIFYING_SHAPE_TYPES = {"TABLE", "CHART", "EMBEDDED_OLE_OBJECT", "MEDIA", "GROUP"}
 
+# Readable overrides for the generic "contains a <type>" skip-reason
+# phrasing below -- OLE is an acronym (stays uppercase), and the
+# indefinite article needs to be "an" before it.
+_SHAPE_TYPE_PHRASES = {"EMBEDDED_OLE_OBJECT": "an embedded OLE object"}
+
+
+def _disqualifying_shape_phrase(type_name: str) -> str:
+    if type_name in _SHAPE_TYPE_PHRASES:
+        return _SHAPE_TYPE_PHRASES[type_name]
+    label = type_name.lower().replace("_", " ")
+    article = "an" if label[:1] in "aeiou" else "a"
+    return f"{article} {label}"
+
 TITLE_PLACEHOLDER_TYPES = {"TITLE", "CENTER_TITLE"}
 BODY_PLACEHOLDER_TYPES = {"BODY", "OBJECT", "SUBTITLE"}
 
@@ -157,7 +170,7 @@ def _extract_slide_content(slide, slide_height_in: Optional[float] = None):
             type_name = "UNKNOWN"
 
         if type_name in DISQUALIFYING_SHAPE_TYPES:
-            return None, [], [], f"contains a {type_name.lower().replace('_', ' ')}"
+            return None, [], [], f"contains {_disqualifying_shape_phrase(type_name)}"
 
         ph_type_name = None
         if getattr(shape, "is_placeholder", False):

@@ -153,21 +153,37 @@ def test_extract_eligible_slides_accepts_dense_text_retemplate_would_skip():
     assert len(eligible[0][1].text_blocks) == 5
 
 
-def test_extract_eligible_slides_still_skips_truly_excessive_text():
+def test_extract_eligible_slides_accepts_many_small_boxes_regardless_of_count():
+    """Block COUNT alone, however high, is never a reason to skip --
+    only total text volume is (see test below). Twenty tiny caption
+    boxes have far less content than a handful of paragraph-sized ones,
+    and redesign condenses either way."""
     prs = new_deck()
     slide = add_slide(prs, layout_idx=6)
-    for i in range(15):  # beyond even redesign's own generous cap
-        # top kept well clear of the top/bottom margins -- a box in
-        # either margin band is treated as footer-like chrome (by
-        # design, same heuristic retemplate uses) and wouldn't count
-        # toward the text-block total at all.
+    for i in range(20):
         box = slide.shapes.add_textbox(Inches(1), Inches(1.0 + 0.3 * i), Inches(3), Inches(0.25))
         box.text_frame.text = f"Block {i}"
+
+    eligible, skipped = extract_eligible_slides(prs)
+
+    assert skipped == []
+    assert len(eligible[0][1].text_blocks) == 20
+
+
+def test_extract_eligible_slides_still_skips_truly_excessive_text_volume():
+    prs = new_deck()
+    slide = add_slide(prs, layout_idx=6)
+    # A handful of boxes, but each stuffed with enough text to blow past
+    # REDESIGN_MAX_TEXT_CHARS -- volume, not count, is what's capped.
+    huge_text = "Lorem ipsum dolor sit amet. " * 800  # ~23,000 characters
+    for i in range(3):
+        box = slide.shapes.add_textbox(Inches(1), Inches(1.0 + 2.0 * i), Inches(3), Inches(1.5))
+        box.text_frame.text = huge_text
 
     _eligible, skipped = extract_eligible_slides(prs)
 
     assert len(skipped) == 1
-    assert "even condensed" in skipped[0].reason
+    assert "reasonably condensed" in skipped[0].reason
 
 
 def test_extract_eligible_slides_still_hard_skips_tables_regardless_of_text_cap():

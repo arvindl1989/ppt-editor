@@ -324,21 +324,26 @@ A blank slide is genuinely blank (no title, text, or images at all) —
 distinguishable by `retemplate.EMPTY_SLIDE_REASON` from every other
 skip reason, which stays a hard skip regardless of a brief.
 
-**Dense, hand-built slides are condensed, not skipped.** A slide with
-more separate text boxes than any layout has placeholders isn't
-skipped just for being text-heavy — `redesign` uses its own, much more
-permissive cap (`REDESIGN_MAX_TEXT_BLOCKS`) on top of the identical
-shape-safety extraction `retemplate` uses, and instructs the model to
-condense to the most important points rather than trying to preserve
-every line. That distinction matters: `retemplate` carries content over
-*verbatim*, so its own tighter cap is a real ceiling (no layout has
-more than 3 body placeholders to carry text into unedited) — but
-`redesign` is already trusted to rewrite wording, so the same limit
-made no sense inherited unmodified, and used to cause real,
-redesignable slides to be skipped for no reason that actually applied.
-The rules that DO stay hard skips regardless — a table, chart, embedded
-object, media, or grouped shape — are exactly the ones no amount of
-rewriting can safely reinterpret; a brief never overrides them.
+**Dense, hand-built slides are condensed, not skipped, no matter how
+many text boxes they were split into.** `retemplate` caps a slide at 3
+separate text boxes because it carries content over *verbatim* — a
+real ceiling, since no layout offers more than 3 body placeholders to
+carry unedited text into. `redesign` has **no cap on text-box count at
+all**: it's already trusted to rewrite and condense wording, so how
+many boxes the original happened to be split across (3 or 30) doesn't
+matter — the model is instructed to select the most important points
+rather than trying to preserve every line, regardless of how the
+source was structured. What redesign caps instead is total text
+*volume* (`REDESIGN_MAX_TEXT_CHARS`, generously) — a sanity ceiling
+against a pathological/corrupted file, not a second-guess of an
+ordinary dense slide. (This went through two wrong iterations before
+landing here: first inheriting retemplate's block-count cap unmodified,
+then replacing it with a higher block-count cap that was still the
+wrong metric — a slide's actual content volume was never what block
+count measured.) The rules that DO stay hard skips regardless — a
+table, chart, embedded object, media, or grouped shape — are exactly
+the ones no amount of rewriting can safely reinterpret; a brief never
+overrides them.
 
 Either way, the model's output is validated against a JSON schema
 shaped exactly like `create`'s own outline format (see

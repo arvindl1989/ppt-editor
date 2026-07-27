@@ -4,11 +4,13 @@ layout, and rebuilding accepted slides on it while carrying over
 title/body text and images.
 """
 
+import io
 import zipfile
 
 import pytest
 from lxml import etree
 from pptx import Presentation
+from pptx.enum.shapes import PROG_ID
 from pptx.util import Inches
 
 from deckguard.retemplate import (
@@ -111,6 +113,12 @@ def test_classify_slide_keeps_a_similarly_small_textbox_away_from_the_edge():
     [
         (lambda slide: slide.shapes.add_table(2, 2, Inches(1), Inches(1), Inches(3), Inches(2)), "contains a table"),
         (lambda slide: slide.shapes.add_group_shape(), "contains a group"),
+        (
+            lambda slide: slide.shapes.add_ole_object(
+                io.BytesIO(b"fake xlsx bytes"), PROG_ID.XLSX, Inches(1), Inches(1)
+            ),
+            "contains an embedded OLE object",
+        ),
     ],
 )
 def test_classify_slide_disqualifies_unsafe_shape_types(build, expected_reason):
