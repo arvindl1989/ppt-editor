@@ -72,12 +72,15 @@ import yaml
 from pptx import Presentation
 from pptx.util import Pt
 
+from deckguard import effects as effects_mod
 from deckguard.config import default_config_path, load_config
 from deckguard.fixer import fix_deck
 from deckguard.retemplate import SlideProfile, _layout_profile, _set_text_block, match_layout
 from deckguard.slide_import import _delete_slide, default_template_path, import_layouts
 
 CHROME_NAME_RE = re.compile(r"logo|tagline", re.IGNORECASE)
+
+_R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 
 TITLE_PLACEHOLDER_TYPES = {"TITLE", "CENTER_TITLE"}
 BODY_PLACEHOLDER_TYPES = {"BODY", "OBJECT", "SUBTITLE"}
@@ -280,9 +283,56 @@ def _fill_title_subtitle(slide, chrome_idxs, title, subtitle) -> None:
             ph.text_frame.text = subtitle
 
 
-def _fill_images(slide, chrome_idxs, images) -> None:
-    for ph, image in zip(_content_pictures(slide, chrome_idxs), images):
-        ph.insert_picture(BytesIO(image) if isinstance(image, (bytes, bytearray)) else str(image))
+def _layout_placeholder_image_blob(layout, idx: int) -> Optional[bytes]:
+    """The image bytes behind a layout's own picture placeholder at
+    `idx`, if it has one baked in via `<a:blipFill><a:blip>` -- e.g. the
+    org template's default cover-photo stock image, which any slide-level
+    placeholder of the same idx shows through inheritance as long as its
+    own `<p:spPr>` stays empty. Used to materialize a REAL, independently
+    editable picture on the slide when no source image is available to
+    carry over (see `_fill_images`): PowerPoint only offers "Change
+    Picture" for an actual picture object belonging to the slide itself,
+    never for one it's merely inheriting from its layout -- an unfilled
+    placeholder left that way only ever offers "Save as Picture" on the
+    rendered (layout-owned) image, same limitation the raw org template
+    itself has for an untouched Cover/Outro/End slide.
+    """
+    for ph in layout.placeholders:
+        if ph.placeholder_format.idx != idx:
+            continue
+        blip = ph._element.find(".//" + effects_mod.a_qn("blip"))
+        if blip is None:
+            return None
+        rid = blip.get(f"{{{_R_NS}}}embed")
+        if not rid:
+            return None
+        try:
+            return layout.part.related_part(rid).blob
+        except KeyError:
+            return None
+    return None
+
+
+def _fill_images(slide, chrome_idxs, images, fallback_to_layout_default: bool = False) -> None:
+    pics = _content_pictures(slide, chrome_idxs)
+    layout = slide.slide_layout if fallback_to_layout_default else None
+    for i, ph in enumerate(pics):
+        if i < len(images):
+            image = images[i]
+            ph.insert_picture(BytesIO(image) if isinstance(image, (bytes, bytearray)) else str(image))
+        elif layout is not None:
+            # No source image for this placeholder -- give it the
+            # layout's own default photo as a real, editable picture
+            # instead of leaving it empty (see
+            # `_layout_placeholder_image_blob`'s own docstring for why
+            # that would silently break "Change Picture" in PowerPoint).
+            # Scoped to cover/end (see call site) -- a content slide
+            # with fewer supplied images than its layout's picture slots
+            # should just show fewer pictures, not get padded out with
+            # repeated stock photos in every leftover slot.
+            default_blob = _layout_placeholder_image_blob(layout, ph.placeholder_format.idx)
+            if default_blob is not None:
+                ph.insert_picture(BytesIO(default_blob))
 
 
 def _fill_columns(slide, chrome_idxs, blocks: list) -> None:
@@ -373,7 +423,7 @@ def _fix_new_slides(prs, config: dict, slide_indices: set) -> list:
 def _populate(new_slide, layout, spec: SlideSpec) -> None:
     chrome_idxs = _chrome_idxs(layout)
     _fill_title_subtitle(new_slide, chrome_idxs, spec.title, spec.subtitle)
-    _fill_images(new_slide, chrome_idxs, spec.images)
+    _fill_images(new_slide, chrome_idxs, spec.images, fallback_to_layout_default=spec.kind in ("cover", "end"))
 
     if spec.kind == "quote":
         _fill_quote(new_slide, chrome_idxs, spec.quote_text, spec.quote_author, spec.quote_label)

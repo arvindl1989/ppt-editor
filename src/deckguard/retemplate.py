@@ -31,6 +31,7 @@ from typing import Optional
 from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 
+from deckguard import effects as effects_mod
 from deckguard.slide_import import (
     _delete_slide,
     _move_slide,
@@ -378,9 +379,44 @@ def _set_text_block(text_frame, block: list) -> None:
         p.level = max(0, min(level, 8))
 
 
-def _transplant_content(new_slide, profile: SlideProfile) -> None:
+_R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+
+
+def _layout_placeholder_image_blob(layout, idx: int) -> Optional[bytes]:
+    """The image bytes behind a layout's own picture placeholder at
+    `idx`, if it has one baked in via `<a:blipFill><a:blip>` -- e.g. the
+    org template's default cover-photo stock image, which any slide-
+    level placeholder of the same idx shows through inheritance as long
+    as its own `<p:spPr>` stays empty. Used to materialize a REAL,
+    independently editable picture on the slide when the source slide
+    had none of its own to carry over (see `_transplant_content`):
+    PowerPoint only offers "Change Picture" for an actual picture object
+    belonging to the slide itself, never for one it's merely inheriting
+    from its layout -- an unfilled placeholder left that way only ever
+    offers "Save as Picture" on the rendered (layout-owned) image, same
+    limitation the raw org template itself has for an untouched Cover/
+    Outro/End slide.
+    """
+    for ph in layout.placeholders:
+        if ph.placeholder_format.idx != idx:
+            continue
+        blip = ph._element.find(".//" + effects_mod.a_qn("blip"))
+        if blip is None:
+            return None
+        rid = blip.get(f"{{{_R_NS}}}embed")
+        if not rid:
+            return None
+        try:
+            return layout.part.related_part(rid).blob
+        except KeyError:
+            return None
+    return None
+
+
+def _transplant_content(new_slide, profile: SlideProfile, fallback_to_layout_default: bool = False) -> None:
     body_iter = iter(profile.text_blocks)
     image_iter = iter(profile.images)
+    layout = new_slide.slide_layout if fallback_to_layout_default else None
     for ph in new_slide.placeholders:
         ph_type = ph.placeholder_format.type
         name = ph_type.name if ph_type else None
@@ -395,6 +431,17 @@ def _transplant_content(new_slide, profile: SlideProfile) -> None:
             blob = next(image_iter, None)
             if blob is not None:
                 ph.insert_picture(BytesIO(blob))
+            elif layout is not None:
+                # No source image on this slide to carry over -- give
+                # the picture placeholder the layout's own default photo
+                # as a real, editable picture instead of leaving it
+                # empty (see `_layout_placeholder_image_blob`). Scoped to
+                # the cover/end swap (see call site) -- an ordinary
+                # content slide with no image of its own should just
+                # have no picture, not get padded out with a stock photo.
+                default_blob = _layout_placeholder_image_blob(layout, ph.placeholder_format.idx)
+                if default_blob is not None:
+                    ph.insert_picture(BytesIO(default_blob))
 
 
 @dataclass
@@ -502,7 +549,8 @@ def _rebuild_accepted_slides(
             layout = layout_by_name[layout_by_index[orig_idx]]
 
             new_slide = prs2.slides.add_slide(layout)
-            _transplant_content(new_slide, profile)
+            is_cover_or_end_layout = layout_by_index[orig_idx] in (REBRAND_COVER_LAYOUT, REBRAND_END_LAYOUT)
+            _transplant_content(new_slide, profile, fallback_to_layout_default=is_cover_or_end_layout)
             new_partname_by_old[old_partname] = str(new_slide.part.partname).lstrip("/")
 
         # Phase B: now that every new slide safely exists, move each into

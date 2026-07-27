@@ -447,6 +447,29 @@ def test_apply_rebrand_never_changes_wording(tmp_path):
     assert "Keep going" in body_texts
 
 
+def test_apply_rebrand_cover_with_no_source_image_gets_a_real_editable_picture(tmp_path):
+    """Regression test for a real bug report: a cover/end slide with no
+    image of its own on the source deck left its picture placeholder
+    completely empty on the rebranded slide too -- <p:spPr/>, no
+    <p:blipFill> -- which PowerPoint renders by inheriting the LAYOUT's
+    own baked-in default photo, but only ever offers "Save as Picture"
+    for (never "Change Picture", since there's no picture object owned
+    by the slide itself). The swapped-in Cover B/Outro picture
+    placeholder must come out with a real, slide-owned picture --
+    materialized from the layout's own default image -- so it's
+    independently editable like any other picture."""
+    path = _cover_content_end_deck(tmp_path)
+    out_path = tmp_path / "out.pptx"
+
+    apply_rebrand(str(path), str(out_path), template_path=TEMPLATE_PATH)
+
+    prs2 = Presentation(str(out_path))
+    for slide in (prs2.slides[0], prs2.slides[-1]):
+        pic = next(s for s in slide.shapes if "Picture" in s.name)
+        xml = pic._element.xml
+        assert "blipFill" in xml and "r:embed" in xml, f"{slide.slide_layout.name}'s picture placeholder was left empty"
+
+
 def test_apply_rebrand_picks_varied_layouts_instead_of_repeating_one(tmp_path):
     """Several ordinary content slides, identically shaped (title + one
     body block, no images) -- without anti-repeat scoring they'd all pick

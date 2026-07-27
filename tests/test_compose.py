@@ -301,6 +301,50 @@ def test_build_deck_leaves_logo_placeholder_empty_so_it_inherits(tmp_path):
     assert logo_shape.text_frame.text == ""
 
 
+def test_build_deck_cover_with_no_image_gets_a_real_editable_picture(tmp_path):
+    """Regression test for a real bug report: a cover slide authored
+    with no source image (nothing to carry over) left its picture
+    placeholder completely empty -- <p:spPr/>, no <p:blipFill> at all --
+    which PowerPoint renders by inheriting the LAYOUT's own baked-in
+    default photo, but only ever offers "Save as Picture" for (never
+    "Change Picture", since there's no picture object on the slide
+    itself to change). The placeholder must come out with a real,
+    slide-owned picture -- materialized from the layout's own default
+    image -- so it's independently editable like any other picture."""
+    outline = _outline(SlideSpec(kind="cover", title="Cover", variant="B"), SlideSpec(kind="end", title="Thanks"))
+    out_path = tmp_path / "deck.pptx"
+    build_deck(outline, str(out_path))
+
+    prs = Presentation(str(out_path))
+    for slide in (prs.slides[0], prs.slides[-1]):
+        pic = next(s for s in slide.shapes if "Picture" in s.name)
+        xml = pic._element.xml
+        assert "blipFill" in xml and "r:embed" in xml, f"{slide.slide_layout.name}'s picture placeholder was left empty"
+
+
+def test_build_deck_content_slide_with_fewer_images_than_slots_stays_empty(tmp_path):
+    """The layout-default fallback is scoped to cover/end only -- an
+    ordinary content slide with fewer supplied images than its layout's
+    picture slots should just show fewer pictures, not get padded out
+    with a repeated stock photo in every leftover slot."""
+    png_bytes = make_pattern_png(tmp_path / "src.png", seed=3).read_bytes()
+    outline = _outline(
+        SlideSpec(kind="content", title="One photo", layout="Two pictures and text A", images=[png_bytes]),
+    )
+    out_path = tmp_path / "deck.pptx"
+    build_deck(outline, str(out_path))
+
+    prs = Presentation(str(out_path))
+    slide = prs.slides[0]
+    pics = [
+        s for s in slide.shapes
+        if s.is_placeholder and s.placeholder_format.type is not None and s.placeholder_format.type.name == "PICTURE"
+    ]
+    assert len(pics) >= 2, "test setup expects a multi-picture layout"
+    empty = [p for p in pics if "blipFill" not in p._element.xml]
+    assert empty, "expected at least one leftover picture placeholder to stay empty, not be auto-filled"
+
+
 def test_build_deck_result_is_clean_by_construction(tmp_path):
     """Text with no all-caps-looking content should audit clean --
     zero critical or major violations -- since fix_deck's pass resolves
