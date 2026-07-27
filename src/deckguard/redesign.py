@@ -8,12 +8,26 @@ since Phase 1.
 Deliberately narrow in scope, and deliberately NOT where any new brand
 logic lives:
 
-- Content extraction is 100% deterministic and reuses `retemplate.py`'s
-  own `classify_slide` verbatim -- the same eligibility rules (a table,
-  chart, embedded object, or over-full slide is left alone, never
-  guessed at) apply here exactly as they do for `retemplate`. The model
-  never sees a slide this project's own rules already consider unsafe to
-  reinterpret.
+- Content extraction reuses `retemplate.py`'s own shape-walk
+  (`_extract_slide_content`) verbatim, so a table, chart, embedded
+  object, media, group shape, or overload of free-form decorative
+  shapes is left alone and reported here exactly as it is for
+  `retemplate` -- the model never sees a slide this project's own rules
+  already consider unsafe to reinterpret, no matter what mode redesign
+  is running in.
+- What's DIFFERENT from `retemplate` on purpose: the cap on how much
+  TEXT a slide can carry before redesign gives up on it is much higher
+  than retemplate's own cap (`REDESIGN_MAX_TEXT_BLOCKS` vs.
+  `retemplate.MAX_TEXT_BLOCKS`). retemplate carries content over
+  VERBATIM, so its cap is the literal max placeholder count any layout
+  offers -- a real ceiling, not a style choice. redesign is already
+  trusted to rewrite/condense wording, so a slide with more raw text
+  boxes than any layout has placeholders isn't unsafe here the way it
+  is for retemplate; it's just asked to condense to the essential
+  points instead of being skipped. (An earlier version of this file
+  reused retemplate's cap unmodified, which meant real, redesignable
+  content-heavy slides were being skipped for no reason that applied to
+  redesign's own capabilities -- see `_classify_slide_for_redesign`.)
 - The LLM call decides two things, and only two: per slide WITH source
   content, which `compose.py` slide *kind* best fits it (a light
   copy-edit, never inventing facts); and, for a blank slide or a bare
@@ -54,9 +68,18 @@ from typing import Optional
 from pptx import Presentation
 
 from deckguard.compose import ComposeError, ComposeResult, Outline, build_deck, outline_from_list
-from deckguard.retemplate import EMPTY_SLIDE_REASON, SlideProfile, classify_slide
+from deckguard.retemplate import EMPTY_SLIDE_REASON, SlideProfile, _extract_slide_content
 
 DEFAULT_MODEL = "claude-opus-5"
+
+# Much more permissive than retemplate.MAX_TEXT_BLOCKS/MAX_IMAGES (3/4) --
+# see the module docstring for why: redesign condenses/rewrites, it
+# doesn't carry content over verbatim, so a slide isn't unsafe here just
+# because it has more raw text boxes than any layout has placeholders.
+# These are a sanity ceiling ("even summarized, this is too much for one
+# slide"), not a literal per-layout placeholder count.
+REDESIGN_MAX_TEXT_BLOCKS = 10
+REDESIGN_MAX_IMAGES = 8
 
 # As of this writing (see the claude-api skill's cached pricing table) --
 # used only to give the caller a rough, clearly-labeled cost estimate
@@ -67,6 +90,24 @@ PRICE_PER_MTOK_USD = {
     "claude-sonnet-5": {"input": 3.00, "output": 15.00},
     "claude-haiku-4-5": {"input": 1.00, "output": 5.00},
 }
+
+
+def _classify_slide_for_redesign(slide, slide_height_in: Optional[float] = None) -> SlideProfile:
+    """Same shape-safety rules as retemplate.classify_slide (a table,
+    chart, embedded object, media, group, or decorative-shape overload
+    is still a hard skip -- never touched, brief or no brief), but a
+    much higher cap on text/image *count*, since redesign condenses
+    rather than carrying content over verbatim."""
+    title, text_blocks, images, reason = _extract_slide_content(slide, slide_height_in)
+    if reason:
+        return SlideProfile(None, [], [], False, reason)
+    if title is None and not text_blocks and not images:
+        return SlideProfile(None, [], [], False, EMPTY_SLIDE_REASON)
+    if len(text_blocks) > REDESIGN_MAX_TEXT_BLOCKS:
+        return SlideProfile(None, [], [], False, "far more body text than any layout could hold even condensed")
+    if len(images) > REDESIGN_MAX_IMAGES:
+        return SlideProfile(None, [], [], False, "far more images than any layout could hold")
+    return SlideProfile(title=title, text_blocks=text_blocks, images=images, eligible=True)
 
 KIND_GUIDE = """\
 Available slide kinds and when to use each:
@@ -111,6 +152,17 @@ text below) -- these are a REDESIGN, not a rewrite:
   that slide's own extracted source text.
 - Tighten and professionalize wording (sentence case, concise, no
   filler) but preserve the original meaning.
+- Every layout has a real capacity limit (at most 3 body columns, a
+  handful of bullets each). A source slide may have far more raw text
+  than that -- it was likely built by hand with many separate text
+  boxes. When that happens, DO NOT try to preserve every line: condense
+  to the most important, representative points, the way an editor
+  would summarize a dense slide into a clean one. Losing minor detail
+  in service of a slide someone can actually read is correct behavior
+  here, not a failure -- the alternative (an unreadable wall of bullets,
+  or being skipped and left out of the deck entirely) is worse. Use
+  `columns` to organize genuinely multi-part content into up to 3
+  side-by-side groups if that reads better than one long list.
 - Return exactly one outline entry per source slide provided, in order,
   each with its correct `source_slide_index`.
 """
@@ -236,16 +288,18 @@ def _describe_slide(index: int, profile: SlideProfile) -> dict:
 
 
 def extract_eligible_slides(prs) -> tuple[list, list]:
-    """Classify every slide with the exact same eligibility rules
-    `retemplate.py` uses. Returns (eligible: list[(index, SlideProfile)],
-    skipped: list[SkippedSlide]) -- `skipped` here includes blank slides;
-    callers that need blanks split out separately should use
-    `partition_skipped`."""
+    """Classify every slide with `_classify_slide_for_redesign` --
+    retemplate's own shape-safety rules, but with redesign's own
+    (higher) cap on text/image count, since redesign condenses rather
+    than carrying content over verbatim. Returns (eligible:
+    list[(index, SlideProfile)], skipped: list[SkippedSlide]) --
+    `skipped` here includes blank slides; callers that need blanks
+    split out separately should use `partition_skipped`."""
     slide_height_in = _slide_height_in(prs)
     eligible = []
     skipped = []
     for i, slide in enumerate(prs.slides, start=1):
-        profile = classify_slide(slide, slide_height_in)
+        profile = _classify_slide_for_redesign(slide, slide_height_in)
         if profile.eligible:
             eligible.append((i, profile))
         else:

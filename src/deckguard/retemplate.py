@@ -127,9 +127,24 @@ def _is_footer_like(shape, slide_height_in: Optional[float]) -> bool:
     return top_in < 0.6 or top_in > slide_height_in - 0.75
 
 
-def classify_slide(slide, slide_height_in: Optional[float] = None) -> SlideProfile:
-    """Extract a slide's title/body-text/image content and decide
-    whether it's safe to auto-map onto a new layout at all."""
+def _extract_slide_content(slide, slide_height_in: Optional[float] = None):
+    """Walk a slide's shapes once and pull out title/text-blocks/images.
+
+    Returns (title, text_blocks, images, disqualify_reason). A non-None
+    `disqualify_reason` means the slide has content that's unsafe to
+    reinterpret in ANY context -- a table/chart/embedded-object/media/
+    group shape, or too many free-form decorative shapes to trust a
+    reflow -- and callers should treat the slide as ineligible outright,
+    ignoring the other three (empty/undefined) return values.
+
+    Deliberately does NOT apply a cap on text-block or image *count* --
+    that's caller-side policy, not a property of the shapes themselves.
+    `classify_slide` below applies retemplate's own cap (the org
+    template's actual per-layout placeholder capacity, since retemplate
+    carries content over VERBATIM); a caller willing to condense or
+    rewrite content, like redesign.py, can reasonably choose a higher
+    one against this exact same extraction.
+    """
     title = None
     text_blocks: list = []
     images: list = []
@@ -142,7 +157,7 @@ def classify_slide(slide, slide_height_in: Optional[float] = None) -> SlideProfi
             type_name = "UNKNOWN"
 
         if type_name in DISQUALIFYING_SHAPE_TYPES:
-            return SlideProfile(None, [], [], False, f"contains a {type_name.lower().replace('_', ' ')}")
+            return None, [], [], f"contains a {type_name.lower().replace('_', ' ')}"
 
         ph_type_name = None
         if getattr(shape, "is_placeholder", False):
@@ -176,8 +191,18 @@ def classify_slide(slide, slide_height_in: Optional[float] = None) -> SlideProfi
 
         decorative += 1
         if decorative > MAX_DECORATIVE_SHAPES:
-            return SlideProfile(None, [], [], False, "too many free-form shapes to safely reflow")
+            return None, [], [], "too many free-form shapes to safely reflow"
 
+    return title, text_blocks, images, None
+
+
+def classify_slide(slide, slide_height_in: Optional[float] = None) -> SlideProfile:
+    """Extract a slide's title/body-text/image content and decide
+    whether it's safe to auto-map onto a new layout at all, under
+    retemplate's own (verbatim-carryover) capacity rules."""
+    title, text_blocks, images, reason = _extract_slide_content(slide, slide_height_in)
+    if reason:
+        return SlideProfile(None, [], [], False, reason)
     if title is None and not text_blocks and not images:
         return SlideProfile(None, [], [], False, EMPTY_SLIDE_REASON)
     if len(text_blocks) > MAX_TEXT_BLOCKS:

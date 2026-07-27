@@ -133,6 +133,56 @@ def test_extract_eligible_slides_empty_deck_slide_is_skipped():
     assert len(skipped) == 1
 
 
+def test_extract_eligible_slides_accepts_dense_text_retemplate_would_skip():
+    """Regression test: a hand-built slide with more text boxes than any
+    layout has placeholders used to be skipped by redesign too (it
+    reused retemplate.classify_slide's MAX_TEXT_BLOCKS=3 cap verbatim),
+    even though redesign is allowed to condense wording and retemplate
+    is not. redesign should accept this and let the model condense it,
+    not skip it."""
+    prs = new_deck()
+    slide = add_slide(prs, layout_idx=6)
+    for i in range(5):  # one more than retemplate.MAX_TEXT_BLOCKS (3)
+        box = slide.shapes.add_textbox(Inches(1), Inches(1 + i), Inches(3), Inches(0.5))
+        box.text_frame.text = f"Block {i}"
+
+    eligible, skipped = extract_eligible_slides(prs)
+
+    assert len(eligible) == 1
+    assert skipped == []
+    assert len(eligible[0][1].text_blocks) == 5
+
+
+def test_extract_eligible_slides_still_skips_truly_excessive_text():
+    prs = new_deck()
+    slide = add_slide(prs, layout_idx=6)
+    for i in range(15):  # beyond even redesign's own generous cap
+        # top kept well clear of the top/bottom margins -- a box in
+        # either margin band is treated as footer-like chrome (by
+        # design, same heuristic retemplate uses) and wouldn't count
+        # toward the text-block total at all.
+        box = slide.shapes.add_textbox(Inches(1), Inches(1.0 + 0.3 * i), Inches(3), Inches(0.25))
+        box.text_frame.text = f"Block {i}"
+
+    _eligible, skipped = extract_eligible_slides(prs)
+
+    assert len(skipped) == 1
+    assert "even condensed" in skipped[0].reason
+
+
+def test_extract_eligible_slides_still_hard_skips_tables_regardless_of_text_cap():
+    """A brief -- or redesign's higher text cap -- never overrides the
+    shape-type safety rules shared with retemplate."""
+    prs = new_deck()
+    slide = add_slide(prs, layout_idx=6)
+    slide.shapes.add_table(2, 2, Inches(1), Inches(1), Inches(3), Inches(2))
+
+    _eligible, skipped = extract_eligible_slides(prs)
+
+    assert len(skipped) == 1
+    assert "table" in skipped[0].reason
+
+
 # --------------------------------------------------------------------------
 # call_claude_for_outline
 # --------------------------------------------------------------------------
