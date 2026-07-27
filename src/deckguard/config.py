@@ -177,6 +177,12 @@ def validate_config(config: dict, base_dir: str | Path = ".") -> list[str]:
         if not resolved.exists():
             errors.append(f"logo.new_logo_path does not exist: {resolved}")
 
+    old_logo_region = logo_cfg.get("old_logo_region_in")
+    if old_logo_region is not None:
+        valid_shape = isinstance(old_logo_region, list) and len(old_logo_region) == 4
+        if not valid_shape or not all(isinstance(v, (int, float)) and v >= 0 for v in old_logo_region):
+            errors.append("logo.old_logo_region_in must be a list of 4 non-negative numbers: [left, top, width, height] in inches")
+
     layout_cfg = config.get("layout", {}) or {}
     slide_size = layout_cfg.get("slide_size")
     if slide_size not in (None, "16:9", "4:3"):

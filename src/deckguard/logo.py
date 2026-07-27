@@ -133,3 +133,58 @@ def replace_background_image(part, blip_element, new_image_path: str) -> None:
     """Swap a page-level background-fill image found via `find_background_blip`."""
     image_part, rId = part.get_or_add_image_part(new_image_path)
     blip_element.set(_r_embed_attr(), rId)
+
+
+def find_shapes_in_region(shapes, region_emu: tuple) -> list:
+    """Top-level shapes (deliberately NOT recursing into groups -- a
+    logo lockup built as a group is one match, not each of its individual
+    paths) whose own bounding box is fully contained within
+    `region_emu = (left, top, width, height)`.
+
+    Exists for the case `find_old_logo_matches` can't handle at all: an
+    old brand mark that isn't a raster picture, so there's no image to
+    perceptual-hash -- e.g. a wordmark drawn as vector freeform shapes
+    directly on a slide master. A logo's one reliable property across
+    however differently it was constructed is that it sits in a fixed,
+    small corner region of every slide -- so unlike hash matching (which
+    identifies WHAT the old logo looks like), this identifies WHERE it
+    lives, config-driven and opt-in (`logo.old_logo_region_in`) for the
+    same reason `old_logo_hashes` is opt-in: guessing at removing
+    shapes from a master, without a human confirming the region first,
+    is exactly the kind of silent guess this project avoids everywhere
+    else.
+    """
+    r_left, r_top, r_width, r_height = region_emu
+    r_right, r_bottom = r_left + r_width, r_top + r_height
+    matches = []
+    for shape in shapes:
+        left, top, width, height = shape.left, shape.top, shape.width, shape.height
+        if None in (left, top, width, height):
+            continue
+        if left >= r_left and top >= r_top and (left + width) <= r_right and (top + height) <= r_bottom:
+            matches.append(shape)
+    return matches
+
+
+def replace_shapes_in_region_with_logo(shape_container, matches: list, new_image_path: str, region_emu: tuple) -> None:
+    """Delete every shape in `matches` from `shape_container` (a
+    master/layout/slide's own `.shapes`) and insert the new logo image
+    in their place, sized to fit within `region_emu` preserving its
+    native aspect ratio (never stretched), anchored to the region's
+    top-left corner.
+    """
+    r_left, r_top, r_width, r_height = region_emu
+    spTree = shape_container._spTree
+    for shape in matches:
+        spTree.remove(shape._element)
+
+    image_part, rId = shape_container.part.get_or_add_image_part(new_image_path)
+    native_width, native_height = image_part.image.size
+    scale = min(r_width / native_width, r_height / native_height)
+    cx, cy = int(native_width * scale), int(native_height * scale)
+    left = r_left + (r_width - cx) // 2
+    top = r_top + (r_height - cy) // 2
+
+    id_ = shape_container._next_shape_id
+    name = "Picture %d" % (id_ - 1)
+    spTree.add_pic(id_, name, image_part.desc, rId, left, top, cx, cy)

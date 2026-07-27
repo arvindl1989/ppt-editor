@@ -35,6 +35,38 @@ def test_validate_rejects_bad_hex(tmp_path):
     assert any("invalid hex" in e for e in errors)
 
 
+def test_validate_rejects_malformed_old_logo_region_in(tmp_path):
+    (tmp_path / "assets").mkdir()
+    (tmp_path / "assets" / "logo.png").write_bytes(b"\x89PNG\r\n")
+    config = {
+        "brand": {"name": "X"},
+        "colors": {"approved": ["#1450F5"], "remap": {}},
+        "fonts": {"approved": ["Inter"], "remap": {}},
+        "typography_rules": {},
+        "logo": {"new_logo_path": "assets/logo.png", "old_logo_region_in": [1, 2, -3]},
+        "layout": {},
+        "audit": {},
+    }
+    errors = validate_config(config, base_dir=tmp_path)
+    assert any("old_logo_region_in" in e for e in errors)
+
+
+def test_validate_accepts_a_well_formed_old_logo_region_in(tmp_path):
+    (tmp_path / "assets").mkdir()
+    (tmp_path / "assets" / "logo.png").write_bytes(b"\x89PNG\r\n")
+    config = {
+        "brand": {"name": "X"},
+        "colors": {"approved": ["#1450F5"], "remap": {}},
+        "fonts": {"approved": ["Inter"], "remap": {}},
+        "typography_rules": {},
+        "logo": {"new_logo_path": "assets/logo.png", "old_logo_region_in": [10.5, 0.0, 2.8, 1.2]},
+        "layout": {},
+        "audit": {},
+    }
+    errors = validate_config(config, base_dir=tmp_path)
+    assert not any("old_logo_region_in" in e for e in errors)
+
+
 def test_validate_rejects_remap_target_not_approved(tmp_path):
     (tmp_path / "assets").mkdir()
     (tmp_path / "assets" / "logo.png").write_bytes(b"\x89PNG\r\n")

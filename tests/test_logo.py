@@ -1,3 +1,5 @@
+from pptx.util import Emu, Inches
+
 from deckguard import logo as logo_mod
 from tests.helpers import add_picture, make_pattern_png, make_solid_png, new_deck, set_background_image
 
@@ -56,6 +58,59 @@ def test_replace_logo_image_preserves_position_and_size(tmp_path):
     assert shape.width == width
     assert shape.height == height
     assert shape.image.blob == new_logo.read_bytes()
+
+
+def test_find_shapes_in_region_matches_only_fully_contained_shapes():
+    prs = new_deck()
+    master = prs.slide_masters[0]
+    spTree = master.shapes._spTree
+    id_ = master.shapes._next_shape_id
+    inside = spTree.add_textbox(id_, "Inside", Inches(11), Inches(0.2), Inches(1), Inches(0.5))
+    id_ += 1
+    straddling = spTree.add_textbox(id_, "Straddling", Inches(9), Inches(0.2), Inches(3), Inches(0.5))
+
+    region = (Emu(Inches(10.5)), Emu(Inches(0)), Emu(Inches(2.8)), Emu(Inches(1.2)))
+    matches = logo_mod.find_shapes_in_region(master.shapes, region)
+
+    matched_elements = {s._element for s in matches}
+    assert inside in matched_elements
+    assert straddling not in matched_elements  # left edge (9in) is outside the region -- not fully contained
+
+
+def test_find_shapes_in_region_empty_when_nothing_is_inside():
+    prs = new_deck()
+    master = prs.slide_masters[0]
+    region = (Emu(Inches(10.5)), Emu(Inches(0)), Emu(Inches(2.8)), Emu(Inches(1.2)))
+    # the master's own default title/body/date/footer placeholders all live elsewhere
+    assert logo_mod.find_shapes_in_region(master.shapes, region) == []
+
+
+def test_replace_shapes_in_region_with_logo_removes_matches_and_inserts_sized_picture(tmp_path):
+    new_logo = make_pattern_png(tmp_path / "new_logo.png", seed=4)
+
+    prs = new_deck()
+    master = prs.slide_masters[0]
+    spTree = master.shapes._spTree
+    id_ = master.shapes._next_shape_id
+    old_mark = spTree.add_textbox(id_, "OldMark", Inches(11), Inches(0.2), Inches(1), Inches(0.5))
+    before_count = len(master.shapes)
+
+    region = (Emu(Inches(10.5)), Emu(Inches(0)), Emu(Inches(2.8)), Emu(Inches(1.2)))
+    matches = logo_mod.find_shapes_in_region(master.shapes, region)
+    assert len(matches) == 1
+
+    logo_mod.replace_shapes_in_region_with_logo(master.shapes, matches, str(new_logo), region)
+
+    assert len(master.shapes) == before_count  # one removed, one added -- net unchanged
+    assert old_mark.getparent() is None  # actually removed from the tree, not just unreferenced
+
+    pictures = [s for s in master.shapes if s.shape_type is not None and s.shape_type.name == "PICTURE"]
+    assert len(pictures) == 1
+    pic = pictures[0]
+    # fits inside the region on both axes, aspect ratio preserved (not stretched)
+    r_left, r_top, r_width, r_height = region
+    assert r_left <= pic.left and pic.left + pic.width <= r_left + r_width
+    assert r_top <= pic.top and pic.top + pic.height <= r_top + r_height
 
 
 def test_find_background_blip_returns_none_when_no_bg_element(tmp_path):

@@ -206,7 +206,18 @@ typography_rules:
 
 logo:
   new_logo_path: "assets/kone_logo.png"
-  old_logo_hashes: []          # populate via `deckguard hash-logo`
+  old_logo_hashes: []          # populate via `deckguard hash-logo`, for an old logo that's a raster image
+  # For an old logo that ISN'T a raster image -- e.g. a wordmark drawn as
+  # vector shapes directly on a slide master, which old_logo_hashes can
+  # never match (nothing to perceptual-hash) -- set old_logo_region_in to
+  # [left, top, width, height] in inches: every top-level shape on a
+  # slide master fully inside that box is deleted and replaced with
+  # new_logo_path, sized to fit. Unset (the default) means this never
+  # runs -- deleting shapes by position alone is only safe once a human
+  # has confirmed the region against their own deck's master (open it in
+  # PowerPoint, check the logo's position/size in inches from the ruler
+  # or Format Shape pane). Leave unset unless you've done that.
+  # old_logo_region_in: [10.5, 0.0, 2.8, 1.2]
   min_clear_space_px: 20
 
 layout:

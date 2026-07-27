@@ -480,7 +480,8 @@ typography_rules:
 
 logo:
   new_logo_path: "assets/kone_logo.png"
-  old_logo_hashes: []      # populate via `deckguard hash-logo`
+  old_logo_hashes: []      # populate via `deckguard hash-logo`, for an old logo that's a raster image
+  old_logo_region_in: null # [left, top, width, height] in inches -- see below, for a non-raster old logo
   min_clear_space_px: 20   # Phase 2 (AI audit) — not checked by the XML engine
 
 layout:
@@ -506,6 +507,22 @@ normalization-aware:
   `"Inter"` + bold all resolve to the same approved family. The theme's
   `fontScheme` (major/minor Latin typeface) is corrected the same way
   theme colors are, fixing every placeholder that inherits the default.
+
+**`logo.old_logo_region_in`** exists for an old logo `old_logo_hashes`
+can never match: one that isn't a raster image at all, e.g. a wordmark
+drawn as vector shapes directly on a slide master (confirmed against a
+real legacy deck — a group of freeform paths, not a picture). Set it to
+`[left, top, width, height]` in inches and every top-level shape on a
+slide master fully inside that box is deleted and replaced with
+`new_logo_path`, sized to fit. To find the right numbers for your own
+deck: open it in PowerPoint, click the logo mark on the slide master
+(View → Slide Master), and read its position/size in inches from the
+Format Shape pane (or the ruler) — pad each side by a few tenths of an
+inch. Unset (`null`, the default) means this never runs: unlike a hash
+match (which identifies *what* the old logo looks like before touching
+anything), a region only identifies *where* something is, so deleting
+shapes by position alone is only safe once a human has confirmed the
+region against their own deck's master.
 
 ## Severity mapping
 

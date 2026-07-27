@@ -322,6 +322,53 @@ def test_fix_replaces_old_logo_placed_directly_on_a_slide_master(tmp_path):
     assert pic.image.blob == new_logo.read_bytes()
 
 
+def test_fix_replaces_a_vector_logo_mark_via_old_logo_region_in(tmp_path):
+    """Regression test for a real report: an old logo that isn't a raster
+    image at all -- a wordmark built from freeform vector shapes directly
+    on a slide master -- can never be found by old_logo_hashes (nothing
+    to perceptual-hash). old_logo_region_in identifies it by position
+    instead."""
+    from pptx.util import Inches
+
+    new_logo = make_pattern_png(tmp_path / "new.png", seed=9)
+
+    prs = new_deck()
+    master = prs.slide_masters[0]
+    spTree = master.shapes._spTree
+    id_ = master.shapes._next_shape_id
+    spTree.add_textbox(id_, "OldVectorMark", Inches(11), Inches(0.2), Inches(1), Inches(0.5))
+    add_slide(prs)
+
+    config = {
+        "colors": {"approved": ["#1450F5"], "remap": {}},
+        "fonts": {"approved": ["Inter"], "remap": {}},
+        "typography_rules": {},
+        "logo": {"old_logo_region_in": [10.5, 0.0, 2.8, 1.2], "new_logo_path": str(new_logo)},
+        "layout": {},
+        "audit": {"fail_on": []},
+    }
+
+    report = fix_deck(prs, config, source_path="in.pptx", output_path=None, dry_run=True)
+
+    assert any(c.rule == "old_logo_region" and c.scope == "master" for c in report.changes)
+    assert not any(s.name == "OldVectorMark" for s in master.shapes)
+    pictures = [s for s in master.shapes if s.shape_type is not None and s.shape_type.name == "PICTURE"]
+    assert len(pictures) == 1
+    assert pictures[0].image.blob == new_logo.read_bytes()
+
+
+def test_fix_old_logo_region_in_unset_is_a_no_op():
+    """Unset (the default) must never touch a master -- deleting shapes
+    by position alone is only safe once a human has confirmed the
+    region, so no region configured means no shapes are ever removed."""
+    prs = new_deck()
+    add_slide(prs)
+
+    report = fix_deck(prs, CONFIG, source_path="in.pptx", output_path=None, dry_run=True)
+
+    assert not any(c.rule == "old_logo_region" for c in report.changes)
+
+
 def test_fix_replaces_old_logo_baked_into_a_slide_background_fill(tmp_path):
     """A logo can also be baked into a page-level background-FILL image
     (<p:cSld><p:bg>) rather than being a picture shape at all -- outside

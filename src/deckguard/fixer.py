@@ -191,6 +191,51 @@ def _replace_old_logo_everywhere(
     return changes
 
 
+def _replace_old_logo_region_everywhere(prs, region_in, new_logo_path: Optional[str]) -> list[Change]:
+    """Fix an old logo `old_logo_hashes` can never match at all: one not
+    built from a raster image, so there's no picture to perceptual-hash
+    against -- e.g. a wordmark drawn as vector freeform shapes directly
+    on a slide master (confirmed against a real legacy deck: a `<p:grpSp>`
+    of freeform paths, not a `<p:pic>`, sitting in the master's own top
+    corner). `region_in` (`[left, top, width, height]` in inches, from
+    `logo.old_logo_region_in`) identifies WHERE the mark lives instead of
+    WHAT it looks like -- every top-level shape on a slide MASTER fully
+    inside that region is removed and replaced with the current logo
+    image, sized to fit. Opt-in and unset by default, same as
+    `old_logo_hashes`: this deletes shapes based on position alone, which
+    is only safe once a human has confirmed the region against their own
+    deck (see README for how).
+    """
+    changes: list[Change] = []
+    if not region_in or not new_logo_path or not Path(new_logo_path).exists():
+        return changes
+    if len(region_in) != 4:
+        return changes
+
+    from pptx.util import Inches
+
+    region_emu = tuple(Inches(v) for v in region_in)
+
+    seen_masters = set()
+    for master in colors_mod.iter_slide_masters(prs):
+        if id(master.part) in seen_masters:
+            continue
+        seen_masters.add(id(master.part))
+        matches = logo_mod.find_shapes_in_region(master.shapes, region_emu)
+        if not matches:
+            continue
+        shape_names = [s.name for s in matches]
+        logo_mod.replace_shapes_in_region_with_logo(master.shapes, matches, new_logo_path, region_emu)
+        changes.append(
+            Change(
+                scope="master", rule="old_logo_region", field="image",
+                old=f"{len(matches)} shape(s): {', '.join(shape_names)}", new=new_logo_path, location=master.name,
+            )
+        )
+
+    return changes
+
+
 def _remap_shapes_fills(shapes, remap: dict[str, str], min_area_emu2: float, scope: str, location: str) -> list[Change]:
     changes = []
     for shape in shapes:
@@ -446,6 +491,11 @@ def fix_deck(prs, config: dict, source_path: str, output_path: Optional[str], dr
         logo_cfg.get("old_logo_hashes", []) or [],
         logo_cfg.get("new_logo_path"),
         logo_cfg.get("match_threshold", logo_mod.DEFAULT_MATCH_THRESHOLD),
+    )
+    changes += _replace_old_logo_region_everywhere(
+        prs,
+        logo_cfg.get("old_logo_region_in"),
+        logo_cfg.get("new_logo_path"),
     )
 
     # Apply auto-fixable violations to a fixpoint. Fixing one violation can
