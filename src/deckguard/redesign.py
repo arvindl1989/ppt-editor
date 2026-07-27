@@ -569,7 +569,6 @@ def _build_review_messages(skipped_proposals: list) -> list:
 def call_claude_for_brand_review(
     skipped_proposals: list,
     model: str = REVIEW_MODEL,
-    effort: str = "low",
     api_key: Optional[str] = None,
     client=None,
 ) -> tuple[list, "Usage"]:
@@ -597,8 +596,10 @@ def call_claude_for_brand_review(
     with client.messages.stream(
         model=model,
         max_tokens=4000,
-        thinking={"type": "adaptive"},
-        output_config={"effort": effort, "format": {"type": "json_schema", "schema": REVIEW_SCHEMA}},
+        # REVIEW_MODEL (Haiku 4.5) doesn't support adaptive thinking or the
+        # `effort` knob -- both 400 on this model -- so this call only sets
+        # the structured-output schema, unlike the outline call above.
+        output_config={"format": {"type": "json_schema", "schema": REVIEW_SCHEMA}},
         messages=messages,
     ) as stream:
         response = stream.get_final_message()
@@ -664,7 +665,7 @@ def _attach_source_images(raw_slides: list, eligible: list) -> list:
 
 def _rebrand_deck(
     deck_path, out_path, template_path=None, rules_config: Optional[dict] = None,
-    review: bool = False, review_model: str = REVIEW_MODEL, review_effort: str = "low",
+    review: bool = False, review_model: str = REVIEW_MODEL,
     api_key: Optional[str] = None, client=None,
 ):
     """mode='brand' path: no LLM call at all by default, so wrap
@@ -702,7 +703,7 @@ def _rebrand_deck(
         reviewable = [p for p in ineligible if p.reason != EMPTY_SLIDE_REASON]
         if reviewable:
             raw_review, usage = call_claude_for_brand_review(
-                reviewable, model=review_model, effort=review_effort, api_key=api_key, client=client,
+                reviewable, model=review_model, api_key=api_key, client=client,
             )
             title_by_index: dict = {}
             for item in raw_review:
@@ -760,7 +761,6 @@ def redesign_deck(
     mode: str = "rewrite",
     review: bool = False,
     review_model: str = REVIEW_MODEL,
-    review_effort: str = "low",
 ) -> tuple[ComposeResult, RedesignResult]:
     """One entry point for all three starting points:
 
@@ -814,7 +814,7 @@ def redesign_deck(
             raise RedesignError("mode='brand' never authors content, so --brief doesn't apply -- use mode='rewrite' instead")
         return _rebrand_deck(
             deck_path, out_path, template_path=template_path, rules_config=rules_config,
-            review=review, review_model=review_model, review_effort=review_effort, api_key=api_key, client=client,
+            review=review, review_model=review_model, api_key=api_key, client=client,
         )
     if review:
         raise RedesignError("--review only applies to mode='brand' -- mode='rewrite' already sends every eligible slide to the model")
