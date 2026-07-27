@@ -374,6 +374,14 @@ class SlideRecord:
     layout_name: str
     master_name: str
     shapes: list
+    # Non-placeholder decorative shapes drawn directly on this slide's
+    # LAYOUT (e.g. a full-height color panel behind a "text" placeholder
+    # column) -- these render behind every slide built on that layout but
+    # are never copied into the slide's own shape tree, so a plain
+    # placeholder textbox sitting on one has no fill of its own and no
+    # same-slide shape to resolve it from either. See
+    # `rules_engine._resolve_effective_bg_hex`.
+    layout_background_shapes: list = field(default_factory=list)
     obj: object = field(repr=False, compare=False, default=None)
 
 
@@ -405,6 +413,8 @@ def build_inventory(prs: Presentation) -> DeckInventory:
         theme_by_master_part[id(master.part)] = colors_mod.get_theme_scheme(master)
         theme_fonts_by_master_part[id(master.part)] = fonts_mod.read_theme_font_scheme(master)
 
+    layout_bg_by_layout_part: dict = {}
+
     slides = []
     for i, slide in enumerate(prs.slides, start=1):
         layout = slide.slide_layout
@@ -412,12 +422,19 @@ def build_inventory(prs: Presentation) -> DeckInventory:
         theme_scheme = theme_by_master_part.get(id(master.part))
         theme_fonts = theme_fonts_by_master_part.get(id(master.part), {})
         shape_records = [_shape_record(s, theme_scheme, master, theme_fonts) for s in slide.shapes]
+
+        layout_key = id(layout.part)
+        if layout_key not in layout_bg_by_layout_part:
+            layout_shape_records = [_shape_record(s, theme_scheme, master, theme_fonts) for s in layout.shapes]
+            layout_bg_by_layout_part[layout_key] = [rec for rec in layout_shape_records if not rec.is_placeholder]
+
         slides.append(
             SlideRecord(
                 index=i,
                 layout_name=layout.name or "",
                 master_name=master.name or "",
                 shapes=shape_records,
+                layout_background_shapes=layout_bg_by_layout_part[layout_key],
                 obj=slide,
             )
         )

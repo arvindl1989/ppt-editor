@@ -9,6 +9,21 @@ def test_default_config_loads_and_validates():
     assert errors == []
 
 
+def test_default_config_remaps_aptos_to_inter():
+    """Regression test for a real bug report: a deck authored/edited in
+    current Office inherits its theme font from Aptos/Aptos Display (the
+    default since late 2023), not Calibri -- and this project's font
+    remap table only listed the older Office defaults. An unmapped
+    inherited font stays "manual review" forever AND silently disables
+    the text_contrast check for that text (it only applies once a run's
+    font resolves to something on the approved list), so a KONE-blue
+    panel's own body text never got corrected to white."""
+    config = load_config(default_config_path())
+    remap = config["fonts"]["remap"]
+    assert remap.get("Aptos") == "Inter"
+    assert remap.get("Aptos Display") == "Inter"
+
+
 def test_load_config_missing_file(tmp_path):
     with pytest.raises(ConfigError):
         load_config(tmp_path / "nope.yaml")

@@ -72,14 +72,27 @@ def _bbox_mostly_contained(inner: ShapeRecord, outer: ShapeRecord, tolerance_in:
 
 
 def _resolve_effective_bg_hex(
-    shape: ShapeRecord, top_shapes: list, top_shape_index: dict[int, int]
+    shape: ShapeRecord,
+    top_shapes: list,
+    top_shape_index: dict[int, int],
+    layout_background_shapes: Optional[list] = None,
 ) -> Optional[str]:
     """A shape's own resolved fill is always the first choice. Failing
-    that -- e.g. a plain textbox with no fill of its own, sitting on top
-    of a separately-drawn color panel, a very common authoring pattern --
-    look for the nearest shape BELOW it in z-order (document order is
-    paint order in OOXML) whose bounding box contains this one's, and use
-    that shape's fill as the effective background.
+    that -- e.g. a plain textbox/placeholder with no fill of its own --
+    two authoring patterns put a real color behind it that this project
+    still needs to see:
+
+    1. A separately-drawn color panel SHAPE on the same slide, sitting
+       below it in z-order (document order is paint order in OOXML) --
+       look for the nearest one whose bounding box contains this one's.
+    2. A decorative (non-placeholder) shape on the slide's own LAYOUT --
+       e.g. a full-height color panel behind a "text" placeholder column,
+       a template pattern this project's own bundled template uses (see
+       "Title and text"'s "Background" shape). Layout-only shapes like
+       this render behind every slide built on that layout but are never
+       copied into the slide's own shape tree, so there's no same-slide
+       candidate to find -- only checked once the same-slide search comes
+       up empty, since an explicit same-slide shape should always win.
 
     Only searches top-level (non-grouped) shapes, where geometry is
     unambiguous in slide-absolute coordinates. A shape nested in a group
@@ -91,9 +104,12 @@ def _resolve_effective_bg_hex(
     if own:
         return own
     idx = top_shape_index.get(shape.shape_id)
-    if idx is None:
-        return None
-    for candidate in reversed(top_shapes[:idx]):
+    if idx is not None:
+        for candidate in reversed(top_shapes[:idx]):
+            candidate_hex = _own_fill_hex(candidate)
+            if candidate_hex and _bbox_mostly_contained(shape, candidate):
+                return candidate_hex
+    for candidate in layout_background_shapes or []:
         candidate_hex = _own_fill_hex(candidate)
         if candidate_hex and _bbox_mostly_contained(shape, candidate):
             return candidate_hex
@@ -752,7 +768,7 @@ def audit_deck(inventory: DeckInventory, config: dict) -> list[Violation]:
                 )
 
         for shape in all_shapes:
-            bg_hex = _resolve_effective_bg_hex(shape, top_shapes, top_shape_index)
+            bg_hex = _resolve_effective_bg_hex(shape, top_shapes, top_shape_index, slide.layout_background_shapes)
             violations += _check_shape(
                 shape, slide.index, slide_height_in, config, font_tables, approved_hexes, remap, tolerance, bg_hex
             )

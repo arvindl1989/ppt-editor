@@ -138,6 +138,12 @@ fonts:
     "Calibri": "Inter"
     "Arial": "Inter"       # Arial is documented as an EMAIL-ONLY fallback, never sanctioned in PPT
     "Segoe UI": "Inter"
+    "Aptos": "Inter"        # Microsoft's current Office default theme font (replaced Calibri
+    "Aptos Display": "Inter" # in late-2023 Office); a deck authored/edited since then inherits
+                             # this instead of Calibri, and it was never in this table -- left
+                             # stuck at "manual review" forever, which also silently disabled the
+                             # text_contrast check for it (that check only applies once a run's
+                             # font resolves to something on the approved list -- see rules_engine.py).
   min_body_size_pt: 11     # safety-net fallback only -- min_size_by_level covers every real
                             # paragraph level (0-8); this only fires if that table is incomplete
   min_title_size_pt: 24    # confirmed: the template's own "Title (24pt) and footers" layout
