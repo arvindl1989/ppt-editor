@@ -212,6 +212,91 @@ def compose_result_page(out_name: str, result_dict: dict, download_links: dict) 
     return body
 
 
+def redesign_form(error: str | None = None, enabled: bool = True) -> str:
+    if not enabled:
+        return """<div class="card">
+<h2 style="margin-top:0;font-size:1.05rem;">Redesign a deck with AI</h2>
+<p class="muted" style="margin:0;">Not enabled on this server — set <code>ANTHROPIC_API_KEY</code> to turn this on.
+This is the only feature here that makes an outbound API call, and each request has a real (small) cost, so it's
+opt-in rather than on by default.</p>
+</div>"""
+    error_html = f'<div class="error">{_esc(error)}</div><div style="height:1rem"></div>' if error else ""
+    return f"""{error_html}<div class="card">
+<h2 style="margin-top:0;font-size:1.05rem;">Redesign a deck with AI</h2>
+<p style="color:var(--ink-muted);font-size:0.88rem;margin:0 0 1rem;">
+  Upload any deck — on-brand or not. Claude reads each slide's extracted text and judges which layout kind
+  (cover, content, quote, stat, timeline, ...) it should become; the result is built through the same
+  deterministic engine <code>create</code> uses, so color/font/layout compliance is guaranteed either way —
+  only the "what kind of slide is this" judgment call is delegated to the model. Slides with a table, chart,
+  or embedded media are left alone and reported, never guessed at.
+</p>
+<form method="post" action="/redesign" enctype="multipart/form-data">
+  <input type="file" name="file" accept=".pptx" required style="margin-bottom:1rem;">
+  <label style="display:block;font-size:0.82rem;color:var(--ink-muted);margin-bottom:0.3rem;">
+    Optional steering notes for the model
+  </label>
+  <textarea name="notes" rows="2" placeholder="e.g. prefer stat slides for anything with a percentage"
+    style="width:100%;font-size:0.85rem;padding:0.6rem;border-radius:8px;border:1px solid var(--border);
+    background:var(--surface);color:var(--ink);margin-bottom:1rem;"></textarea>
+  <div style="display:flex;gap:1rem;margin-bottom:1rem;flex-wrap:wrap;">
+    <label style="font-size:0.82rem;color:var(--ink-muted);">Model
+      <select name="model" style="display:block;margin-top:0.3rem;">
+        <option value="claude-opus-5" selected>claude-opus-5 (recommended)</option>
+        <option value="claude-sonnet-5">claude-sonnet-5 (cheaper)</option>
+      </select>
+    </label>
+    <label style="font-size:0.82rem;color:var(--ink-muted);">Effort
+      <select name="effort" style="display:block;margin-top:0.3rem;">
+        <option value="low">low</option>
+        <option value="medium">medium</option>
+        <option value="high" selected>high</option>
+        <option value="xhigh">xhigh</option>
+      </select>
+    </label>
+  </div>
+  <div class="btn-row">
+    <button type="submit" class="primary">Redesign with AI</button>
+  </div>
+</form>
+</div>"""
+
+
+def redesign_result_page(deck_name: str, redesign_dict: dict, compose_dict: dict, download_links: dict) -> str:
+    usage = redesign_dict["usage"]
+    stats = f"""<div class="stat-row">
+  <div class="stat"><b style="color:#1ED273">{compose_dict['slide_count']}</b><span>slides built</span></div>
+  <div class="stat"><b>{len(redesign_dict['skipped'])}</b><span>skipped</span></div>
+  <div class="stat"><b>{len(compose_dict['manual_review'])}</b><span>need review</span></div>
+  <div class="stat"><b>${usage['estimated_cost_usd']:.3f}</b><span>est. cost</span></div>
+</div>"""
+    dl = (
+        f'<a class="dl" href="{download_links["pptx"]}">Download redesigned .pptx</a>'
+        f'<a class="dl secondary" href="/">Redesign another deck</a>'
+    )
+    layouts_used = ", ".join(sorted(set(compose_dict["layouts_used"])))
+    skipped_rows = "".join(
+        f"<tr><td>{_esc(s['slide_index'])}</td><td>{_esc(s['reason'])}</td></tr>" for s in redesign_dict["skipped"]
+    ) or '<tr><td colspan="2" class="empty">Every slide was eligible.</td></tr>'
+    body = f"""<div class="card"><h2 style="margin-top:0;font-size:1.05rem;">Redesigned — {_esc(deck_name)}</h2>
+{stats}
+<p class="muted" style="margin:0.5rem 0 1rem;">Layouts used: {_esc(layouts_used)} &middot;
+{_esc(usage['input_tokens'])} in / {_esc(usage['output_tokens'])} out tokens ({_esc(usage['model'])})</p>
+{dl}
+</div>
+<div class="card"><h3 style="margin-top:0;font-size:0.95rem;">Skipped slides ({len(redesign_dict['skipped'])})</h3>
+<p class="muted" style="margin:0 0 0.5rem;">Never sent to the model — carry a table, chart, embedded media, or too much content to redesign safely.</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Slide</th><th>Reason</th></tr></thead>
+<tbody>{skipped_rows}</tbody>
+</table></div></div>
+<div class="card"><h3 style="margin-top:0;font-size:0.95rem;">Manual review ({len(compose_dict['manual_review'])})</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Slide</th><th>Severity</th><th>Rule</th><th>Shape</th><th>Message</th><th>Fix?</th></tr></thead>
+<tbody>{_violation_rows(compose_dict['manual_review'])}</tbody>
+</table></div></div>"""
+    return body
+
+
 def _violation_rows(violations: list[dict]) -> str:
     if not violations:
         return '<tr><td colspan="6" class="empty">No violations found.</td></tr>'

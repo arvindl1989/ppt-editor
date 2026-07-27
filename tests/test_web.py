@@ -256,10 +256,18 @@ def test_create_flow_fresh_deck_and_download(tmp_path, monkeypatch):
 
 
 def test_create_flow_append_to_existing_deck(tmp_path, monkeypatch):
+    """Regression test for a real bug: the web route checked
+    isinstance(existing_file, fastapi.UploadFile), but request.form()
+    returns starlette.datastructures.UploadFile instances -- fastapi's
+    is a SUBCLASS of starlette's, so that check was always False and the
+    upload was silently ignored, falling back to a fresh (non-append)
+    build. Assert on the actual slide count and preserved content, not
+    just "the page rendered", so that class of bug can't hide again."""
     client, _ = _client(tmp_path, monkeypatch)
     legacy = tmp_path / "legacy.pptx"
     prs = new_deck()
-    add_slide(prs)
+    legacy_slide = add_slide(prs)
+    title_run(legacy_slide).text = "Pre-existing legacy content"
     prs.save(str(legacy))
 
     with legacy.open("rb") as f:
@@ -270,7 +278,23 @@ def test_create_flow_append_to_existing_deck(tmp_path, monkeypatch):
         )
     assert resp.status_code == 200
     assert "Composed" in resp.text
-    assert "slides built" in resp.text or "2</b>" in resp.text
+
+    m = re.search(r'/download/([a-f0-9]+)/composed\.pptx', resp.text)
+    assert m, "no composed.pptx download link found in response"
+    dl = client.get(m.group(0))
+    assert dl.status_code == 200
+
+    from io import BytesIO
+
+    from pptx import Presentation
+
+    out_prs = Presentation(BytesIO(dl.content))
+    # 1 pre-existing slide + 2 slides from SAMPLE_OUTLINE (cover + content)
+    assert len(out_prs.slides) == 3
+    first_slide_text = [
+        shp.text_frame.text for shp in out_prs.slides[0].shapes if shp.has_text_frame and shp.text_frame.text.strip()
+    ]
+    assert "Pre-existing legacy content" in first_slide_text
 
 
 def test_create_flow_tolerates_existing_file_sent_as_plain_text(tmp_path, monkeypatch):
@@ -303,6 +327,73 @@ def test_create_flow_invalid_outline_gives_clean_message(tmp_path, monkeypatch):
     assert resp.status_code == 200
     assert "unknown kind" in resp.text
     assert "Traceback" not in resp.text
+
+
+def test_index_hides_redesign_form_without_api_key(tmp_path, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    client, _ = _client(tmp_path, monkeypatch)
+    resp = client.get("/")
+    assert "Not enabled on this server" in resp.text
+
+
+def test_redesign_route_disabled_without_api_key(tmp_path, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    client, _ = _client(tmp_path, monkeypatch)
+    deck = tmp_path / "d.pptx"
+    _write_violating_deck(deck)
+    with deck.open("rb") as f:
+        resp = client.post("/redesign", files={"file": ("d.pptx", f, "application/octet-stream")})
+    assert resp.status_code == 200
+    assert "Not enabled on this server" in resp.text
+
+
+def test_redesign_route_rejects_non_pptx(tmp_path, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    client, _ = _client(tmp_path, monkeypatch)
+    resp = client.post("/redesign", files={"file": ("d.txt", b"not a deck", "text/plain")})
+    assert resp.status_code == 200
+    assert "upload a .pptx" in resp.text.lower()
+
+
+def test_redesign_route_success_with_mocked_engine(tmp_path, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    client, web_mod = _client(tmp_path, monkeypatch)
+
+    from deckguard import redesign as redesign_mod
+    from deckguard.compose import ComposeResult
+
+    def fake_redesign_deck(deck_path, out_path, model="claude-opus-5", effort="high", notes=None, template_path=None, rules_config=None, api_key=None, client=None):
+        from pptx import Presentation as _P
+        prs = _P()
+        prs.slides.add_slide(prs.slide_layouts[0])
+        prs.save(out_path)
+        compose_result = ComposeResult(slide_count=1, layouts_used=["Cover B"], manual_review=[])
+        redesign_result = redesign_mod.RedesignResult(
+            outline=None,
+            skipped=[redesign_mod.SkippedSlide(slide_index=2, reason="contains a table")],
+            usage=redesign_mod.Usage(input_tokens=1500, output_tokens=700, model=model),
+        )
+        return compose_result, redesign_result
+
+    monkeypatch.setattr(redesign_mod, "redesign_deck", fake_redesign_deck)
+
+    deck = tmp_path / "d.pptx"
+    _write_violating_deck(deck)
+    with deck.open("rb") as f:
+        resp = client.post(
+            "/redesign",
+            files={"file": ("d.pptx", f, "application/octet-stream")},
+            data={"model": "claude-opus-5", "effort": "high", "notes": "be terse"},
+        )
+    assert resp.status_code == 200
+    assert "Redesigned" in resp.text
+    assert "contains a table" in resp.text
+
+    m = re.search(r'/download/([a-f0-9]+)/redesigned\.pptx', resp.text)
+    assert m, "no redesigned.pptx download link found"
+    dl = client.get(m.group(0))
+    assert dl.status_code == 200
+    assert dl.headers["content-type"].startswith("application/vnd.openxmlformats")
 
 
 def test_learn_flow_and_downloads(tmp_path, monkeypatch):

@@ -8,6 +8,10 @@ against the same `brand_rules.yaml` and the same org master template:
 - **`create`** — generate a brand-new, on-brand deck from a YAML content
   outline (or append on-brand slides to an existing deck), built directly
   on the org template's own approved layouts
+- **`redesign`** — the AI-assisted counterpart to `create`: upload any
+  deck and have Claude judge which slide kind each slide's content
+  should become, then build it through the exact same deterministic,
+  brand-guaranteed pipeline `create` uses (needs `ANTHROPIC_API_KEY`)
 - **`fix`** — auto-correct brand violations in a `.pptx` file
 - **`audit`** — scan one deck or a folder of decks and report violations
 - **`retemplate`** — rebuild an old deck's slides onto the org template's
@@ -19,11 +23,22 @@ against the same `brand_rules.yaml` and the same org master template:
 
 - **Deterministic first, AI second.** Everything achievable with rules +
   `python-pptx` — color remap, font swap, logo replace, effects removal,
-  size/alignment checks — is pure Python with zero API calls. This is all
-  of what's implemented today (Phase 1). A later phase will add an
-  Anthropic-API-backed visual audit layer for judgment calls (layout
-  consistency, "used sparingly", clear-space) that XML analysis can't
-  decide; `deckguard` runs fully today with **no API key required**.
+  size/alignment checks, and every layout an on-brand deck gets built or
+  rebuilt onto — is pure Python with zero API calls, and stays that way
+  regardless of whether AI is available. `redesign` is the one command
+  that spends an API call, and only for the one judgment call XML
+  analysis can't make on its own — "what kind of slide is this" — never
+  for color, font, or layout-approval decisions (see "AI-assisted
+  redesign" below). It runs nowhere near the deterministic engine's own
+  guarantees: its output is just another `create`-shaped outline, built
+  through the identical brand-compliant pipeline. Every other command —
+  `create`, `fix`, `audit`, `retemplate`, `migrate`, `learn`, `inspect`,
+  `hash-logo`, `validate-rules`, and the web app minus its one opt-in
+  route — still runs with **no API key required**, same as always. A
+  still-unbuilt, broader visual-judgment layer (logo clear-space,
+  "used sparingly" checks against a rendered image rather than extracted
+  text) remains future work — that's a materially different, harder
+  problem than the content-to-layout mapping `redesign` solves.
 - **Config-driven.** All brand knowledge lives in `brand_rules.yaml`
   (shipped as the default config, both at the repo root and packaged
   inside `deckguard`). No brand values are hardcoded — point `--rules` at
@@ -72,10 +87,13 @@ uvicorn deckguard.web:app --reload
 # -> http://127.0.0.1:8000
 ```
 
-Routes: `GET /` (upload + compose forms), `POST /audit`, `POST /fix`,
-`POST /create` (compose a new deck from a pasted YAML outline, optionally
-appending onto an uploaded existing deck), `POST /learn`,
-`GET /download/{token}/{filename}`, `GET /health`.
+Routes: `GET /` (upload + compose + redesign forms), `POST /audit`,
+`POST /fix`, `POST /create` (compose a new deck from a pasted YAML
+outline, optionally appending onto an uploaded existing deck),
+`POST /redesign` (AI-assisted redesign of an uploaded deck — only
+active when the server has `ANTHROPIC_API_KEY` set; see "AI-assisted
+redesign" above), `POST /learn`, `GET /download/{token}/{filename}`,
+`GET /health`.
 
 Set `DECKGUARD_WEB_PASSWORD` to require an HTTP Basic Auth password
 before anything is reachable (username is ignored) — unset by default,
@@ -140,6 +158,7 @@ merges on brand compliance.
 | Command | Purpose |
 |---|---|
 | `create <outline.yaml> --out <deck.pptx>` | Generates a new deck straight onto the org template's own layouts from a YAML content outline — see "Composing a new deck" below. `--append <deck.pptx>` appends onto a copy of an existing deck instead of starting fresh. |
+| `redesign <deck> --out <deck.pptx>` | AI-assisted counterpart to `create`: judges each eligible slide's kind with Claude, then builds it through the same deterministic pipeline — see "AI-assisted redesign" below. Needs `ANTHROPIC_API_KEY`. |
 | `inspect <deck>` | Full structured inventory: shapes, fills, fonts (raw + normalized), sizes, alignment, images (with perceptual hash), effects, layout/master usage. The discovery tool for growing `brand_rules.yaml` from real decks. |
 | `fix <deck>` | Applies deterministic corrections: color remap (fills, gradients, text, lines, theme), font remap (run + theme/master/layout level), logo replacement by image hash, forbidden text-effect removal, forced left-alignment. |
 | `audit <deck\|folder>` | Reports violations (slide, element, rule, severity, auto-fixable). Folder mode writes a per-deck report plus a `summary.csv`. |
@@ -248,6 +267,67 @@ Two things `create` deliberately does not attempt:
   `compose.py`'s module docstring) but not a per-slide date/footer/page
   number placeholder, the same as a slide added via python-pptx's own
   `add_slide()`. A known gap, not a silent corruption.
+
+## AI-assisted redesign
+
+`deckguard redesign` is the judgment layer `create` can't provide on its
+own: instead of a hand-written outline, you hand it an *existing* deck
+(on-brand or not — a random export, an old template, whatever someone
+uploads) and Claude decides which `create` slide kind each slide's
+content should become.
+
+```bash
+export ANTHROPIC_API_KEY=sk-...
+deckguard redesign old_deck.pptx --out redesigned.pptx
+# -> wrote: redesigned.pptx
+#    9 slide(s) using layouts: Cover B, Section divider (just title), ...
+#    (a table with the skipped-slides list, if any)
+#    tokens: 8420 in / 3110 out — est. cost $0.120 (claude-opus-5)
+```
+
+**What's deterministic and what's AI-judged is a hard line, not a
+blur.** Content extraction reuses `retemplate.py`'s own `classify_slide`
+verbatim — the exact same eligibility rules that already govern
+`retemplate` decide what's safe to touch here too, so a slide with a
+table, chart, embedded object, or more content than any layout can hold
+is never sent to the model at all; it's skipped and reported, same as
+`retemplate`. The model's only job, per eligible slide, is picking a
+`kind` (cover/agenda/section/content/quote/statement/stat/timeline/end/
+blank) and lightly copy-editing that slide's own extracted text into
+it — never inventing facts, numbers, or claims. Its output is validated
+against a JSON schema shaped exactly like `create`'s own outline format
+(see `compose.outline_from_list`), so from that point on a human-written
+YAML outline and an AI-generated one are indistinguishable: both run
+through the identical `build_deck` — same layout selection, same final
+`fix_deck` brand-compliance pass. Nothing about color, font, or
+layout-approval judgment is ever delegated to the model.
+
+Options: `--model` (default `claude-opus-5`; pass `claude-sonnet-5` for
+a cheaper run), `--effort` (`low`/`medium`/`high`/`xhigh`/`max`, default
+`high`), `--notes` (free-text steering appended to the model's
+instructions, e.g. `--notes "prefer stat slides for anything with a
+percentage"` — the way to tune behavior without touching code), and the
+same `--template`/`--rules` options `create` takes.
+
+**Cost.** Each run prints the API's real `usage` token counts and a
+rough estimate (`Usage.estimated_cost_usd` in `redesign.py`, using the
+per-model pricing cached there — verify against
+platform.claude.com/docs/en/pricing before trusting it for billing). A
+whole-deck redesign is one batched API call, not one per slide, so a
+50-slide deck typically lands well under $2 even at `claude-opus-5`
+pricing; a handful of slides for iterating on `--notes` costs a small
+fraction of that. `anthropic` is a base dependency (see
+`requirements.txt`), but nothing about `redesign` runs, and no key is
+ever required, unless you explicitly set `ANTHROPIC_API_KEY` — every
+other command in this tool remains fully API-key-free.
+
+**On the hosted web app**, the "Redesign a deck with AI" form only
+appears/works when the server itself has `ANTHROPIC_API_KEY` set — it's
+the one route in `web.py` that spends real money per request, so it's
+opt-in per deployment rather than on by default, and it never accepts a
+client-supplied key. **If you enable it on a public deployment, also set
+`DECKGUARD_WEB_PASSWORD`** — an open, unauthenticated `/redesign` route
+would let anyone spend your API budget.
 
 ## Config reference (`brand_rules.yaml`)
 
@@ -393,7 +473,11 @@ severity mapping per rule, the non-destructive guarantee (source file
 byte-for-byte unchanged after `fix`), `--dry-run` correctness, and
 (`test_web.py`) the web app's upload/audit/fix/download flow, error
 handling, download path-traversal guarding, and the password gate — via
-FastAPI's `TestClient`, no server process needed.
+FastAPI's `TestClient`, no server process needed. `test_redesign.py`
+covers `redesign` the same way every other test does — no real network
+or API calls — by injecting a fake Anthropic-shaped client (any object
+exposing `.messages.stream(...)`) so the extraction/prompt/parsing
+logic is fully exercised offline.
 
 ## Known Phase 1 limitations
 

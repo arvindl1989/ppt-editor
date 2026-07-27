@@ -163,6 +163,18 @@ def compose_result_to_dict(result) -> dict:
     }
 
 
+def redesign_result_to_dict(result) -> dict:
+    return {
+        "skipped": [{"slide_index": s.slide_index, "reason": s.reason} for s in result.skipped],
+        "usage": {
+            "input_tokens": result.usage.input_tokens,
+            "output_tokens": result.usage.output_tokens,
+            "model": result.usage.model,
+            "estimated_cost_usd": result.usage.estimated_cost_usd,
+        },
+    }
+
+
 def remap_overrides_summary(report) -> dict:
     """Aggregate a fix run's applied color/font changes into unique
     old->new pairs, for the web UI's review-and-override table.

@@ -31,6 +31,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pptx import Presentation
+from starlette.datastructures import UploadFile as _FormUploadFile
 from pptx.exc import PackageNotFoundError
 
 from deckguard import learn as learn_mod
@@ -123,7 +124,9 @@ def _open_presentation_or_error(path: Path) -> Presentation:
 
 @app.get("/", response_class=HTMLResponse)
 def index(_auth: None = Depends(_require_auth)):
-    return tpl.page_shell("deckguard", tpl.upload_form() + tpl.compose_form())
+    redesign_enabled = bool(os.environ.get("ANTHROPIC_API_KEY"))
+    body = tpl.upload_form() + tpl.compose_form() + tpl.redesign_form(enabled=redesign_enabled)
+    return tpl.page_shell("deckguard", body)
 
 
 @app.post("/audit", response_class=HTMLResponse)
@@ -383,9 +386,17 @@ async def create_route(request: Request, _auth: None = Depends(_require_auth)):
     # 422 JSON validation error instead of the friendly page every other
     # error path here renders. Checking the type ourselves after the fact
     # degrades a malformed field to "no file supplied" instead of crashing.
+    #
+    # Check against starlette.datastructures.UploadFile, not fastapi's --
+    # request.form() always returns the former, and fastapi.UploadFile is
+    # a SUBCLASS of it (confirmed: fastapi.UploadFile.__mro__ includes
+    # starlette's), so isinstance(x, fastapi.UploadFile) is False for
+    # every real form-parsed file. That silently dropped every "append to
+    # existing deck" upload here until a stricter test on /redesign (same
+    # bug, copied) caught it.
     existing_file = form.get("existing_file")
     existing_path = None
-    if isinstance(existing_file, UploadFile) and existing_file.filename:
+    if isinstance(existing_file, _FormUploadFile) and existing_file.filename:
         if not existing_file.filename.lower().endswith(".pptx"):
             shutil.rmtree(work_dir, ignore_errors=True)
             return tpl.page_shell("deckguard", tpl.compose_form("The existing deck to append to must be a .pptx file."))
@@ -410,10 +421,62 @@ async def create_route(request: Request, _auth: None = Depends(_require_auth)):
         shutil.rmtree(work_dir, ignore_errors=True)
         return tpl.page_shell("deckguard", tpl.compose_form(f"Compose failed: {exc}"))
 
-    out_name = existing_file.filename if (isinstance(existing_file, UploadFile) and existing_file.filename) else "new deck"
+    out_name = existing_file.filename if (isinstance(existing_file, _FormUploadFile) and existing_file.filename) else "new deck"
     download_links = {"pptx": f"/download/{token}/composed.pptx"}
     body = tpl.compose_result_page(out_name, report_mod.compose_result_to_dict(result), download_links)
     return tpl.page_shell(f"Composed — {out_name}", body)
+
+
+@app.post("/redesign", response_class=HTMLResponse)
+async def redesign_route(request: Request, _auth: None = Depends(_require_auth)):
+    # Server-opt-in only: this is the one route in the app that spends the
+    # operator's own money on every request, so it never runs unless the
+    # operator has set ANTHROPIC_API_KEY themselves -- never accept a key
+    # from the client, and never let an unconfigured server silently bill
+    # anyone.
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return tpl.page_shell("deckguard", tpl.redesign_form(enabled=False))
+
+    _cleanup_old_uploads()
+    form = await request.form()
+    file = form.get("file")
+    if not isinstance(file, _FormUploadFile) or not file.filename or not file.filename.lower().endswith(".pptx"):
+        return tpl.page_shell("deckguard", tpl.redesign_form("Please upload a .pptx file."))
+
+    model = str(form.get("model") or "claude-opus-5")
+    effort = str(form.get("effort") or "high")
+    notes = str(form.get("notes") or "").strip() or None
+
+    token = uuid.uuid4().hex
+    work_dir = STORAGE_ROOT / token
+    source_path = await _save_upload(file, work_dir)
+
+    try:
+        from deckguard.redesign import RedesignError, redesign_deck
+
+        config = _load_engine_config()
+        output_path = work_dir / "redesigned.pptx"
+        compose_result, redesign_result = redesign_deck(
+            source_path, str(output_path), model=model, effort=effort, notes=notes, rules_config=config,
+        )
+    except RedesignError as exc:
+        shutil.rmtree(work_dir, ignore_errors=True)
+        return tpl.page_shell("deckguard", tpl.redesign_form(str(exc)))
+    except HTTPException as exc:
+        shutil.rmtree(work_dir, ignore_errors=True)
+        return tpl.page_shell("deckguard", tpl.redesign_form(str(exc.detail)))
+    except Exception as exc:  # noqa: BLE001
+        shutil.rmtree(work_dir, ignore_errors=True)
+        return tpl.page_shell("deckguard", tpl.redesign_form(f"Redesign failed: {exc}"))
+
+    download_links = {"pptx": f"/download/{token}/redesigned.pptx"}
+    body = tpl.redesign_result_page(
+        file.filename,
+        report_mod.redesign_result_to_dict(redesign_result),
+        report_mod.compose_result_to_dict(compose_result),
+        download_links,
+    )
+    return tpl.page_shell(f"Redesigned — {file.filename}", body)
 
 
 @app.get("/download/{token}/{filename}")
@@ -422,7 +485,7 @@ def download(token: str, filename: str, _auth: None = Depends(_require_auth)):
     # the exact names we ourselves wrote into that directory.
     allowed = (
         "audit.json", "fixed.pptx", "changelog.json", "changelog.md",
-        "brand_rules.yaml", "learn_report.json", "composed.pptx",
+        "brand_rules.yaml", "learn_report.json", "composed.pptx", "redesigned.pptx",
     )
     if not token.isalnum() or filename not in allowed:
         raise HTTPException(status_code=404, detail="Not found")

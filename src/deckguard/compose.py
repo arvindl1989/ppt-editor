@@ -194,6 +194,18 @@ def _slide_spec_from_dict(raw, position: int) -> SlideSpec:
     )
 
 
+def outline_from_list(raw_slides: list) -> Outline:
+    """Build an Outline from already-parsed slide dicts -- the shared tail
+    end of `load_outline` (after YAML parsing) and of `redesign.py`'s AI
+    path (after parsing the model's structured-output JSON). Both producers
+    speak the identical schema, so a human-written outline and an
+    AI-generated one are indistinguishable to `build_deck` from here on.
+    """
+    if not isinstance(raw_slides, list) or not raw_slides:
+        raise ComposeError("outline.slides must be a non-empty list")
+    return Outline(slides=[_slide_spec_from_dict(s, i) for i, s in enumerate(raw_slides, start=1)])
+
+
 def load_outline(path) -> Outline:
     """Parse a YAML content outline: a top-level 'slides' list, each
     entry a mapping with at least a 'kind'. See README for the schema."""
@@ -208,10 +220,7 @@ def load_outline(path) -> Outline:
 
     if not isinstance(data, dict) or "slides" not in data:
         raise ComposeError("outline must be a YAML mapping with a top-level 'slides' list")
-    raw_slides = data["slides"]
-    if not isinstance(raw_slides, list) or not raw_slides:
-        raise ComposeError("outline.slides must be a non-empty list")
-    return Outline(slides=[_slide_spec_from_dict(s, i) for i, s in enumerate(raw_slides, start=1)])
+    return outline_from_list(data["slides"])
 
 
 def _chrome_idxs(layout) -> set:
