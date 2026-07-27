@@ -1,7 +1,9 @@
-"""AI-assisted deck redesign: turn an arbitrary, not-necessarily-on-brand
-deck into a fresh outline of the same kind `compose.py` already knows how
-to build -- the realization of the "Phase 2" judgment layer this project's
-own README has flagged as not-yet-implemented since Phase 1.
+"""AI-assisted deck redesign: turn ANY starting point -- a completely
+off-brand deck with real content, a mostly-empty deck, or no deck at
+all, just a topic -- into a fresh outline of the kind `compose.py`
+already knows how to build. The realization of the "Phase 2" judgment
+layer this project's own README has flagged as not-yet-implemented
+since Phase 1.
 
 Deliberately narrow in scope, and deliberately NOT where any new brand
 logic lives:
@@ -12,19 +14,29 @@ logic lives:
   guessed at) apply here exactly as they do for `retemplate`. The model
   never sees a slide this project's own rules already consider unsafe to
   reinterpret.
-- The ONLY thing an LLM call decides is, per eligible slide: which
-  `compose.py` slide *kind* best fits its content, and a light copy-edit
-  of that content into the kind's fields (bullets/quote/stats/...). The
-  model's output is validated against a JSON schema shaped exactly like
-  `compose.py`'s own outline dict format (see `outline_from_list`), so a
-  human-written YAML outline and an AI-generated one are indistinguishable
-  from that point on -- they run through the identical `build_deck` (same
-  layout selection, same final `fix_deck` pass, same brand guarantees).
+- The LLM call decides two things, and only two: per slide WITH source
+  content, which `compose.py` slide *kind* best fits it (a light
+  copy-edit, never inventing facts); and, for a blank slide or a bare
+  topic brief with no slide behind it at all, what content to AUTHOR
+  from the brief to make the deck whole. Those are different rules
+  (never-invent vs. please-invent-from-the-brief) and the prompt keeps
+  them explicitly separate so the model never blurs them.
+- The model's output is validated against a JSON schema shaped exactly
+  like `compose.py`'s own outline dict format (see `outline_from_list`),
+  so a human-written YAML outline, a redesigned deck, and a
+  from-scratch AI-authored one are indistinguishable from that point
+  on -- they all run through the identical `build_deck` (same layout
+  selection, same final `fix_deck` pass, same brand guarantees).
 - Nothing about color, font, or layout-approval judgment is delegated to
-  the model. That's exactly the split this project has used since Phase
-  1: deterministic first, AI second, and AI only for the one judgment
-  call -- "what kind of slide is this" -- that a shape-count heuristic
-  can't make well.
+  the model, in any of the three modes. That's exactly the split this
+  project has used since Phase 1: deterministic first, AI second, and
+  AI only for the one judgment call a shape-count heuristic can't make.
+
+Three ways to call `redesign_deck`, matched to the three starting points:
+
+    redesign_deck("old_deck.pptx", out_path)                  # redesign
+    redesign_deck("half_empty.pptx", out_path, brief="...")   # fill gaps
+    redesign_deck(None, out_path, brief="...")                # from scratch
 
 Requires the `anthropic` package (a base dependency -- see
 requirements.txt / pyproject.toml) and an `ANTHROPIC_API_KEY` at
@@ -36,14 +48,13 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass, field
-from pathlib import Path
+from dataclasses import dataclass
 from typing import Optional
 
 from pptx import Presentation
 
 from deckguard.compose import ComposeError, ComposeResult, Outline, build_deck, outline_from_list
-from deckguard.retemplate import SlideProfile, classify_slide
+from deckguard.retemplate import EMPTY_SLIDE_REASON, SlideProfile, classify_slide
 
 DEFAULT_MODEL = "claude-opus-5"
 
@@ -60,16 +71,16 @@ PRICE_PER_MTOK_USD = {
 KIND_GUIDE = """\
 Available slide kinds and when to use each:
 
-- cover: the deck's own title slide. Only slide 1 of the ORIGINAL deck
-  should ever become a cover.
+- cover: the deck's own title slide -- exactly one, first.
 - agenda: a short list of upcoming topics/sections (an outline of the
-  deck itself).
+  deck itself). Only worth including if the deck has enough distinct
+  sections to preview.
 - section: a chapter/divider slide -- just a short heading, marking a
   transition between topics. No body content.
 - content: the default for an ordinary slide with a title and 1-3 blocks
   of bullet points. Use `columns` (one list of bullets per column) when
-  the source slide visually reads as 2-3 side-by-side blocks; otherwise
-  use a single `bullets` list.
+  the content visually reads as 2-3 side-by-side blocks; otherwise use a
+  single `bullets` list.
 - quote: a slide whose main content is a single attributed quotation.
   Needs quote_text and, if known, quote_author.
 - statement: one short, unmissable, single-sentence message with no
@@ -79,27 +90,56 @@ Available slide kinds and when to use each:
 - timeline: a sequence of 2-3 dated/labeled milestones. Needs
   `milestones`, each with a `label` (date/phase) and `text` (what
   happens).
-- end: the deck's closing/thank-you slide. Only the ORIGINAL deck's last
-  slide should become this.
+- end: the deck's closing/thank-you slide -- exactly one, last.
 - blank: use only if a slide's content genuinely doesn't fit any of the
   above and you cannot responsibly summarize it (rare -- prefer content).
 
-Rules:
-- Never invent facts, numbers, names, or claims that are not present in
-  the extracted source text for that slide.
-- Tighten and professionalize wording (sentence case, concise, no
-  filler) but preserve the original meaning -- this is a copy-edit, not
-  a rewrite of what the slide says.
+General rules:
 - `source_slide_index` must be the 1-based index of the ORIGINAL slide
-  (given below) this entry was built from.
-- Return exactly one outline entry per source slide provided to you, in
-  the same order.
+  (given below) an entry was built from, or `null` if you authored this
+  slide from scratch (see below) with no original slide behind it.
+- A coherent deck reads as a narrative, not a pile of unrelated slides:
+  cover, optional agenda, then content grouped under section dividers
+  where it naturally clusters, closing with end. Don't force an agenda
+  or section dividers onto a short/simple deck that doesn't need them.
 """
+
+REDESIGN_RULES = """\
+Rules for slides that have ORIGINAL source content (see the extracted
+text below) -- these are a REDESIGN, not a rewrite:
+- Never invent facts, numbers, names, or claims that are not present in
+  that slide's own extracted source text.
+- Tighten and professionalize wording (sentence case, concise, no
+  filler) but preserve the original meaning.
+- Return exactly one outline entry per source slide provided, in order,
+  each with its correct `source_slide_index`.
+"""
+
+AUTHORING_RULES = """\
+Rules for content you are AUTHORING FROM SCRATCH (blank slides in the
+source deck, and/or the brief below) -- this is the opposite of the
+redesign rules above: there is no original text to preserve, so write
+real, substantive, specific content grounded in the brief. Don't pad
+with vague filler ("drives value", "best-in-class") -- if the brief
+doesn't give you enough to make a claim specific, write a more general
+but still concrete statement rather than invent a fake number or name.
+Give these entries `source_slide_index: null`.
+"""
+
+
+def _target_slides_guidance(target_slides: Optional[int]) -> str:
+    if target_slides is not None:
+        return f"Aim for approximately {target_slides} total slides in the finished deck."
+    return (
+        "No specific slide count was requested -- use your judgment for a deck length "
+        "that suits the brief's scope (a narrow topic might be 5-6 slides; a broad one 10-12)."
+    )
+
 
 OUTLINE_ITEM_SCHEMA = {
     "type": "object",
     "properties": {
-        "source_slide_index": {"type": "integer"},
+        "source_slide_index": {"type": ["integer", "null"]},
         "kind": {
             "type": "string",
             "enum": [
@@ -151,7 +191,8 @@ OUTLINE_SCHEMA = {
 
 class RedesignError(ComposeError):
     """Raised when the AI redesign step itself fails (missing API key,
-    missing dependency, or a malformed/unusable model response)."""
+    missing dependency, nothing to work from, or a malformed/unusable
+    model response)."""
 
 
 @dataclass
@@ -177,7 +218,7 @@ class Usage:
 @dataclass
 class RedesignResult:
     outline: Outline
-    skipped: list  # list[SkippedSlide] -- ineligible slides, never sent to the model
+    skipped: list  # list[SkippedSlide] -- unsafe-to-touch slides, never sent to the model
     usage: Usage
 
 
@@ -197,7 +238,9 @@ def _describe_slide(index: int, profile: SlideProfile) -> dict:
 def extract_eligible_slides(prs) -> tuple[list, list]:
     """Classify every slide with the exact same eligibility rules
     `retemplate.py` uses. Returns (eligible: list[(index, SlideProfile)],
-    skipped: list[SkippedSlide])."""
+    skipped: list[SkippedSlide]) -- `skipped` here includes blank slides;
+    callers that need blanks split out separately should use
+    `partition_skipped`."""
     slide_height_in = _slide_height_in(prs)
     eligible = []
     skipped = []
@@ -210,29 +253,66 @@ def extract_eligible_slides(prs) -> tuple[list, list]:
     return eligible, skipped
 
 
-def _build_messages(eligible: list, notes: Optional[str]) -> list:
-    slides_json = json.dumps([_describe_slide(i, p) for i, p in eligible], indent=2)
-    extra = f"\n\nAdditional guidance from the operator running this tool:\n{notes}\n" if notes else ""
-    user_content = (
-        f"{KIND_GUIDE}\n{extra}\n"
-        "Here is the extracted content of every slide eligible for redesign, "
-        f"in order:\n\n{slides_json}"
-    )
-    return [{"role": "user", "content": user_content}]
+def partition_skipped(skipped: list) -> tuple[list, list]:
+    """Split `extract_eligible_slides`'s skip list into (blank slide
+    indices, everything else). A blank slide has nothing to protect --
+    it's safe to author content for it from a brief. Every other skip
+    reason (table/chart/media/overfull) means real content this project
+    has already decided is unsafe to reinterpret, brief or no brief."""
+    blank_indices = [s.slide_index for s in skipped if s.reason == EMPTY_SLIDE_REASON]
+    real_skipped = [s for s in skipped if s.reason != EMPTY_SLIDE_REASON]
+    return blank_indices, real_skipped
+
+
+def _build_messages(
+    eligible: list, blank_count: int, brief: Optional[str], notes: Optional[str], target_slides: Optional[int]
+) -> list:
+    sections = [KIND_GUIDE]
+
+    if eligible:
+        sections.append(REDESIGN_RULES)
+    if blank_count or brief or not eligible:
+        sections.append(AUTHORING_RULES)
+        sections.append(_target_slides_guidance(target_slides))
+
+    if notes:
+        sections.append(f"Additional guidance from the operator running this tool:\n{notes}")
+    if brief:
+        sections.append(f"Brief describing the deck to build (use this to author any new content needed):\n{brief}")
+
+    if eligible:
+        slides_json = json.dumps([_describe_slide(i, p) for i, p in eligible], indent=2)
+        sections.append(
+            f"Here is the extracted content of every slide with original source content, in order "
+            f"(redesign each of these per the rules above):\n\n{slides_json}"
+        )
+    if blank_count:
+        sections.append(
+            f"The source deck also has {blank_count} blank slide(s) with no content at all -- "
+            "author new slides for these (or fold them into a better overall structure) using the brief."
+        )
+    if not eligible and not blank_count:
+        sections.append("There is no source deck -- author the entire outline from the brief above.")
+
+    return [{"role": "user", "content": "\n\n".join(sections)}]
 
 
 def call_claude_for_outline(
     eligible: list,
+    blank_count: int = 0,
+    brief: Optional[str] = None,
+    target_slides: Optional[int] = None,
     model: str = DEFAULT_MODEL,
     effort: str = "high",
     notes: Optional[str] = None,
     api_key: Optional[str] = None,
     client=None,
 ) -> tuple[list, Usage]:
-    """Send the extracted, eligible-only slide content to Claude and get
-    back a list of outline-item dicts (compose.py's own schema) plus the
-    call's token usage. `client` is an injection point for tests -- any
-    object exposing `.messages.stream(...)` in the Anthropic SDK shape.
+    """Send whatever's available -- extracted content, a count of blank
+    slides to fill, and/or a topic brief -- to Claude and get back a
+    list of outline-item dicts (compose.py's own schema) plus the call's
+    token usage. `client` is an injection point for tests -- any object
+    exposing `.messages.stream(...)` in the Anthropic SDK shape.
     """
     if client is None:
         try:
@@ -246,7 +326,7 @@ def call_claude_for_outline(
             raise RedesignError("ANTHROPIC_API_KEY is not set -- redesign needs an Anthropic API key")
         client = anthropic.Anthropic(api_key=key)
 
-    messages = _build_messages(eligible, notes)
+    messages = _build_messages(eligible, blank_count, brief, notes, target_slides)
     with client.messages.stream(
         model=model,
         max_tokens=32000,
@@ -257,7 +337,7 @@ def call_claude_for_outline(
         response = stream.get_final_message()
 
     if response.stop_reason == "refusal":
-        raise RedesignError("Claude declined the redesign request (safety refusal) -- try again or adjust the source deck")
+        raise RedesignError("Claude declined the redesign request (safety refusal) -- try again or adjust the brief/source deck")
 
     text = next((b.text for b in response.content if b.type == "text"), None)
     if not text:
@@ -270,6 +350,8 @@ def call_claude_for_outline(
     raw_slides = parsed.get("slides")
     if not isinstance(raw_slides, list):
         raise RedesignError("model response had no 'slides' array")
+    if not raw_slides:
+        raise RedesignError("model returned zero slides")
 
     usage = Usage(input_tokens=response.usage.input_tokens, output_tokens=response.usage.output_tokens, model=model)
     return raw_slides, usage
@@ -284,8 +366,10 @@ def _strip_ai_only_fields(raw_slides: list) -> list:
 
 
 def redesign_deck(
-    deck_path,
-    out_path,
+    deck_path=None,
+    out_path=None,
+    brief: Optional[str] = None,
+    target_slides: Optional[int] = None,
     model: str = DEFAULT_MODEL,
     effort: str = "high",
     notes: Optional[str] = None,
@@ -294,21 +378,58 @@ def redesign_deck(
     api_key: Optional[str] = None,
     client=None,
 ) -> tuple[ComposeResult, RedesignResult]:
-    """End to end: extract eligible content from `deck_path`, ask Claude to
-    redesign it into a `compose.py` outline, then build that outline onto
-    the org template exactly as `deckguard create` would -- same layout
-    selection, same final brand-compliance pass. Ineligible slides
-    (tables, charts, embedded media, overfull content) are never sent to
-    the model and never appear in the output; they're reported back in
-    `RedesignResult.skipped` for manual handling, same as `retemplate`.
+    """One entry point for all three starting points:
+
+    - `deck_path` set, `brief` unset: redesign an existing deck's
+      content onto the org template (blank slides in it are skipped,
+      same as any other unsafe-to-touch content, since there's no brief
+      to author them from).
+    - `deck_path` set, `brief` set: redesign the deck's real content
+      AND author its blank slides from the brief, as one coherent deck.
+    - `deck_path` unset, `brief` set: no source deck at all -- author
+      the entire outline from the brief, exactly like asking a designer
+      to build a deck on a topic from nothing.
+
+    Whichever mode, everything downstream is identical: the resulting
+    outline runs through the same `build_deck`/`fix_deck` pipeline
+    `deckguard create` uses, so layout selection and brand compliance
+    are guaranteed the same way regardless of which mode produced it.
+    Slides with real content this project's rules already consider
+    unsafe to reinterpret (a table, chart, embedded object, or more
+    content than any layout can hold) are never sent to the model in
+    any mode; they're reported back in `RedesignResult.skipped`.
     """
-    prs = Presentation(str(deck_path))
-    eligible, skipped = extract_eligible_slides(prs)
-    if not eligible:
-        raise RedesignError("no slide in this deck is eligible for automatic redesign (see skipped reasons)")
+    if out_path is None:
+        raise RedesignError("out_path is required")
+
+    eligible: list = []
+    blank_indices: list = []
+    skipped: list = []
+    if deck_path is not None:
+        prs = Presentation(str(deck_path))
+        eligible, all_skipped = extract_eligible_slides(prs)
+        blank_indices, skipped = partition_skipped(all_skipped)
+
+    if not eligible and not blank_indices and not brief:
+        raise RedesignError(
+            "nothing to work with: the deck has no eligible content to redesign and no --brief was given "
+            "to generate from (pass --brief to fill blank slides, or to build a new deck with no source at all)"
+        )
+
+    effective_target = target_slides
+    if effective_target is None and (eligible or blank_indices):
+        effective_target = len(eligible) + len(blank_indices)
 
     raw_slides, usage = call_claude_for_outline(
-        eligible, model=model, effort=effort, notes=notes, api_key=api_key, client=client
+        eligible,
+        blank_count=len(blank_indices),
+        brief=brief,
+        target_slides=effective_target,
+        model=model,
+        effort=effort,
+        notes=notes,
+        api_key=api_key,
+        client=client,
     )
     outline = outline_from_list(_strip_ai_only_fields(raw_slides))
 

@@ -440,16 +440,25 @@ async def redesign_route(request: Request, _auth: None = Depends(_require_auth))
     _cleanup_old_uploads()
     form = await request.form()
     file = form.get("file")
-    if not isinstance(file, _FormUploadFile) or not file.filename or not file.filename.lower().endswith(".pptx"):
-        return tpl.page_shell("deckguard", tpl.redesign_form("Please upload a .pptx file."))
+    has_file = isinstance(file, _FormUploadFile) and bool(file.filename)
+    if has_file and not file.filename.lower().endswith(".pptx"):
+        return tpl.page_shell("deckguard", tpl.redesign_form("That upload must be a .pptx file."))
+
+    brief = str(form.get("brief") or "").strip() or None
+    if not has_file and not brief:
+        return tpl.page_shell("deckguard", tpl.redesign_form("Upload a deck, add a brief, or both."))
 
     model = str(form.get("model") or "claude-opus-5")
     effort = str(form.get("effort") or "high")
     notes = str(form.get("notes") or "").strip() or None
+    slides_raw = str(form.get("slides") or "").strip()
+    target_slides = int(slides_raw) if slides_raw.isdigit() else None
 
     token = uuid.uuid4().hex
     work_dir = STORAGE_ROOT / token
-    source_path = await _save_upload(file, work_dir)
+    work_dir.mkdir(parents=True, exist_ok=True)
+    source_path = await _save_upload(file, work_dir) if has_file else None
+    out_name = file.filename if has_file else "new deck"
 
     try:
         from deckguard.redesign import RedesignError, redesign_deck
@@ -457,7 +466,8 @@ async def redesign_route(request: Request, _auth: None = Depends(_require_auth))
         config = _load_engine_config()
         output_path = work_dir / "redesigned.pptx"
         compose_result, redesign_result = redesign_deck(
-            source_path, str(output_path), model=model, effort=effort, notes=notes, rules_config=config,
+            source_path, str(output_path), brief=brief, target_slides=target_slides,
+            model=model, effort=effort, notes=notes, rules_config=config,
         )
     except RedesignError as exc:
         shutil.rmtree(work_dir, ignore_errors=True)
@@ -471,12 +481,12 @@ async def redesign_route(request: Request, _auth: None = Depends(_require_auth))
 
     download_links = {"pptx": f"/download/{token}/redesigned.pptx"}
     body = tpl.redesign_result_page(
-        file.filename,
+        out_name,
         report_mod.redesign_result_to_dict(redesign_result),
         report_mod.compose_result_to_dict(compose_result),
         download_links,
     )
-    return tpl.page_shell(f"Redesigned — {file.filename}", body)
+    return tpl.page_shell(f"Redesigned — {out_name}", body)
 
 
 @app.get("/download/{token}/{filename}")

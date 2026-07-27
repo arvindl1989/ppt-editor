@@ -158,7 +158,7 @@ merges on brand compliance.
 | Command | Purpose |
 |---|---|
 | `create <outline.yaml> --out <deck.pptx>` | Generates a new deck straight onto the org template's own layouts from a YAML content outline — see "Composing a new deck" below. `--append <deck.pptx>` appends onto a copy of an existing deck instead of starting fresh. |
-| `redesign <deck> --out <deck.pptx>` | AI-assisted counterpart to `create`: judges each eligible slide's kind with Claude, then builds it through the same deterministic pipeline — see "AI-assisted redesign" below. Needs `ANTHROPIC_API_KEY`. |
+| `redesign [deck] --out <deck.pptx> [--brief TEXT]` | AI-assisted counterpart to `create`, from any starting point: redesigns an existing deck's content, fills its blank slides from `--brief`, or (with no deck at all) builds one from just a brief — then builds through the same deterministic pipeline either way. See "AI-assisted redesign" below. Needs `ANTHROPIC_API_KEY`. |
 | `inspect <deck>` | Full structured inventory: shapes, fills, fonts (raw + normalized), sizes, alignment, images (with perceptual hash), effects, layout/master usage. The discovery tool for growing `brand_rules.yaml` from real decks. |
 | `fix <deck>` | Applies deterministic corrections: color remap (fills, gradients, text, lines, theme), font remap (run + theme/master/layout level), logo replacement by image hash, forbidden text-effect removal, forced left-alignment. |
 | `audit <deck\|folder>` | Reports violations (slide, element, rule, severity, auto-fixable). Folder mode writes a per-deck report plus a `summary.csv`. |
@@ -271,14 +271,28 @@ Two things `create` deliberately does not attempt:
 ## AI-assisted redesign
 
 `deckguard redesign` is the judgment layer `create` can't provide on its
-own: instead of a hand-written outline, you hand it an *existing* deck
-(on-brand or not — a random export, an old template, whatever someone
-uploads) and Claude decides which `create` slide kind each slide's
-content should become.
+own, and it works from any starting point — the goal is that a brand
+new deck, a mostly-empty one, and a completely off-brand one all land
+on the org template the way a human designer would build them, through
+one command:
 
 ```bash
 export ANTHROPIC_API_KEY=sk-...
+
+# 1. Redesign an existing, possibly off-brand deck
 deckguard redesign old_deck.pptx --out redesigned.pptx
+
+# 2. A deck that's mostly empty -- redesign its real content AND
+#    author its blank slides from a brief, as one coherent whole
+deckguard redesign half_empty.pptx --out filled.pptx \
+  --brief "Q3 update on the predictive-maintenance rollout"
+
+# 3. No deck at all -- build one from nothing, like asking a designer
+#    for a deck on a topic
+deckguard redesign --out from_scratch.pptx \
+  --brief "A short deck on predictive maintenance for facilities managers" \
+  --slides 8
+
 # -> wrote: redesigned.pptx
 #    9 slide(s) using layouts: Cover B, Section divider (just title), ...
 #    (a table with the skipped-slides list, if any)
@@ -286,28 +300,49 @@ deckguard redesign old_deck.pptx --out redesigned.pptx
 ```
 
 **What's deterministic and what's AI-judged is a hard line, not a
-blur.** Content extraction reuses `retemplate.py`'s own `classify_slide`
-verbatim — the exact same eligibility rules that already govern
-`retemplate` decide what's safe to touch here too, so a slide with a
-table, chart, embedded object, or more content than any layout can hold
-is never sent to the model at all; it's skipped and reported, same as
-`retemplate`. The model's only job, per eligible slide, is picking a
-`kind` (cover/agenda/section/content/quote/statement/stat/timeline/end/
-blank) and lightly copy-editing that slide's own extracted text into
-it — never inventing facts, numbers, or claims. Its output is validated
-against a JSON schema shaped exactly like `create`'s own outline format
-(see `compose.outline_from_list`), so from that point on a human-written
-YAML outline and an AI-generated one are indistinguishable: both run
-through the identical `build_deck` — same layout selection, same final
-`fix_deck` brand-compliance pass. Nothing about color, font, or
-layout-approval judgment is ever delegated to the model.
+blur, in every one of those three modes.** Content extraction reuses
+`retemplate.py`'s own `classify_slide` verbatim — the exact same
+eligibility rules that already govern `retemplate` decide what's safe
+to touch here too, so a slide with a table, chart, embedded object, or
+more content than any layout can hold is never sent to the model at
+all, brief or no brief — it's skipped and reported, same as
+`retemplate`. The model makes exactly two kinds of judgment call, kept
+explicitly separate in its instructions:
 
-Options: `--model` (default `claude-opus-5`; pass `claude-sonnet-5` for
-a cheaper run), `--effort` (`low`/`medium`/`high`/`xhigh`/`max`, default
-`high`), `--notes` (free-text steering appended to the model's
-instructions, e.g. `--notes "prefer stat slides for anything with a
-percentage"` — the way to tune behavior without touching code), and the
-same `--template`/`--rules` options `create` takes.
+- For a slide **with real source content**: which `kind`
+  (cover/agenda/section/content/quote/statement/stat/timeline/end/
+  blank) it should become, and a light copy-edit into that kind's
+  fields — never inventing facts, numbers, or claims not already on
+  that slide.
+- For a **blank slide, or a bare brief with no slide behind it at
+  all**: the opposite rule — there's nothing to preserve, so the model
+  is instructed to write real, specific content grounded in the brief
+  (never vague filler, never a fabricated number where the brief didn't
+  give one).
+
+A blank slide is genuinely blank (no title, text, or images at all) —
+distinguishable by `retemplate.EMPTY_SLIDE_REASON` from every other
+skip reason, which stays a hard skip regardless of a brief.
+
+Either way, the model's output is validated against a JSON schema
+shaped exactly like `create`'s own outline format (see
+`compose.outline_from_list`), so a human-written YAML outline, a
+redesigned deck, and a from-scratch AI-authored one are
+indistinguishable from that point on — all three run through the
+identical `build_deck` — same layout selection, same final `fix_deck`
+brand-compliance pass. Nothing about color, font, or layout-approval
+judgment is ever delegated to the model, in any mode.
+
+Options: `--brief` (topic/description — required if you omit DECK,
+also fills any blank slides in a DECK you do give it), `--slides`
+(target total slide count; omit it and Claude judges an appropriate
+length from the brief's scope), `--model` (default `claude-opus-5`;
+pass `claude-sonnet-5` for a cheaper run), `--effort`
+(`low`/`medium`/`high`/`xhigh`/`max`, default `high`), `--notes`
+(free-text steering appended to the model's instructions, e.g.
+`--notes "prefer stat slides for anything with a percentage"` — the
+way to tune behavior without touching code), and the same
+`--template`/`--rules` options `create` takes.
 
 **Cost.** Each run prints the API's real `usage` token counts and a
 rough estimate (`Usage.estimated_cost_usd` in `redesign.py`, using the

@@ -352,7 +352,29 @@ def test_redesign_route_rejects_non_pptx(tmp_path, monkeypatch):
     client, _ = _client(tmp_path, monkeypatch)
     resp = client.post("/redesign", files={"file": ("d.txt", b"not a deck", "text/plain")})
     assert resp.status_code == 200
-    assert "upload a .pptx" in resp.text.lower()
+    assert "must be a .pptx" in resp.text.lower()
+
+
+def test_redesign_route_requires_a_file_or_a_brief(tmp_path, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    client, _ = _client(tmp_path, monkeypatch)
+    resp = client.post("/redesign", data={})
+    assert resp.status_code == 200
+    assert "upload a deck, add a brief" in resp.text.lower()
+
+
+def _fake_redesign_deck_factory(compose_result, redesign_result):
+    def fake_redesign_deck(
+        deck_path, out_path, brief=None, target_slides=None, model="claude-opus-5", effort="high",
+        notes=None, template_path=None, rules_config=None, api_key=None, client=None,
+    ):
+        from pptx import Presentation as _P
+        prs = _P()
+        prs.slides.add_slide(prs.slide_layouts[0])
+        prs.save(out_path)
+        return compose_result, redesign_result
+
+    return fake_redesign_deck
 
 
 def test_redesign_route_success_with_mocked_engine(tmp_path, monkeypatch):
@@ -362,20 +384,13 @@ def test_redesign_route_success_with_mocked_engine(tmp_path, monkeypatch):
     from deckguard import redesign as redesign_mod
     from deckguard.compose import ComposeResult
 
-    def fake_redesign_deck(deck_path, out_path, model="claude-opus-5", effort="high", notes=None, template_path=None, rules_config=None, api_key=None, client=None):
-        from pptx import Presentation as _P
-        prs = _P()
-        prs.slides.add_slide(prs.slide_layouts[0])
-        prs.save(out_path)
-        compose_result = ComposeResult(slide_count=1, layouts_used=["Cover B"], manual_review=[])
-        redesign_result = redesign_mod.RedesignResult(
-            outline=None,
-            skipped=[redesign_mod.SkippedSlide(slide_index=2, reason="contains a table")],
-            usage=redesign_mod.Usage(input_tokens=1500, output_tokens=700, model=model),
-        )
-        return compose_result, redesign_result
-
-    monkeypatch.setattr(redesign_mod, "redesign_deck", fake_redesign_deck)
+    compose_result = ComposeResult(slide_count=1, layouts_used=["Cover B"], manual_review=[])
+    redesign_result = redesign_mod.RedesignResult(
+        outline=None,
+        skipped=[redesign_mod.SkippedSlide(slide_index=2, reason="contains a table")],
+        usage=redesign_mod.Usage(input_tokens=1500, output_tokens=700, model="claude-opus-5"),
+    )
+    monkeypatch.setattr(redesign_mod, "redesign_deck", _fake_redesign_deck_factory(compose_result, redesign_result))
 
     deck = tmp_path / "d.pptx"
     _write_violating_deck(deck)
@@ -394,6 +409,39 @@ def test_redesign_route_success_with_mocked_engine(tmp_path, monkeypatch):
     dl = client.get(m.group(0))
     assert dl.status_code == 200
     assert dl.headers["content-type"].startswith("application/vnd.openxmlformats")
+
+
+def test_redesign_route_builds_from_brief_with_no_uploaded_file(tmp_path, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    client, _ = _client(tmp_path, monkeypatch)
+
+    from deckguard import redesign as redesign_mod
+    from deckguard.compose import ComposeResult
+
+    compose_result = ComposeResult(slide_count=3, layouts_used=["Cover B", "Content"], manual_review=[])
+    redesign_result = redesign_mod.RedesignResult(
+        outline=None, skipped=[], usage=redesign_mod.Usage(input_tokens=900, output_tokens=400, model="claude-opus-5")
+    )
+    captured = {}
+
+    def fake_redesign_deck(deck_path, out_path, brief=None, target_slides=None, **kwargs):
+        captured["deck_path"] = deck_path
+        captured["brief"] = brief
+        captured["target_slides"] = target_slides
+        from pptx import Presentation as _P
+        prs = _P()
+        prs.slides.add_slide(prs.slide_layouts[0])
+        prs.save(out_path)
+        return compose_result, redesign_result
+
+    monkeypatch.setattr(redesign_mod, "redesign_deck", fake_redesign_deck)
+
+    resp = client.post("/redesign", data={"brief": "A deck about predictive maintenance", "slides": "5"})
+    assert resp.status_code == 200
+    assert "Redesigned — new deck" in resp.text
+    assert captured["deck_path"] is None
+    assert captured["brief"] == "A deck about predictive maintenance"
+    assert captured["target_slides"] == 5
 
 
 def test_learn_flow_and_downloads(tmp_path, monkeypatch):

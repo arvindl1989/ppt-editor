@@ -224,14 +224,24 @@ opt-in rather than on by default.</p>
     return f"""{error_html}<div class="card">
 <h2 style="margin-top:0;font-size:1.05rem;">Redesign a deck with AI</h2>
 <p style="color:var(--ink-muted);font-size:0.88rem;margin:0 0 1rem;">
-  Upload any deck — on-brand or not. Claude reads each slide's extracted text and judges which layout kind
-  (cover, content, quote, stat, timeline, ...) it should become; the result is built through the same
-  deterministic engine <code>create</code> uses, so color/font/layout compliance is guaranteed either way —
-  only the "what kind of slide is this" judgment call is delegated to the model. Slides with a table, chart,
-  or embedded media are left alone and reported, never guessed at.
+  Works from any starting point: upload an existing deck (on-brand or not — Claude judges which layout kind
+  each slide's content should become), add a brief to also author its blank slides, or skip the upload
+  entirely and describe a deck to build from nothing. Every mode runs through the same deterministic engine
+  <code>create</code> uses, so color/font/layout compliance is guaranteed either way — only "what kind of
+  slide is this, and what does it say" is ever delegated to the model. A slide with a table, chart, or
+  embedded media is always left alone and reported, brief or no brief, never guessed at.
 </p>
 <form method="post" action="/redesign" enctype="multipart/form-data">
-  <input type="file" name="file" accept=".pptx" required style="margin-bottom:1rem;">
+  <label style="display:block;font-size:0.82rem;color:var(--ink-muted);margin-bottom:0.3rem;">
+    Existing deck to redesign (optional — omit to build a new deck from just the brief below)
+  </label>
+  <input type="file" name="file" accept=".pptx" style="margin-bottom:1rem;">
+  <label style="display:block;font-size:0.82rem;color:var(--ink-muted);margin-bottom:0.3rem;">
+    Brief (required if no deck is uploaded; also used to author any blank slides in an uploaded deck)
+  </label>
+  <textarea name="brief" rows="2" placeholder="e.g. a short deck on predictive maintenance for facilities managers"
+    style="width:100%;font-size:0.85rem;padding:0.6rem;border-radius:8px;border:1px solid var(--border);
+    background:var(--surface);color:var(--ink);margin-bottom:1rem;"></textarea>
   <label style="display:block;font-size:0.82rem;color:var(--ink-muted);margin-bottom:0.3rem;">
     Optional steering notes for the model
   </label>
@@ -252,6 +262,9 @@ opt-in rather than on by default.</p>
         <option value="high" selected>high</option>
         <option value="xhigh">xhigh</option>
       </select>
+    </label>
+    <label style="font-size:0.82rem;color:var(--ink-muted);">Target slide count (optional)
+      <input type="number" name="slides" min="1" max="60" style="display:block;margin-top:0.3rem;width:6rem;">
     </label>
   </div>
   <div class="btn-row">

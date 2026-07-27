@@ -51,6 +51,14 @@ MAX_TEXT_BLOCKS = 3
 MAX_IMAGES = 4
 MAX_PREVIEW_CHARS = 120
 
+# classify_slide's ineligibility reason for a genuinely blank slide --
+# distinct from every OTHER ineligibility reason (table/chart/media/
+# overfull), which mean "this has real content we can't safely
+# reinterpret." A blank slide has nothing to protect; redesign.py uses
+# this exact string to tell "empty, safe to author from a brief" apart
+# from "has content, must never be touched or guessed at."
+EMPTY_SLIDE_REASON = "no title, text, or images to migrate"
+
 # The org template's "ordinary content" layouts -- deliberately excludes
 # Cover/Section/Agenda/Statement/Quote/Outro/End/REPORT-*/Blank, which are
 # special-purpose or structural, not sensible targets for an arbitrary old
@@ -171,7 +179,7 @@ def classify_slide(slide, slide_height_in: Optional[float] = None) -> SlideProfi
             return SlideProfile(None, [], [], False, "too many free-form shapes to safely reflow")
 
     if title is None and not text_blocks and not images:
-        return SlideProfile(None, [], [], False, "no title, text, or images to migrate")
+        return SlideProfile(None, [], [], False, EMPTY_SLIDE_REASON)
     if len(text_blocks) > MAX_TEXT_BLOCKS:
         return SlideProfile(None, [], [], False, "more body text blocks than any template layout can hold")
     if len(images) > MAX_IMAGES:
