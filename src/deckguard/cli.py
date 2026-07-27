@@ -501,7 +501,8 @@ def create(outline_path: str, out_path: str, append_path: Optional[str], templat
 @click.option("--notes", default=None, help="Extra steering text appended to the model's instructions (e.g. \"prefer stat slides for anything with a percentage\"). Ignored in --mode brand.")
 @click.option(
     "--mode", type=click.Choice(["rewrite", "brand"]), default="rewrite", show_default=True,
-    help="'rewrite': Claude edits/condenses wording and picks a kind. "
+    help="'rewrite': Claude picks each slide's kind/layout and re-lays-out its existing wording -- never rewords or "
+    "condenses; a slide with more text than one layout holds is split across multiple output slides instead. "
     "'brand': fully deterministic, no API key needed -- text/images carry over verbatim, only layout/variant and the cover/closing slide change.",
 )
 @click.option(
@@ -520,11 +521,16 @@ def redesign(
     model: str, effort: str, notes: Optional[str], mode: str, review: bool, template: Optional[str], rules_path: Optional[str],
 ):
     """Build a deck onto the org template, from any starting point: an
-    existing DECK (redesigns its real content), DECK plus --brief (also
-    authors its blank slides), or --brief alone with no DECK at all (a
-    brand-new deck built from nothing, the way a designer would from a
-    topic). All three need --mode rewrite (the default) and Claude's
-    judgment on wording.
+    existing DECK (re-lays-out its real content), DECK plus --brief
+    (also authors its blank slides), or --brief alone with no DECK at
+    all (a brand-new deck built from nothing, the way a designer would
+    from a topic). All three need --mode rewrite (the default) and
+    Claude's judgment. For a slide that already has real content, that
+    judgment is layout ONLY -- which kind/layout fits it, and, when it
+    doesn't fit on one slide, how to split its existing wording across
+    several rather than condensing -- never a word changed. A blank
+    slide or a bare brief is the opposite: there's nothing to preserve,
+    so the model is authoring real content there, grounded in the brief.
 
     --mode brand is a different, fully deterministic animal: no LLM
     call, no API key, and no wording changes -- it just carries DECK's
@@ -535,11 +541,11 @@ def redesign(
     Whichever mode, everything downstream is identical to `create`:
     same deterministic layout selection, same final brand-compliance
     pass, so nothing about color, font, or approved-layout judgment is
-    ever left to the model -- only "what kind of slide is this, and
-    what does it say" is (and in --mode brand, not even that). A slide
-    with a table, chart, embedded object, or more content than any
-    layout can hold is never guessed at -- it's skipped and reported,
-    same as `retemplate`.
+    ever left to the model -- only "what kind of slide is this, and how
+    should its existing content be laid out" is (and in --mode brand,
+    not even that). A slide with a table, chart, embedded object, or
+    more content than any layout can hold is never guessed at -- it's
+    skipped and reported, same as `retemplate`.
 
     --mode rewrite requires an ANTHROPIC_API_KEY (the `anthropic`
     package is a base dependency) and prints the API's real token usage

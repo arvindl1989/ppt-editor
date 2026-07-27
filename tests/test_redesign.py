@@ -185,7 +185,7 @@ def test_extract_eligible_slides_still_skips_truly_excessive_text_volume():
     _eligible, skipped = extract_eligible_slides(prs)
 
     assert len(skipped) == 1
-    assert "reasonably condensed" in skipped[0].reason
+    assert "reasonably split" in skipped[0].reason
 
 
 def test_extract_eligible_slides_still_hard_skips_tables_regardless_of_text_cap():
@@ -315,6 +315,63 @@ def test_redesign_deck_builds_a_valid_composed_deck(tmp_path):
 
     out_prs = Presentation(str(out_path))
     assert len(out_prs.slides) == 2
+
+
+def test_redesign_deck_allows_one_source_slide_to_split_across_multiple_output_slides(tmp_path):
+    """Direct response to explicit direction: AI mode must never reword
+    or condense real source content -- when it doesn't fit one layout,
+    it should split across multiple output slides instead (all sharing
+    the same source_slide_index), never dropping or paraphrasing
+    anything. This is a prompt-level instruction the model follows, not
+    something the schema enforces, so this test drives the pipeline
+    with a fake response that already reflects that -- the real
+    assertion is that redesign_deck's plumbing (outline building,
+    image backfill) tolerates and correctly handles multiple entries
+    sharing one source index."""
+    img_path = make_pattern_png(tmp_path / "img.png", seed=6)
+
+    prs = new_deck()
+    slide = add_slide(prs)
+    title_run(slide).text = "Dense slide"
+    for i in range(5):
+        box = slide.shapes.add_textbox(Inches(1), Inches(0.3 * i), Inches(3), Inches(0.25))
+        box.text_frame.text = f"Point {i}"
+    add_picture(slide, str(img_path))
+    src_path = tmp_path / "source.pptx"
+    prs.save(str(src_path))
+
+    response_json = _outline_json(
+        _slide_item(1, kind="content", title="Dense slide (1/2)", bullets=["Point 0", "Point 1", "Point 2"]),
+        _slide_item(1, kind="content", title="Dense slide (2/2)", bullets=["Point 3", "Point 4"]),
+    )
+    client = _FakeClient(_FakeResponse(response_json))
+
+    out_path = tmp_path / "redesigned.pptx"
+    compose_result, _redesign_result = redesign_deck(str(src_path), str(out_path), client=client)
+
+    assert compose_result.slide_count == 2
+    out_prs = Presentation(str(out_path))
+    assert len(out_prs.slides) == 2
+    all_text = "\n".join(
+        shp.text_frame.text for slide in out_prs.slides for shp in slide.shapes
+        if shp.has_text_frame and shp.text_frame.text.strip()
+    )
+    for i in range(5):
+        assert f"Point {i}" in all_text
+
+    # the source slide's one image is attached to only the FIRST split
+    # entry, never duplicated onto both
+    def _image_blobs(slide):
+        blobs = []
+        for shp in slide.shapes:
+            try:
+                blobs.append(shp.image.blob)
+            except (AttributeError, ValueError):
+                continue
+        return blobs
+
+    slide_image_counts = [len(_image_blobs(s)) for s in out_prs.slides]
+    assert sorted(slide_image_counts) == [0, 1]
 
 
 def test_redesign_deck_carries_source_images_into_the_redesigned_slide(tmp_path):

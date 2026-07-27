@@ -17,24 +17,28 @@ logic lives:
   is running in.
 - What's DIFFERENT from `retemplate` on purpose: retemplate caps a
   slide at `MAX_TEXT_BLOCKS` (3) separate text boxes, because it
-  carries content over VERBATIM -- that's the literal max placeholder
-  count any layout offers, a real ceiling, not a style choice. redesign
-  has no such cap on block *count* at all: it's already trusted to
-  rewrite/condense wording, so how many boxes the original text was
-  split across is irrelevant to whether it's safe to redesign. What it
-  caps instead is total text *volume* (`REDESIGN_MAX_TEXT_CHARS`), and
-  generously -- a sanity ceiling against a pathological/corrupted file,
-  not a second-guess of an ordinary dense slide. (Two earlier versions
-  of this file got this wrong: first reusing retemplate's block-count
-  cap unmodified, then replacing it with a *higher* block-count cap
-  that was still the wrong metric -- see `_classify_slide_for_redesign`.)
-- The LLM call decides two things, and only two: per slide WITH source
-  content, which `compose.py` slide *kind* best fits it (a light
-  copy-edit, never inventing facts); and, for a blank slide or a bare
-  topic brief with no slide behind it at all, what content to AUTHOR
-  from the brief to make the deck whole. Those are different rules
-  (never-invent vs. please-invent-from-the-brief) and the prompt keeps
-  them explicitly separate so the model never blurs them.
+  carries content over verbatim onto exactly ONE new slide -- that's
+  the literal max placeholder count any single layout offers, a real
+  ceiling. redesign also carries content over verbatim (never
+  rewording, never condensing -- see REDESIGN_RULES), but isn't
+  confined to one output slide for it: a source slide with more text
+  than any layout holds gets SPLIT across multiple output slides
+  instead, so nothing is ever dropped or paraphrased just because it
+  was originally typed into a lot of text boxes. What redesign caps is
+  total text *volume* (`REDESIGN_MAX_TEXT_CHARS`), and generously -- a
+  sanity ceiling against a pathological/corrupted file (an unbounded
+  number of split slides is still a real cost/quality concern), not a
+  second-guess of an ordinary dense slide.
+- The LLM call decides two things, and only two, for a slide WITH
+  source content: which `compose.py` slide *kind* best fits it, and --
+  when it doesn't fit on one slide -- how to split its existing text
+  across as many output slides as it takes. It is never asked to, and
+  the prompt explicitly forbids it from, changing a single word of
+  that text. Separately, for a blank slide or a bare topic brief with
+  no slide behind it at all, it decides what content to AUTHOR from
+  the brief to make the deck whole -- the opposite rule
+  (never-invent vs. please-invent-from-the-brief), and the prompt keeps
+  the two explicitly separate so the model never blurs them.
 - The model's output is validated against a JSON schema shaped exactly
   like `compose.py`'s own outline dict format (see `outline_from_list`),
   so a human-written YAML outline, a redesigned deck, and a
@@ -93,14 +97,17 @@ DEFAULT_MODEL = "claude-opus-5"
 
 # Deliberately NOT a cap on text-block *count* (a first cut at this used
 # one, at 10 -- still wrong, and for the same reason a cap of 3 was
-# wrong: block count doesn't measure how much there is to condense. A
+# wrong: block count doesn't measure how much there is to place. A
 # slide split across 20 tiny caption boxes has less actual content than
-# one with 3 paragraph-sized text boxes, and redesign condenses either
-# way regardless of how the original was carved up. What actually bounds
-# the work (and the cost) is total text VOLUME, so that's what's capped
-# here -- generously, since even a genuinely dense slide is a few
-# thousand characters at most; this exists to catch a pathological or
-# corrupted file, not to second-guess an ordinary hand-built slide.
+# one with 3 paragraph-sized text boxes, and redesign carries every one
+# of them over verbatim regardless of how the original was carved up
+# -- splitting across multiple output slides rather than condensing,
+# see REDESIGN_RULES. What actually bounds the work (and the cost,
+# since an unbounded split is still real output) is total text VOLUME,
+# so that's what's capped here -- generously, since even a genuinely
+# dense slide is a few thousand characters at most; this exists to
+# catch a pathological or corrupted file, not to second-guess an
+# ordinary hand-built slide.
 REDESIGN_MAX_TEXT_CHARS = 20_000
 REDESIGN_MAX_IMAGES = 12
 
@@ -130,11 +137,14 @@ def _classify_slide_for_redesign(slide, slide_height_in: Optional[float] = None)
     """Same shape-safety rules as retemplate.classify_slide (a table,
     chart, embedded object, media, group, or decorative-shape overload
     is still a hard skip -- never touched, brief or no brief). No cap on
-    text-block *count* at all -- redesign condenses rather than carrying
-    content over verbatim, so how many boxes the original text happened
-    to be split across is irrelevant; only total text *volume* is capped
-    (generously), and image count gets a higher ceiling than
-    retemplate's, since redesign is allowed to select a subset."""
+    text-block *count* at all -- redesign carries every block over
+    verbatim, splitting across multiple output slides rather than
+    condensing when one won't hold it all (see REDESIGN_RULES), so how
+    many boxes the original text happened to be split across is
+    irrelevant; only total text *volume* is capped (generously, as a
+    sanity ceiling against an unbounded split on a pathological file),
+    and image count gets a higher ceiling than retemplate's, since
+    redesign is allowed to select a subset."""
     title, text_blocks, images, reason = _extract_slide_content(slide, slide_height_in)
     if reason:
         return SlideProfile(None, [], [], False, reason)
@@ -142,7 +152,7 @@ def _classify_slide_for_redesign(slide, slide_height_in: Optional[float] = None)
         return SlideProfile(None, [], [], False, EMPTY_SLIDE_REASON)
     total_chars = sum(len(text) for block in text_blocks for _level, text in block)
     if total_chars > REDESIGN_MAX_TEXT_CHARS:
-        return SlideProfile(None, [], [], False, "far more text than can be reasonably condensed onto one slide")
+        return SlideProfile(None, [], [], False, "far more text than could be reasonably split across a few slides")
     if len(images) > REDESIGN_MAX_IMAGES:
         return SlideProfile(None, [], [], False, "far more images than any layout could hold")
     return SlideProfile(title=title, text_blocks=text_blocks, images=images, eligible=True)
@@ -185,24 +195,31 @@ General rules:
 
 REDESIGN_RULES = """\
 Rules for slides that have ORIGINAL source content (see the extracted
-text below) -- these are a REDESIGN, not a rewrite:
+text below) -- this is RE-LAYOUT, not a rewrite. Your only job for
+these slides is deciding which `kind` and layout best presents content
+that already exists -- never editing what it says:
 - Never invent facts, numbers, names, or claims that are not present in
   that slide's own extracted source text.
-- Tighten and professionalize wording (sentence case, concise, no
-  filler) but preserve the original meaning.
+- Never paraphrase, tighten, summarize, or condense the wording either
+  -- carry every bullet/line over VERBATIM, character for character
+  (light structural cleanup only: e.g. dropping a "Subject:" prefix
+  from something that's clearly a title, is fine; rewriting a sentence
+  is not). If the source text is genuinely messy, it stays messy --
+  fixing prose is not this tool's job.
 - Every layout has a real capacity limit (at most 3 body columns, a
   handful of bullets each). A source slide may have far more raw text
   than that -- it was likely built by hand with many separate text
-  boxes. When that happens, DO NOT try to preserve every line: condense
-  to the most important, representative points, the way an editor
-  would summarize a dense slide into a clean one. Losing minor detail
-  in service of a slide someone can actually read is correct behavior
-  here, not a failure -- the alternative (an unreadable wall of bullets,
-  or being skipped and left out of the deck entirely) is worse. Use
-  `columns` to organize genuinely multi-part content into up to 3
-  side-by-side groups if that reads better than one long list.
-- Return exactly one outline entry per source slide provided, in order,
-  each with its correct `source_slide_index`.
+  boxes. When that happens, DO NOT drop or condense anything: return
+  MULTIPLE outline entries for that one source slide instead, each
+  with the SAME `source_slide_index`, splitting its bullets/columns
+  across them so every line ends up somewhere. Use as few slides as
+  keep each one readable (usually 2-3), and keep them adjacent in your
+  output so the split reads as one continuous section. Use `columns`
+  to organize genuinely multi-part content into up to 3 side-by-side
+  groups on any one of those slides if that reads better than a single
+  list.
+- Every source slide must appear in your output at least once, in
+  order, each entry carrying its correct `source_slide_index`.
 """
 
 AUTHORING_RULES = """\
@@ -480,9 +497,10 @@ REVIEW_ITEM_SCHEMA = {
         },
         "note": {
             "type": ["string", "null"],
-            "description": "A short (one sentence) note on anything else about this slide's text that reads "
-            "as off-brand -- e.g. leftover placeholder text, a stray internal comment. Null if nothing stands out. "
-            "This is a text-only judgment call (no visual rendering is shown), so only flag what the text itself reveals.",
+            "description": "A short (one sentence) note flagging unreplaced placeholder/template copy (e.g. "
+            "\"Lorem ipsum\", \"[bracketed placeholder]\", \"PRODUCT NAME\") or a confidentiality/proprietary "
+            "notice worded differently than plain \"Confidential\". Null if neither is visible in the text. "
+            "Text-only judgment (no visual rendering is shown) -- never guess at colors, fonts, or layout.",
         },
     },
     "required": ["slide_index", "is_divider", "divider_title", "note"],
@@ -500,12 +518,26 @@ REVIEW_RULES = """\
 Each slide below was left untouched by a deterministic brand-compliance pass
 because it has real content that can't be safely rewritten (see its "reason"
 field for why -- e.g. more text than any layout could hold, or a genuinely
-short heading with nothing else on the slide). Your only job is to spot the
-second case: a slide that is actually a short section-divider or transition
-page -- like an "Appendix", "Q&A", "Next Steps", or "Thank You" break
-between sections -- which the org template has a purpose-built divider
-layout for, currently unused because this slide instead kept its old,
-off-brand structure.
+short heading with nothing else on the slide). You have two jobs, both
+narrow, both text-only (you're given a preview, not a rendering, so never
+guess at colors, fonts, or layout you can't see):
+
+1. Spot a slide that is actually a short section-divider or transition
+   page -- like an "Appendix", "Q&A", "Next Steps", or "Thank You" break
+   between sections -- which the org template has a purpose-built divider
+   layout for, currently unused because this slide instead kept its old,
+   off-brand structure.
+2. Separately, in `note`, flag anything else the text preview itself
+   plainly reveals as off-brand or leftover, specifically:
+   - Placeholder/template copy that was never replaced with real content
+     (e.g. "[bracketed placeholder]", "Lorem ipsum...", "PRODUCT NAME",
+     "TBD", "XXX", "Insert text here").
+   - A confidentiality/proprietary/internal-use notice worded differently
+     than plain "Confidential" (which a separate deterministic pass
+     already removes on its own) -- e.g. "Internal use only",
+     "Proprietary and confidential", "Do not distribute".
+   Don't speculate beyond what the text shows -- if nothing like this is
+   visible, note is null.
 
 Rules:
 - Mark is_divider true ONLY for a slide whose entire real content is a
@@ -515,10 +547,6 @@ Rules:
 - divider_title must be taken verbatim (or lightly trimmed, e.g. dropping
   a "Subject:" prefix) from that slide's own extracted text -- never
   invent or guess a title for a slide that doesn't already have one.
-- note is optional and text-only: you are given a text preview, not a
-  rendering of the slide, so only flag something the text itself reveals
-  (e.g. obvious leftover placeholder copy) -- never guess at colors,
-  fonts, or layout you can't see.
 - Return exactly one entry per slide listed, in the same order.
 """
 
@@ -612,12 +640,25 @@ def _attach_source_images(raw_slides: list, eligible: list) -> list:
     model call rather than asking the model to round-trip image data it
     never needed to see. Capped per slide at REDESIGN_IMAGES_PER_SLIDE so
     a slide that had many images still lands on a layout match_layout can
-    actually find (see that constant's own comment)."""
+    actually find (see that constant's own comment).
+
+    A source slide's content can now legally split across MULTIPLE
+    output entries sharing the same source_slide_index (see
+    REDESIGN_RULES) -- its images are attached only to the FIRST such
+    entry, never duplicated onto every split piece, since the same
+    picture appearing on 2-3 consecutive slides would look like a
+    copy-paste mistake, not a deliberate choice.
+    """
     images_by_source_index = {i: profile.images[:REDESIGN_IMAGES_PER_SLIDE] for i, profile in eligible}
+    attached_indices: set = set()
     for slide in raw_slides:
-        images = images_by_source_index.get(slide.get("source_slide_index"))
+        src = slide.get("source_slide_index")
+        if src in attached_indices:
+            continue
+        images = images_by_source_index.get(src)
         if images:
             slide["images"] = images
+            attached_indices.add(src)
     return raw_slides
 
 

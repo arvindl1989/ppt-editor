@@ -316,9 +316,14 @@ separate in its instructions:
 
 - For a slide **with real source content**: which `kind`
   (cover/agenda/section/content/quote/statement/stat/timeline/end/
-  blank) it should become, and a light copy-edit into that kind's
-  fields — never inventing facts, numbers, or claims not already on
-  that slide.
+  blank) it should become — and nothing about the wording itself.
+  Content is carried over **verbatim**: no rewording, no condensing,
+  no inventing facts, numbers, or claims not already on that slide. If
+  a source slide has more text than any single layout can hold, the
+  model splits it across multiple output slides (all tagged with that
+  same source slide) rather than dropping or paraphrasing anything —
+  see "Dense, hand-built slides are split, not condensed or skipped"
+  below.
 - For a **blank slide, or a bare brief with no slide behind it at
   all**: the opposite rule — there's nothing to preserve, so the model
   is instructed to write real, specific content grounded in the brief
@@ -329,26 +334,23 @@ A blank slide is genuinely blank (no title, text, or images at all) —
 distinguishable by `retemplate.EMPTY_SLIDE_REASON` from every other
 skip reason, which stays a hard skip regardless of a brief.
 
-**Dense, hand-built slides are condensed, not skipped, no matter how
-many text boxes they were split into.** `retemplate` caps a slide at 3
-separate text boxes because it carries content over *verbatim* — a
-real ceiling, since no layout offers more than 3 body placeholders to
-carry unedited text into. `redesign` has **no cap on text-box count at
-all**: it's already trusted to rewrite and condense wording, so how
-many boxes the original happened to be split across (3 or 30) doesn't
-matter — the model is instructed to select the most important points
-rather than trying to preserve every line, regardless of how the
-source was structured. What redesign caps instead is total text
+**Dense, hand-built slides are split, not condensed or skipped, no
+matter how many text boxes they were built from.** `retemplate` caps a
+slide at 3 separate text boxes because it carries content over
+*verbatim* onto exactly ONE new slide — a real ceiling, since no
+layout offers more than 3 body placeholders. `redesign` also carries
+content over verbatim (on explicit direction: it never rewords or
+condenses a source slide's own text, full stop), but isn't confined to
+one output slide for it — a slide with more text than any layout holds
+gets split across as many output slides as it takes (typically 2-3),
+all sharing that slide's `source_slide_index`, rather than losing or
+paraphrasing anything. What redesign caps instead is total text
 *volume* (`REDESIGN_MAX_TEXT_CHARS`, generously) — a sanity ceiling
-against a pathological/corrupted file, not a second-guess of an
-ordinary dense slide. (This went through two wrong iterations before
-landing here: first inheriting retemplate's block-count cap unmodified,
-then replacing it with a higher block-count cap that was still the
-wrong metric — a slide's actual content volume was never what block
-count measured.) The rules that DO stay hard skips regardless — a
-table, chart, embedded object, media, or grouped shape — are exactly
-the ones no amount of rewriting can safely reinterpret; a brief never
-overrides them.
+against a pathological/corrupted file (an unbounded split is still a
+real cost), not a second-guess of an ordinary dense slide. The rules
+that DO stay hard skips regardless — a table, chart, embedded object,
+media, or grouped shape — are exactly the ones no amount of relayout
+can safely reinterpret; a brief never overrides them.
 
 **Images are carried over, not just text.** The model is never shown
 the actual pixels — its outline schema doesn't have an `images`
@@ -468,19 +470,28 @@ own verbatim-carryover rules allow — correctly left alone, since
 nothing in that hard-skip list is something a heuristic should guess
 its way around.
 
-`--review` adds exactly one narrowly-scoped judgment call for this:
-it looks only at slides `--mode brand` already left untouched (never a
-rebuilt slide), asks Claude a single yes/no question per slide — "does
-this read as a short divider page, and if so what should its title
-say" — and for anything answered yes, rebuilds that ONE slide onto the
-org template's own Section Divider layout with that title, taken
-verbatim from the slide's own text (never invented). Nothing else
-about the deck changes, and no other kind of edit is made — this is
-deliberately not a second `--mode rewrite`. Anything else the model
-notices worth a human's attention comes back as plain-text findings
-(`RedesignResult.review_notes`, printed by the CLI) rather than being
-silently applied — the model is shown a text preview, not a rendering,
-so its judgment there is necessarily limited to what the text reveals.
+`--review` adds exactly two narrowly-scoped judgment calls for this,
+both looking only at slides `--mode brand` already left untouched
+(never a rebuilt slide):
+
+1. **Divider detection, the one thing it's allowed to actually fix.**
+   "Does this read as a short divider page, and if so what should its
+   title say" — for anything answered yes, it rebuilds that ONE slide
+   onto the org template's own Section Divider layout with that title,
+   taken verbatim from the slide's own text (never invented). Nothing
+   else about the deck changes.
+2. **Two more categories, flagged but never auto-applied:** unreplaced
+   placeholder/template copy (e.g. "Lorem ipsum", "[bracketed
+   placeholder]", "PRODUCT NAME") and a confidentiality/proprietary
+   notice worded differently than plain "Confidential" (which a
+   separate deterministic pass already removes on its own). These come
+   back as plain-text findings (`RedesignResult.review_notes`, printed
+   by the CLI) for a human to act on, not silently applied.
+
+Nothing beyond those two categories is in scope — this is deliberately
+not a second `--mode rewrite`, and the model is shown a text preview,
+not a rendering, so its judgment is necessarily limited to what the
+text itself reveals.
 
 ## Config reference (`brand_rules.yaml`)
 
