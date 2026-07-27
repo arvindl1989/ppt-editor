@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
+from functools import lru_cache
 from io import BytesIO
 from typing import Optional
 
@@ -168,6 +169,7 @@ def find_shapes_in_region(shapes, region_emu: tuple) -> list:
     return matches
 
 
+@lru_cache(maxsize=8)
 def reference_logo_geometry(template_path) -> Optional[tuple]:
     """The current org template's own standard corner-logo size and
     position (left, top, width, height, in EMU) -- the ground truth for
@@ -186,6 +188,10 @@ def reference_logo_geometry(template_path) -> Optional[tuple]:
     content layout" position is correct, not an arbitrary tiebreak).
     Returns None if the template can't be read or has no such shape at
     all -- callers should fall back to their own prior behavior.
+    Cached (`lru_cache`) since this reparses a 60-layout template from
+    scratch and `fix_deck`/`apply_rebrand` may call it many times in
+    one process -- the bundled template's own geometry can't change
+    mid-run.
     """
     from pptx import Presentation
 

@@ -1,8 +1,10 @@
 import hashlib
 
+import pytest
 from lxml import etree
 from pptx import Presentation
 from pptx.enum.text import PP_ALIGN
+from pptx.util import Inches
 
 from deckguard import logo as logo_mod
 from deckguard.config import load_config, default_config_path
@@ -98,6 +100,24 @@ def test_fix_is_idempotent_on_a_clean_deck():
     set_run(title_run(slide), text="Title", font="Inter Semi Bold", color_hex="141414")
     set_run(body_run(slide), text="Body copy", font="Inter", color_hex="141414")
     slide.placeholders[1].text_frame.paragraphs[0].alignment = PP_ALIGN.LEFT
+
+    # The stock template's own DATE/SLIDE_NUMBER layout placeholders don't
+    # match the org template's position either -- bring those up to brand
+    # too, same reasoning as the theme/font lines above.
+    from deckguard.fixer import _reference_placeholder_geometry
+    from deckguard.slide_import import default_template_path
+
+    layout = slide.slide_layout
+    containers = [layout.placeholders, layout.slide_master.shapes]
+    for container in containers:
+        for ph in container:
+            if not getattr(ph, "is_placeholder", False):
+                continue
+            ph_type = ph.placeholder_format.type
+            if ph_type is not None and ph_type.name in ("DATE", "SLIDE_NUMBER"):
+                geom = _reference_placeholder_geometry(default_template_path(), ph_type.name)
+                if geom:
+                    ph.left, ph.top, ph.width, ph.height = geom
 
     report = fix_deck(prs, CONFIG, source_path="clean.pptx", output_path=None, dry_run=True)
     # Nothing to fix except the (unfixable) slide-size mismatch and
@@ -595,7 +615,7 @@ def test_fix_forces_brand_font_and_color_onto_unstyled_footer_text():
     prs = new_deck()
     slide = add_slide(prs)
     footer_ph = _add_layout_placeholder_to_slide(slide, "FOOTER")
-    footer_ph.text_frame.text = "Confidential | © Some Corp"
+    footer_ph.text_frame.text = "Some Corp Internal"
     run = footer_ph.text_frame.paragraphs[0].runs[0]
     assert run.font.name is None  # sanity: no explicit override to start with
     assert run.font.color.type is None
@@ -621,7 +641,7 @@ def test_fix_never_overrides_a_footer_run_with_an_explicit_color_already():
     prs = new_deck()
     slide = add_slide(prs)
     footer_ph = _add_layout_placeholder_to_slide(slide, "FOOTER")
-    footer_ph.text_frame.text = "Confidential"
+    footer_ph.text_frame.text = "Some Corp Internal"
     run = footer_ph.text_frame.paragraphs[0].runs[0]
     run.font.name = "Inter SemiBold"  # already approved -- the general font pass has nothing to fix
     from pptx.dml.color import RGBColor
@@ -670,3 +690,55 @@ def test_fix_footer_chrome_leaves_ordinary_body_placeholders_alone():
     report = fix_deck(prs, CONFIG, source_path="in.pptx", output_path=None, dry_run=True)
 
     assert not any(c.rule == "footer_chrome_default" for c in report.changes)
+
+
+def test_fix_repositions_date_and_slide_number_to_brand_position():
+    """Regression test for a real report: an old deck's own layout had
+    slide-number at the LEFT edge and its confidentiality/footer text
+    at the RIGHT -- backwards from the org template's own convention
+    (date left, slide number right, confirmed by direct inspection)."""
+    from deckguard.fixer import _reference_placeholder_geometry
+    from deckguard.slide_import import default_template_path
+
+    if not default_template_path().exists():
+        pytest.skip("bundled template asset not present")
+
+    prs = new_deck()
+    slide = add_slide(prs)
+    layout = slide.slide_layout
+    date_ph = next(ph for ph in layout.placeholders if ph.placeholder_format.type.name == "DATE")
+    slidenum_ph = next(ph for ph in layout.placeholders if ph.placeholder_format.type.name == "SLIDE_NUMBER")
+    # deliberately swapped from brand -- slide number on the left, date on the right
+    date_ph.left, slidenum_ph.left = Inches(9), Inches(0.2)
+
+    fix_deck(prs, CONFIG, source_path="in.pptx", output_path=None, dry_run=True)
+
+    expected_date = _reference_placeholder_geometry(default_template_path(), "DATE")
+    expected_slidenum = _reference_placeholder_geometry(default_template_path(), "SLIDE_NUMBER")
+    assert (date_ph.left, date_ph.top, date_ph.width, date_ph.height) == expected_date
+    assert (slidenum_ph.left, slidenum_ph.top, slidenum_ph.width, slidenum_ph.height) == expected_slidenum
+    assert date_ph.left < slidenum_ph.left  # date ends up left of slide number, as brand requires
+
+
+def test_fix_removes_confidentiality_footer_text():
+    prs = new_deck()
+    slide = add_slide(prs)
+    footer_ph = _add_layout_placeholder_to_slide(slide, "FOOTER")
+    footer_ph.text_frame.text = "Confidential  |  © KONE Corporation"
+
+    report = fix_deck(prs, CONFIG, source_path="in.pptx", output_path=None, dry_run=True)
+
+    assert any(c.rule == "confidentiality_footer_removed" for c in report.changes)
+    assert footer_ph.text_frame.text == ""
+
+
+def test_fix_leaves_an_ordinary_footer_line_alone():
+    prs = new_deck()
+    slide = add_slide(prs)
+    footer_ph = _add_layout_placeholder_to_slide(slide, "FOOTER")
+    footer_ph.text_frame.text = "Q3 2026 Investor Update"
+
+    report = fix_deck(prs, CONFIG, source_path="in.pptx", output_path=None, dry_run=True)
+
+    assert not any(c.rule == "confidentiality_footer_removed" for c in report.changes)
+    assert footer_ph.text_frame.text == "Q3 2026 Investor Update"

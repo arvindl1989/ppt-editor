@@ -19,11 +19,14 @@ loaded from a copy, and `--dry-run` simply skips the final `prs.save()`.
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
 from lxml import etree
+from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.enum.dml import MSO_COLOR_TYPE
 from pptx.enum.shapes import MSO_SHAPE_TYPE
@@ -246,6 +249,117 @@ def _replace_old_logo_region_everywhere(prs, region_in, new_logo_path: Optional[
             )
         )
 
+    return changes
+
+
+@lru_cache(maxsize=32)
+def _reference_placeholder_geometry(template_path, ph_type_name: str) -> Optional[tuple]:
+    """Majority (left, top, width, height) EMU for every layout's own
+    `ph_type_name`-type placeholder (e.g. "DATE", "SLIDE_NUMBER") in the
+    org template -- same "the current template defines the ground
+    truth" principle as `logo.reference_logo_geometry`, generalized to
+    any placeholder type. Returns None if the template can't be read or
+    has no such placeholder at all. Cached for the same reason
+    `reference_logo_geometry` is -- see its docstring.
+    """
+    try:
+        prs = Presentation(str(template_path))
+    except Exception:  # noqa: BLE001 -- missing/corrupt template, not fatal to the caller
+        return None
+
+    sizes: Counter = Counter()
+    for master in prs.slide_masters:
+        for layout in master.slide_layouts:
+            for ph in layout.placeholders:
+                ph_type = ph.placeholder_format.type
+                if ph_type is not None and ph_type.name == ph_type_name and None not in (ph.left, ph.top, ph.width, ph.height):
+                    sizes[(ph.left, ph.top, ph.width, ph.height)] += 1
+    if not sizes:
+        return None
+    return sizes.most_common(1)[0][0]
+
+
+def _normalize_footer_chrome_position(prs) -> list[Change]:
+    """Reposition DATE/SLIDE_NUMBER placeholders on every master/layout
+    in the deck onto the org template's own position -- date on the
+    left, slide number on the right, confirmed by direct inspection of
+    the bundled template. Real, confirmed defect this fixes: an old
+    deck's own layout had these swapped (slide number at the LEFT edge,
+    its confidentiality/footer text occupying the RIGHT). Only ever
+    repositions -- never touches text/content -- and skips a
+    placeholder already at the reference position, so an already-
+    correct deck is left byte-for-byte untouched on this axis.
+    """
+    from deckguard.slide_import import default_template_path
+
+    changes: list[Change] = []
+    reference = {}
+    for ph_type_name in ("DATE", "SLIDE_NUMBER"):
+        geom = _reference_placeholder_geometry(default_template_path(), ph_type_name)
+        if geom:
+            reference[ph_type_name] = geom
+    if not reference:
+        return changes
+
+    containers = []
+    seen_masters = set()
+    for master in colors_mod.iter_slide_masters(prs):
+        if id(master.part) not in seen_masters:
+            seen_masters.add(id(master.part))
+            containers.append(("master", master.name, master.shapes))
+        for layout in master.slide_layouts:
+            containers.append(("layout", layout.name, layout.shapes))
+
+    for scope, location, shapes in containers:
+        for shp in shapes:
+            if not getattr(shp, "is_placeholder", False):
+                continue
+            ph_type = shp.placeholder_format.type
+            if ph_type is None or ph_type.name not in reference:
+                continue
+            if None in (shp.left, shp.top, shp.width, shp.height):
+                continue
+            target = reference[ph_type.name]
+            if (shp.left, shp.top, shp.width, shp.height) == target:
+                continue
+            shp.left, shp.top, shp.width, shp.height = target
+            changes.append(
+                Change(
+                    scope=scope, rule="footer_chrome_position", field=ph_type.name.lower(),
+                    old=None, new=None, location=location,
+                )
+            )
+    return changes
+
+
+CONFIDENTIALITY_FOOTER_MARKER = "confidential"
+
+
+def _remove_confidentiality_footer_text(prs) -> list[Change]:
+    """Clear a FOOTER placeholder's text on every slide where it reads
+    as a confidentiality/copyright boilerplate line (matched
+    case-insensitively on the word "confidential", e.g. "Confidential |
+    (c) KONE Corporation") -- removed outright on explicit direction,
+    not just recolored/refonted like ordinary footer chrome. Only ever
+    touches a FOOTER placeholder specifically, and only when it
+    contains that marker word -- never guesses at any other text.
+    """
+    changes: list[Change] = []
+    for i, slide in enumerate(prs.slides, start=1):
+        for shp in slide.placeholders:
+            ph_type = shp.placeholder_format.type
+            if ph_type is None or ph_type.name != "FOOTER" or not shp.has_text_frame:
+                continue
+            text = shp.text_frame.text
+            if CONFIDENTIALITY_FOOTER_MARKER not in text.lower():
+                continue
+            shp.text_frame.clear()
+            changes.append(
+                Change(
+                    scope="slide", rule="confidentiality_footer_removed", field="text",
+                    old=text.strip(), new="", slide_index=i, shape_id=shp.shape_id, shape_name=shp.name,
+                )
+            )
     return changes
 
 
@@ -717,7 +831,9 @@ def fix_deck(prs, config: dict, source_path: str, output_path: Optional[str], dr
     # shape surgery earlier in this same run) before saving -- see
     # _dedupe_shape_ids_in_part's own docstring for why this matters.
     changes += _dedupe_shape_ids(prs)
+    changes += _remove_confidentiality_footer_text(prs)
     changes += _normalize_footer_chrome_text(prs, config)
+    changes += _normalize_footer_chrome_position(prs)
 
     if not dry_run and output_path:
         prs.save(output_path)
