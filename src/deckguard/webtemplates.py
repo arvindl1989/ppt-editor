@@ -253,6 +253,9 @@ def compose_form(error: str | None = None) -> str:
   afterward. See the README for the full outline schema (slide kinds: cover,
   agenda, section, content, quote, statement, stat, timeline, end, blank).
 </p>
+<p class="note">Don't want to hand-write YAML? Skip to <a href="#redesign">AI redesign</a>
+  below, leave "Existing deck" empty, and just type what the deck should be about — Claude
+  writes the outline and builds it on these same approved layouts.</p>
 <form method="post" action="/create">
   <textarea name="outline" rows="16" style="width:100%;font-family:ui-monospace,'SF Mono',Consolas,monospace;
     font-size:0.85rem;padding:0.75rem;border-radius:8px;border:1px solid var(--border);
