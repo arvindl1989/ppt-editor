@@ -124,8 +124,8 @@ def _open_presentation_or_error(path: Path) -> Presentation:
 
 @app.get("/", response_class=HTMLResponse)
 def index(_auth: None = Depends(_require_auth)):
-    redesign_enabled = bool(os.environ.get("ANTHROPIC_API_KEY"))
-    body = tpl.upload_form() + tpl.compose_form() + tpl.redesign_form(enabled=redesign_enabled)
+    ai_enabled = bool(os.environ.get("ANTHROPIC_API_KEY"))
+    body = tpl.upload_form() + tpl.compose_form() + tpl.redesign_form(ai_enabled=ai_enabled)
     return tpl.page_shell("deckguard", body)
 
 
@@ -429,24 +429,34 @@ async def create_route(request: Request, _auth: None = Depends(_require_auth)):
 
 @app.post("/redesign", response_class=HTMLResponse)
 async def redesign_route(request: Request, _auth: None = Depends(_require_auth)):
-    # Server-opt-in only: this is the one route in the app that spends the
-    # operator's own money on every request, so it never runs unless the
-    # operator has set ANTHROPIC_API_KEY themselves -- never accept a key
-    # from the client, and never let an unconfigured server silently bill
-    # anyone.
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        return tpl.page_shell("deckguard", tpl.redesign_form(enabled=False))
+    ai_enabled = bool(os.environ.get("ANTHROPIC_API_KEY"))
 
     _cleanup_old_uploads()
     form = await request.form()
+    mode = str(form.get("mode") or "rewrite")
+    if mode not in ("rewrite", "brand"):
+        return tpl.page_shell("deckguard", tpl.redesign_form("Invalid mode.", ai_enabled=ai_enabled))
+    # Server-opt-in only for AI rewrite: it's the one route in the app that
+    # spends the operator's own money on every request, so it never runs
+    # unless the operator has set ANTHROPIC_API_KEY themselves -- never
+    # accept a key from the client, and never let an unconfigured server
+    # silently bill anyone. Brand mode makes no API call at all, so it has
+    # no such gate.
+    if mode == "rewrite" and not ai_enabled:
+        return tpl.page_shell("deckguard", tpl.redesign_form(ai_enabled=False))
+
     file = form.get("file")
     has_file = isinstance(file, _FormUploadFile) and bool(file.filename)
     if has_file and not file.filename.lower().endswith(".pptx"):
-        return tpl.page_shell("deckguard", tpl.redesign_form("That upload must be a .pptx file."))
+        return tpl.page_shell("deckguard", tpl.redesign_form("That upload must be a .pptx file.", ai_enabled=ai_enabled))
 
     brief = str(form.get("brief") or "").strip() or None
-    if not has_file and not brief:
-        return tpl.page_shell("deckguard", tpl.redesign_form("Upload a deck, add a brief, or both."))
+    if mode == "brand":
+        if not has_file:
+            return tpl.page_shell("deckguard", tpl.redesign_form("Brand mode needs an uploaded deck.", ai_enabled=ai_enabled))
+        brief = None  # brand mode never authors content -- ignore a stray brief rather than erroring on it
+    elif not has_file and not brief:
+        return tpl.page_shell("deckguard", tpl.redesign_form("Upload a deck, add a brief, or both.", ai_enabled=ai_enabled))
 
     model = str(form.get("model") or "claude-opus-5")
     effort = str(form.get("effort") or "high")
@@ -467,17 +477,17 @@ async def redesign_route(request: Request, _auth: None = Depends(_require_auth))
         output_path = work_dir / "redesigned.pptx"
         compose_result, redesign_result = redesign_deck(
             source_path, str(output_path), brief=brief, target_slides=target_slides,
-            model=model, effort=effort, notes=notes, rules_config=config,
+            model=model, effort=effort, notes=notes, rules_config=config, mode=mode,
         )
     except RedesignError as exc:
         shutil.rmtree(work_dir, ignore_errors=True)
-        return tpl.page_shell("deckguard", tpl.redesign_form(str(exc)))
+        return tpl.page_shell("deckguard", tpl.redesign_form(str(exc), ai_enabled=ai_enabled))
     except HTTPException as exc:
         shutil.rmtree(work_dir, ignore_errors=True)
-        return tpl.page_shell("deckguard", tpl.redesign_form(str(exc.detail)))
+        return tpl.page_shell("deckguard", tpl.redesign_form(str(exc.detail), ai_enabled=ai_enabled))
     except Exception as exc:  # noqa: BLE001
         shutil.rmtree(work_dir, ignore_errors=True)
-        return tpl.page_shell("deckguard", tpl.redesign_form(f"Redesign failed: {exc}"))
+        return tpl.page_shell("deckguard", tpl.redesign_form(f"Redesign failed: {exc}", ai_enabled=ai_enabled))
 
     download_links = {"pptx": f"/download/{token}/redesigned.pptx"}
     body = tpl.redesign_result_page(

@@ -53,11 +53,20 @@ logic lives:
   among them. Which images survive is a deterministic backfill after the
   model call, capped per slide at `REDESIGN_IMAGES_PER_SLIDE`.
 
-Three ways to call `redesign_deck`, matched to the three starting points:
+Three ways to call `redesign_deck` in its default `mode="rewrite"`,
+matched to the three starting points:
 
     redesign_deck("old_deck.pptx", out_path)                  # redesign
     redesign_deck("half_empty.pptx", out_path, brief="...")   # fill gaps
     redesign_deck(None, out_path, brief="...")                # from scratch
+
+A fourth, orthogonal option -- `mode="brand"` -- skips the LLM
+entirely: it's `retemplate.apply_rebrand`'s fully deterministic
+verbatim-carryover-plus-layout-variety-plus-cover/end-swap path (see
+its own docstring), for a deck whose wording is fine as written and
+just needs to land on brand. No API key needed.
+
+    redesign_deck("old_deck.pptx", out_path, mode="brand")
 
 Requires the `anthropic` package (a base dependency -- see
 requirements.txt / pyproject.toml) and an `ANTHROPIC_API_KEY` at
@@ -464,6 +473,31 @@ def _attach_source_images(raw_slides: list, eligible: list) -> list:
     return raw_slides
 
 
+def _rebrand_deck(deck_path, out_path, template_path=None, rules_config: Optional[dict] = None):
+    """mode='brand' path: no LLM call at all, so wrap `apply_rebrand`'s
+    result into the same `(ComposeResult, RedesignResult)` shape the
+    rewrite path returns, for a single consistent return type regardless
+    of mode. `Usage` is all zeros with `model="none"` -- there's no API
+    call to report, and `Usage.estimated_cost_usd` is already defined to
+    read as $0 for an unrecognized model."""
+    from deckguard.retemplate import apply_rebrand
+
+    rebrand_result = apply_rebrand(str(deck_path), out_path, template_path=template_path, rules_config=rules_config)
+
+    layouts_used = [p.layout_name for p in rebrand_result.proposals if p.eligible and p.layout_name]
+    compose_result = ComposeResult(
+        slide_count=len(rebrand_result.transformed), layouts_used=layouts_used, manual_review=rebrand_result.manual_review
+    )
+    skipped = [
+        SkippedSlide(slide_index=p.slide_index, reason=p.reason or "not eligible")
+        for p in rebrand_result.proposals if not p.eligible
+    ]
+    redesign_result = RedesignResult(
+        outline=Outline(slides=[]), skipped=skipped, usage=Usage(input_tokens=0, output_tokens=0, model="none")
+    )
+    return compose_result, redesign_result
+
+
 def redesign_deck(
     deck_path=None,
     out_path=None,
@@ -476,6 +510,7 @@ def redesign_deck(
     rules_config: Optional[dict] = None,
     api_key: Optional[str] = None,
     client=None,
+    mode: str = "rewrite",
 ) -> tuple[ComposeResult, RedesignResult]:
     """One entry point for all three starting points:
 
@@ -497,9 +532,31 @@ def redesign_deck(
     unsafe to reinterpret (a table, chart, embedded object, or more
     content than any layout can hold) are never sent to the model in
     any mode; they're reported back in `RedesignResult.skipped`.
+
+    `mode`: "rewrite" (default) is everything described above -- the AI
+    edits/condenses wording and picks a kind. "brand" is a completely
+    different, fully deterministic path with no LLM call and no API key
+    needed at all: `retemplate.apply_rebrand` carries every eligible
+    slide's text/images over VERBATIM, picks layouts with an anti-repeat
+    tie-break for visual variety, and swaps a confidently-detected cover/
+    closing slide onto the current brand layout -- see that function's
+    own docstring. `brief`/`target_slides`/`model`/`effort`/`notes`/
+    `api_key`/`client` are all rewrite-mode-only and are rejected if
+    `mode="brand"`; `deck_path` is required in brand mode since there's
+    no content to rework without one.
     """
     if out_path is None:
         raise RedesignError("out_path is required")
+
+    if mode not in ("rewrite", "brand"):
+        raise RedesignError(f"mode must be 'rewrite' or 'brand', got {mode!r}")
+
+    if mode == "brand":
+        if deck_path is None:
+            raise RedesignError("mode='brand' needs a source deck (it never authors content, only re-lays-out what's there)")
+        if brief is not None:
+            raise RedesignError("mode='brand' never authors content, so --brief doesn't apply -- use mode='rewrite' instead")
+        return _rebrand_deck(deck_path, out_path, template_path=template_path, rules_config=rules_config)
 
     eligible: list = []
     blank_indices: list = []

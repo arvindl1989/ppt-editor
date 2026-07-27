@@ -495,10 +495,15 @@ def create(outline_path: str, out_path: str, append_path: Optional[str], templat
     help="Topic/description to author new content from. Required if DECK is omitted; also fills any blank "
     "slides in DECK when one is given, alongside redesigning its real content.",
 )
-@click.option("--slides", "target_slides", type=int, default=None, help="Target total slide count (default: let Claude judge).")
-@click.option("--model", default="claude-opus-5", show_default=True, help="Claude model to use for the redesign judgment call.")
+@click.option("--slides", "target_slides", type=int, default=None, help="Target total slide count (default: let Claude judge). Ignored in --mode brand.")
+@click.option("--model", default="claude-opus-5", show_default=True, help="Claude model to use for the redesign judgment call. Ignored in --mode brand.")
 @click.option("--effort", type=click.Choice(["low", "medium", "high", "xhigh", "max"]), default="high", show_default=True)
-@click.option("--notes", default=None, help="Extra steering text appended to the model's instructions (e.g. \"prefer stat slides for anything with a percentage\").")
+@click.option("--notes", default=None, help="Extra steering text appended to the model's instructions (e.g. \"prefer stat slides for anything with a percentage\"). Ignored in --mode brand.")
+@click.option(
+    "--mode", type=click.Choice(["rewrite", "brand"]), default="rewrite", show_default=True,
+    help="'rewrite': Claude edits/condenses wording and picks a kind. "
+    "'brand': fully deterministic, no API key needed -- text/images carry over verbatim, only layout/variant and the cover/closing slide change.",
+)
 @click.option(
     "--template", type=click.Path(exists=True, dir_okay=False), default=None,
     help="Org template .pptx to build on (default: the bundled KONE master template).",
@@ -506,30 +511,41 @@ def create(outline_path: str, out_path: str, append_path: Optional[str], templat
 @click.option("--rules", "rules_path", type=click.Path(exists=True, dir_okay=False), default=None)
 def redesign(
     deck: Optional[str], out_path: str, brief: Optional[str], target_slides: Optional[int],
-    model: str, effort: str, notes: Optional[str], template: Optional[str], rules_path: Optional[str],
+    model: str, effort: str, notes: Optional[str], mode: str, template: Optional[str], rules_path: Optional[str],
 ):
-    """Build a deck onto the org template using Claude for judgment,
-    from any starting point: an existing DECK (redesigns its real
-    content), DECK plus --brief (also authors its blank slides), or
-    --brief alone with no DECK at all (a brand-new deck built from
-    nothing, the way a designer would from a topic).
+    """Build a deck onto the org template, from any starting point: an
+    existing DECK (redesigns its real content), DECK plus --brief (also
+    authors its blank slides), or --brief alone with no DECK at all (a
+    brand-new deck built from nothing, the way a designer would from a
+    topic). All three need --mode rewrite (the default) and Claude's
+    judgment on wording.
+
+    --mode brand is a different, fully deterministic animal: no LLM
+    call, no API key, and no wording changes -- it just carries DECK's
+    text/images over verbatim onto approved layouts (picked for visual
+    variety) and swaps a confidently-detected cover/closing slide onto
+    the current brand layout. Needs a DECK; --brief doesn't apply.
 
     Whichever mode, everything downstream is identical to `create`:
     same deterministic layout selection, same final brand-compliance
     pass, so nothing about color, font, or approved-layout judgment is
     ever left to the model -- only "what kind of slide is this, and
-    what does it say" is. A slide with a table, chart, embedded object,
-    or more content than any layout can hold is never guessed at, brief
-    or no brief -- it's skipped and reported, same as `retemplate`.
+    what does it say" is (and in --mode brand, not even that). A slide
+    with a table, chart, embedded object, or more content than any
+    layout can hold is never guessed at -- it's skipped and reported,
+    same as `retemplate`.
 
-    Requires an ANTHROPIC_API_KEY (the `anthropic` package is a base
-    dependency). Prints the API's real token usage and a rough cost
-    estimate when done.
+    --mode rewrite requires an ANTHROPIC_API_KEY (the `anthropic`
+    package is a base dependency) and prints the API's real token usage
+    and a rough cost estimate when done.
     """
     from deckguard.redesign import RedesignError, redesign_deck
 
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        console.print("[bold red]error:[/] ANTHROPIC_API_KEY is not set — `redesign` needs an Anthropic API key.")
+    if mode == "rewrite" and not os.environ.get("ANTHROPIC_API_KEY"):
+        console.print("[bold red]error:[/] ANTHROPIC_API_KEY is not set — `redesign` needs an Anthropic API key (or pass --mode brand, which doesn't).")
+        sys.exit(1)
+    if mode == "brand" and not deck:
+        console.print("[bold red]error:[/] --mode brand needs a DECK to work from (it never authors content).")
         sys.exit(1)
     if not deck and not brief:
         console.print("[bold red]error:[/] pass a DECK to redesign, --brief to build from scratch, or both.")
@@ -542,7 +558,7 @@ def redesign(
     try:
         compose_result, redesign_result = redesign_deck(
             deck, str(out), brief=brief, target_slides=target_slides, model=model, effort=effort, notes=notes,
-            template_path=template, rules_config=config,
+            template_path=template, rules_config=config, mode=mode,
         )
     except RedesignError as exc:
         console.print(f"[bold red]error:[/] {exc}")
@@ -552,8 +568,9 @@ def redesign(
     console.print(
         f"[cyan]{compose_result.slide_count} slide(s)[/] using layouts: {', '.join(sorted(set(compose_result.layouts_used)))}"
     )
+    skip_title = "Skipped (needs manual handling)" if mode == "brand" else "Skipped (not sent to the model — needs manual handling)"
     if redesign_result.skipped:
-        table = Table(title="Skipped (not sent to the model — needs manual handling)")
+        table = Table(title=skip_title)
         table.add_column("Slide")
         table.add_column("Reason")
         for s in redesign_result.skipped:
@@ -562,11 +579,14 @@ def redesign(
     if compose_result.manual_review:
         console.print(f"[yellow]{len(compose_result.manual_review)} finding(s) need manual review[/]")
 
-    u = redesign_result.usage
-    console.print(
-        f"[dim]tokens: {u.input_tokens} in / {u.output_tokens} out — "
-        f"est. cost ${u.estimated_cost_usd:.3f} ({u.model})[/]"
-    )
+    if mode == "brand":
+        console.print("[dim]mode: brand — fully deterministic, no API call made[/]")
+    else:
+        u = redesign_result.usage
+        console.print(
+            f"[dim]tokens: {u.input_tokens} in / {u.output_tokens} out — "
+            f"est. cost ${u.estimated_cost_usd:.3f} ({u.model})[/]"
+        )
 
 
 if __name__ == "__main__":

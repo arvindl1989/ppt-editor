@@ -256,15 +256,26 @@ class LayoutMatch:
     score: int
 
 
-def match_layout(profile: SlideProfile, layout_profiles: list[LayoutProfile]) -> Optional[LayoutMatch]:
+def match_layout(
+    profile: SlideProfile, layout_profiles: list[LayoutProfile], usage_counts: Optional[dict] = None
+) -> Optional[LayoutMatch]:
     """Pick the tightest-fitting candidate layout that can hold every
     piece of this slide's content -- never one that would force dropping
-    a text block or image. None if nothing qualifies."""
+    a text block or image. None if nothing qualifies.
+
+    `usage_counts` (optional, `{layout_name: times already used}`) only
+    ever breaks a TIE between equally-good fits -- it can never make a
+    worse-fitting layout win over a better one. Passed by `apply_rebrand`
+    so a deck's slides don't all land on the same "obvious" layout; every
+    other caller omits it and gets the exact fit-only behavior this
+    function has always had (every count reads as 0, so ties resolve by
+    candidate-list order same as before).
+    """
     title_needed = profile.title is not None
     n_body_needed = len(profile.text_blocks)
     n_pic_needed = len(profile.images)
 
-    best: Optional[tuple[int, str]] = None
+    best: Optional[tuple[tuple[int, int], str]] = None
     for lp in layout_profiles:
         if title_needed and not lp.has_title:
             continue
@@ -273,13 +284,14 @@ def match_layout(profile: SlideProfile, layout_profiles: list[LayoutProfile]) ->
         waste = (lp.n_body - n_body_needed) + (lp.n_picture - n_pic_needed)
         if lp.has_title and not title_needed:
             waste += 1
-        score = -waste
+        used = usage_counts.get(lp.name, 0) if usage_counts else 0
+        score = (-waste, -used)
         if best is None or score > best[0]:
             best = (score, lp.name)
 
     if best is None:
         return None
-    return LayoutMatch(layout_name=best[1], score=best[0])
+    return LayoutMatch(layout_name=best[1], score=best[0][0])
 
 
 @dataclass
@@ -415,7 +427,21 @@ def apply_retemplate(
         shutil.copy(deck_path, out_path)
         return result
 
-    needed_layouts = sorted({proposal_by_index[i].layout_name for i in accepted})
+    layout_by_index = {i: proposal_by_index[i].layout_name for i in accepted}
+    _rebuild_accepted_slides(deck_path, out_path, template_path, accepted, layout_by_index)
+    return result
+
+
+def _rebuild_accepted_slides(
+    deck_path, out_path, template_path, accepted: set, layout_by_index: dict
+) -> None:
+    """Shared slide-surgery for `apply_retemplate` and `apply_rebrand`:
+    rebuild every slide index in `accepted` on the layout named in
+    `layout_by_index[index]`, carrying its content over verbatim, in the
+    original slide's own position -- every other slide in the deck is
+    left byte-for-byte untouched. Saves to `out_path` itself.
+    """
+    needed_layouts = sorted(set(layout_by_index[i] for i in accepted))
     tmp_path = Path(out_path).with_suffix(".layouts.pptx")
     import_layouts(deck_path, str(template_path), str(tmp_path), needed_layouts)
 
@@ -447,7 +473,7 @@ def apply_retemplate(
             old_partname = original_partnames[orig_idx - 1]
             old_slide = next(s for s in prs2.slides if str(s.part.partname).lstrip("/") == old_partname)
             profile = classify_slide(old_slide, slide_height_in)  # re-derive from the still-intact original (bytes are unchanged from `prs`)
-            layout = layout_by_name[proposal_by_index[orig_idx].layout_name]
+            layout = layout_by_name[layout_by_index[orig_idx]]
 
             new_slide = prs2.slides.add_slide(layout)
             _transplant_content(new_slide, profile)
@@ -469,4 +495,129 @@ def apply_retemplate(
     finally:
         tmp_path.unlink(missing_ok=True)
 
-    return result
+
+# The org template's current title/closing layouts -- what a confidently
+# detected cover or closing slide gets force-swapped onto in
+# apply_rebrand, in place of whatever ordinary-content layout would
+# otherwise fit it. Same names `compose.py` uses for a from-scratch
+# cover/end slide (its default cover variant, and its only end layout),
+# kept as plain literals here rather than imported to avoid a circular
+# import (compose.py already imports FROM this module).
+REBRAND_COVER_LAYOUT = "Cover B"
+REBRAND_END_LAYOUT = "Outro"
+
+
+def _looks_like_cover_or_end_slide(profile: SlideProfile) -> bool:
+    """A confident-only heuristic for a genuine title/closing slide, as
+    opposed to an ordinary content slide that merely happens to be
+    sparse: a real cover/closing slide has a title and, at most, one
+    short supporting line -- nothing more. Anything busier is real
+    content and must never be guessed at, which is why this only ever
+    overrides which layout an ALREADY-eligible slide lands on (see its
+    one call site in `apply_rebrand`) -- it never changes eligibility
+    itself."""
+    return profile.title is not None and len(profile.text_blocks) <= 1 and len(profile.images) <= 1
+
+
+@dataclass
+class RebrandResult:
+    proposals: list  # list[SlideProposal], every slide (eligible or not)
+    transformed: list  # slide_index (1-based, ORIGINAL numbering) actually rebuilt
+    skipped: list  # slide_index left untouched (ineligible, or no layout fit)
+    manual_review: list  # fix_deck's own post-pass findings it couldn't auto-resolve (e.g. all_caps)
+
+
+def apply_rebrand(deck_path, out_path, template_path=None, rules_config: Optional[dict] = None) -> RebrandResult:
+    """A fully deterministic alternative to `redesign`'s AI content-rewrite
+    mode, for a deck whose wording is fine as written and just needs to
+    land on brand: every eligible slide's title/body text/images are
+    carried over VERBATIM -- same eligibility rules `apply_retemplate`
+    already uses (nothing here condenses, so there's no reason to accept
+    more than a layout can literally hold, unlike `redesign`'s permissive
+    caps). Matched to a layout with an anti-repeat tie-break
+    (`match_layout`'s `usage_counts`) so the deck doesn't read as one
+    layout stamped out slide after slide, and the deck's own cover/
+    closing slide -- when confidently identifiable as one, see
+    `_looks_like_cover_or_end_slide` -- is swapped onto the org
+    template's current `Cover B`/`Outro` layout instead of whatever
+    ordinary-content layout would otherwise fit it (its own image, if it
+    has one, is carried into that layout's own picture placeholder same
+    as any other -- a normal, independently editable placeholder in the
+    output file, not baked into anything). No LLM call, no API key, no
+    wording changes anywhere. Color/font brand compliance is finished by
+    running `fix_deck` over the whole result before returning -- the same
+    engine/config `deckguard fix` uses -- so this is equivalent to
+    `deckguard retemplate` immediately followed by `deckguard fix`, plus
+    the cover/end swap and layout variety neither of those two do alone.
+    """
+    template_path = template_path or default_template_path()
+    prs = Presentation(deck_path)
+    layout_profiles = _candidate_layout_profiles(template_path)
+    slide_height_in = prs.slide_height / 914400 if prs.slide_height else None
+
+    tmpl_prs = Presentation(str(template_path))
+    tmpl_layout_names = {layout.name for master in tmpl_prs.slide_masters for layout in master.slide_layouts}
+
+    n_slides = len(prs.slides)
+    proposals: list = []
+    usage_counts: dict = {}
+    for i, slide in enumerate(prs.slides, start=1):
+        profile = classify_slide(slide, slide_height_in)
+        if not profile.eligible:
+            proposals.append(SlideProposal(slide_index=i, eligible=False, reason=profile.reason))
+            continue
+
+        layout_name = None
+        is_cover = i == 1 and REBRAND_COVER_LAYOUT in tmpl_layout_names
+        is_end = i == n_slides and n_slides > 1 and REBRAND_END_LAYOUT in tmpl_layout_names
+        if (is_cover or is_end) and _looks_like_cover_or_end_slide(profile):
+            layout_name = REBRAND_COVER_LAYOUT if is_cover else REBRAND_END_LAYOUT
+        else:
+            match = match_layout(profile, layout_profiles, usage_counts)
+            if match is not None:
+                layout_name = match.layout_name
+
+        if layout_name is None:
+            proposals.append(
+                SlideProposal(
+                    slide_index=i, eligible=False, reason="no template layout fits this slide's content",
+                    image_count=len(profile.images),
+                )
+            )
+            continue
+
+        usage_counts[layout_name] = usage_counts.get(layout_name, 0) + 1
+        body_preview = _preview(profile.text_blocks[0][0][1]) if profile.text_blocks and profile.text_blocks[0] else None
+        proposals.append(
+            SlideProposal(
+                slide_index=i, eligible=True, layout_name=layout_name,
+                title_preview=_preview(profile.title), body_preview=body_preview,
+                image_count=len(profile.images),
+            )
+        )
+
+    proposal_by_index = {p.slide_index: p for p in proposals}
+    accepted = {p.slide_index for p in proposals if p.eligible}
+    all_indexes = set(range(1, n_slides + 1))
+    transformed = sorted(accepted)
+    skipped = sorted(all_indexes - accepted)
+
+    if not accepted:
+        import shutil
+
+        shutil.copy(deck_path, out_path)
+        return RebrandResult(proposals=proposals, transformed=transformed, skipped=skipped, manual_review=[])
+
+    layout_by_index = {i: proposal_by_index[i].layout_name for i in accepted}
+    _rebuild_accepted_slides(deck_path, out_path, template_path, accepted, layout_by_index)
+
+    from deckguard.config import default_config_path, load_config
+    from deckguard.fixer import fix_deck
+
+    config = rules_config if rules_config is not None else load_config(default_config_path())
+    out_prs = Presentation(str(out_path))
+    fix_report = fix_deck(out_prs, config, source_path=str(out_path), output_path=str(out_path), dry_run=False)
+
+    return RebrandResult(
+        proposals=proposals, transformed=transformed, skipped=skipped, manual_review=fix_report.manual_review
+    )

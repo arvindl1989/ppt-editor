@@ -158,7 +158,7 @@ merges on brand compliance.
 | Command | Purpose |
 |---|---|
 | `create <outline.yaml> --out <deck.pptx>` | Generates a new deck straight onto the org template's own layouts from a YAML content outline — see "Composing a new deck" below. `--append <deck.pptx>` appends onto a copy of an existing deck instead of starting fresh. |
-| `redesign [deck] --out <deck.pptx> [--brief TEXT]` | AI-assisted counterpart to `create`, from any starting point: redesigns an existing deck's content, fills its blank slides from `--brief`, or (with no deck at all) builds one from just a brief — then builds through the same deterministic pipeline either way. See "AI-assisted redesign" below. Needs `ANTHROPIC_API_KEY`. |
+| `redesign [deck] --out <deck.pptx> [--brief TEXT] [--mode rewrite\|brand]` | Two modes, see "AI-assisted redesign" below. `--mode rewrite` (default): AI-assisted counterpart to `create`, from any starting point — redesigns an existing deck's content, fills its blank slides from `--brief`, or (with no deck at all) builds one from just a brief. Needs `ANTHROPIC_API_KEY`. `--mode brand`: fully deterministic, no API key — carries `deck`'s own text/images over verbatim onto approved layouts (picked for variety) and swaps its cover/closing slide onto the current brand look. |
 | `inspect <deck>` | Full structured inventory: shapes, fills, fonts (raw + normalized), sizes, alignment, images (with perceptual hash), effects, layout/master usage. The discovery tool for growing `brand_rules.yaml` from real decks. |
 | `fix <deck>` | Applies deterministic corrections: color remap (fills, gradients, text, lines, theme), font remap (run + theme/master/layout level), logo replacement by image hash, forbidden text-effect removal, forced left-alignment. |
 | `audit <deck\|folder>` | Reports violations (slide, element, rule, severity, auto-fixable). Folder mode writes a per-deck report plus a `summary.csv`. |
@@ -270,11 +270,16 @@ Two things `create` deliberately does not attempt:
 
 ## AI-assisted redesign
 
-`deckguard redesign` is the judgment layer `create` can't provide on its
-own, and it works from any starting point — the goal is that a brand
-new deck, a mostly-empty one, and a completely off-brand one all land
-on the org template the way a human designer would build them, through
-one command:
+`deckguard redesign` has two modes. `--mode rewrite` (the default,
+described in this whole section) is the judgment layer `create` can't
+provide on its own, and it works from any starting point — the goal is
+that a brand new deck, a mostly-empty one, and a completely off-brand
+one all land on the org template the way a human designer would build
+them, through one command. `--mode brand` is a different, fully
+deterministic animal — see "`--mode brand`: same command, no AI, no
+wording changes" near the end of this section if what you want is your
+deck's existing wording carried over exactly as written, just re-laid-
+out onto approved layouts and brought onto brand colors/fonts.
 
 ```bash
 export ANTHROPIC_API_KEY=sk-...
@@ -391,13 +396,61 @@ fraction of that. `anthropic` is a base dependency (see
 ever required, unless you explicitly set `ANTHROPIC_API_KEY` — every
 other command in this tool remains fully API-key-free.
 
-**On the hosted web app**, the "Redesign a deck with AI" form only
-appears/works when the server itself has `ANTHROPIC_API_KEY` set — it's
-the one route in `web.py` that spends real money per request, so it's
-opt-in per deployment rather than on by default, and it never accepts a
-client-supplied key. **If you enable it on a public deployment, also set
-`DECKGUARD_WEB_PASSWORD`** — an open, unauthenticated `/redesign` route
-would let anyone spend your API budget.
+**On the hosted web app**, the "Redesign a deck" form's AI rewrite
+option only appears/works when the server itself has
+`ANTHROPIC_API_KEY` set — it's the one path in `web.py` that spends
+real money per request, so it's opt-in per deployment rather than on
+by default, and it never accepts a client-supplied key. Brand mode
+(below) needs no key and is always available, key or no key. **If you
+enable AI rewrite on a public deployment, also set
+`DECKGUARD_WEB_PASSWORD`** — an open, unauthenticated route that spends
+API budget per request would let anyone run up your bill.
+
+### `--mode brand`: same command, no AI, no wording changes
+
+```bash
+# No ANTHROPIC_API_KEY needed at all
+deckguard redesign old_deck.pptx --out rebranded.pptx --mode brand
+
+# -> wrote: rebranded.pptx
+#    4 slide(s) using layouts: Cover B, Text and picture A, Two content B, Outro
+#    (a table with the skipped-slides list, if any)
+#    mode: brand — fully deterministic, no API call made
+```
+
+This is what to reach for when a deck's *wording* is already fine and
+the only real problem is that it isn't built on approved layouts,
+colors, or fonts — the same category of fix `retemplate` + `fix`
+already cover separately, done here as one pass with two things
+neither of those alone does:
+
+- **A confidently-detected cover/closing slide is swapped onto the
+  current brand `Cover B`/`Outro` layout**, not just recolored in
+  place — its own image (if it has one) carries into that layout's own
+  picture placeholder, a normal, independently editable placeholder in
+  the output file, so replacing the picture afterward in PowerPoint
+  works exactly like it would on any other placeholder picture. Only
+  ever applied to slide 1 / the last slide, and only when it's
+  genuinely sparse (a title and at most one short supporting line) —
+  busier slides are real content and are never guessed at.
+- **Layout choice is picked for visual variety**, not just the single
+  tightest fit `retemplate` alone would always pick — `match_layout`'s
+  `usage_counts` tie-break spreads similarly-shaped slides across the
+  equally-good candidate layouts instead of stamping one layout out
+  slide after slide. It only ever breaks a TIE between equally good
+  fits; it can never push a slide onto a layout that fits it worse.
+
+Every eligible slide's title/body text/images are carried over
+**verbatim** — the exact same eligibility rules `retemplate` already
+uses (a slide's text has to fit within the real per-placeholder cap a
+layout offers, since nothing here condenses; a table, chart, embedded
+object, media, or grouped shape is still a hard skip). This is
+deliberately much stricter than `--mode rewrite`'s eligibility, which
+tolerates far more text because it's allowed to condense it — brand
+mode never does, so a dense hand-built slide that `--mode rewrite`
+would happily condense stays a hard skip here, reported the same way.
+Color/font brand compliance is finished by running the same `fix_deck`
+engine `deckguard fix` uses over the whole result before returning.
 
 ## Config reference (`brand_rules.yaml`)
 

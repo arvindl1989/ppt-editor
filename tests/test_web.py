@@ -329,22 +329,50 @@ def test_create_flow_invalid_outline_gives_clean_message(tmp_path, monkeypatch):
     assert "Traceback" not in resp.text
 
 
-def test_index_hides_redesign_form_without_api_key(tmp_path, monkeypatch):
+def test_index_shows_redesign_form_without_api_key_but_flags_ai_rewrite_disabled(tmp_path, monkeypatch):
+    """Brand mode needs no API key, so the redesign form itself should
+    still render (unlike the old all-or-nothing gate) -- only AI rewrite
+    mode is unavailable, and the form should say so."""
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     client, _ = _client(tmp_path, monkeypatch)
     resp = client.get("/")
-    assert "Not enabled on this server" in resp.text
+    assert "AI rewrite mode isn't enabled on this server" in resp.text
+    assert 'name="mode"' in resp.text
+    assert 'value="brand"' in resp.text
 
 
-def test_redesign_route_disabled_without_api_key(tmp_path, monkeypatch):
+def test_redesign_route_rewrite_mode_disabled_without_api_key(tmp_path, monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     client, _ = _client(tmp_path, monkeypatch)
     deck = tmp_path / "d.pptx"
     _write_violating_deck(deck)
     with deck.open("rb") as f:
-        resp = client.post("/redesign", files={"file": ("d.pptx", f, "application/octet-stream")})
+        resp = client.post(
+            "/redesign", files={"file": ("d.pptx", f, "application/octet-stream")}, data={"mode": "rewrite"}
+        )
     assert resp.status_code == 200
-    assert "Not enabled on this server" in resp.text
+    assert "AI rewrite mode isn't enabled on this server" in resp.text
+
+
+def test_redesign_route_brand_mode_works_without_api_key(tmp_path, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    client, _ = _client(tmp_path, monkeypatch)
+    deck = tmp_path / "d.pptx"
+    _write_violating_deck(deck)
+    with deck.open("rb") as f:
+        resp = client.post(
+            "/redesign", files={"file": ("d.pptx", f, "application/octet-stream")}, data={"mode": "brand"}
+        )
+    assert resp.status_code == 200
+    assert "Redesigned" in resp.text
+
+
+def test_redesign_route_brand_mode_requires_a_file(tmp_path, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    client, _ = _client(tmp_path, monkeypatch)
+    resp = client.post("/redesign", data={"mode": "brand", "brief": "some brief"})
+    assert resp.status_code == 200
+    assert "needs an uploaded deck" in resp.text
 
 
 def test_redesign_route_rejects_non_pptx(tmp_path, monkeypatch):
@@ -366,7 +394,7 @@ def test_redesign_route_requires_a_file_or_a_brief(tmp_path, monkeypatch):
 def _fake_redesign_deck_factory(compose_result, redesign_result):
     def fake_redesign_deck(
         deck_path, out_path, brief=None, target_slides=None, model="claude-opus-5", effort="high",
-        notes=None, template_path=None, rules_config=None, api_key=None, client=None,
+        notes=None, template_path=None, rules_config=None, api_key=None, client=None, mode="rewrite",
     ):
         from pptx import Presentation as _P
         prs = _P()

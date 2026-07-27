@@ -143,3 +143,46 @@ def test_migrate_replaces_non_standard_cover_and_outro(tmp_path):
     assert "cover replaced" in result.output
     assert "outro replaced" in result.output
     assert (tmp_path / "d_migrated.pptx").exists()
+
+
+def test_redesign_mode_brand_needs_no_api_key(tmp_path, monkeypatch):
+    """--mode brand is fully deterministic -- unlike --mode rewrite
+    (default), it must run with no ANTHROPIC_API_KEY set at all."""
+    from deckguard.slide_import import default_template_path
+
+    if not default_template_path().exists():
+        pytest.skip("bundled template asset not present")
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    deck = tmp_path / "d.pptx"
+    _write_violating_deck(deck)
+    out_path = tmp_path / "rebranded.pptx"
+
+    runner = CliRunner()
+    result = runner.invoke(main, ["redesign", str(deck), "--out", str(out_path), "--mode", "brand"])
+
+    assert result.exit_code == 0, result.output
+    assert "mode: brand" in result.output
+    assert out_path.exists()
+
+
+def test_redesign_mode_rewrite_still_requires_api_key(tmp_path, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    deck = tmp_path / "d.pptx"
+    _write_violating_deck(deck)
+    out_path = tmp_path / "out.pptx"
+
+    runner = CliRunner()
+    result = runner.invoke(main, ["redesign", str(deck), "--out", str(out_path)])
+
+    assert result.exit_code == 1
+    assert "ANTHROPIC_API_KEY is not set" in result.output
+
+
+def test_redesign_mode_brand_without_deck_errors_cleanly(tmp_path, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    runner = CliRunner()
+    result = runner.invoke(main, ["redesign", "--out", str(tmp_path / "out.pptx"), "--mode", "brand"])
+
+    assert result.exit_code == 1
+    assert "needs a DECK" in result.output

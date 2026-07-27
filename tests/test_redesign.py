@@ -462,3 +462,56 @@ def test_call_claude_for_outline_target_slides_guidance_is_included():
 def test_usage_estimated_cost_unknown_model_is_zero():
     usage = Usage(input_tokens=1000, output_tokens=1000, model="some-future-model")
     assert usage.estimated_cost_usd == 0.0
+
+
+# --------------------------------------------------------------------------
+# redesign_deck(mode="brand") -- deterministic, no LLM call at all
+# --------------------------------------------------------------------------
+
+
+def test_redesign_deck_brand_mode_makes_no_client_call(tmp_path):
+    """The whole point of brand mode: it never touches the LLM path at
+    all. A client that would raise if ever called proves it."""
+    prs = new_deck()
+    slide = add_slide(prs)
+    title_run(slide).text = "Highlights"
+    body_run(slide).text = "Grew nicely"
+    src_path = tmp_path / "source.pptx"
+    prs.save(str(src_path))
+
+    class _ExplodingClient:
+        @property
+        def messages(self):
+            raise AssertionError("brand mode must never touch the Anthropic client")
+
+    out_path = tmp_path / "rebranded.pptx"
+    compose_result, redesign_result = redesign_deck(
+        str(src_path), str(out_path), mode="brand", client=_ExplodingClient()
+    )
+
+    assert compose_result.slide_count == 1
+    assert redesign_result.usage.model == "none"
+    assert redesign_result.usage.estimated_cost_usd == 0.0
+
+    out_prs = Presentation(str(out_path))
+    assert len(out_prs.slides) == 1
+
+
+def test_redesign_deck_brand_mode_requires_a_deck(tmp_path):
+    with pytest.raises(RedesignError, match="needs a source deck"):
+        redesign_deck(None, str(tmp_path / "out.pptx"), mode="brand")
+
+
+def test_redesign_deck_brand_mode_rejects_a_brief(tmp_path):
+    prs = new_deck()
+    title_run(add_slide(prs)).text = "Deck"
+    src_path = tmp_path / "source.pptx"
+    prs.save(str(src_path))
+
+    with pytest.raises(RedesignError, match="never authors content"):
+        redesign_deck(str(src_path), str(tmp_path / "out.pptx"), mode="brand", brief="a brief")
+
+
+def test_redesign_deck_rejects_unknown_mode(tmp_path):
+    with pytest.raises(RedesignError, match="mode must be"):
+        redesign_deck(str(tmp_path / "x.pptx"), str(tmp_path / "out.pptx"), mode="bogus")

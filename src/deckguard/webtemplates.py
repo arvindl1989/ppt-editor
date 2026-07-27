@@ -212,50 +212,57 @@ def compose_result_page(out_name: str, result_dict: dict, download_links: dict) 
     return body
 
 
-def redesign_form(error: str | None = None, enabled: bool = True) -> str:
-    if not enabled:
-        return """<div class="card">
-<h2 style="margin-top:0;font-size:1.05rem;">Redesign a deck with AI</h2>
-<p class="muted" style="margin:0;">Not enabled on this server — set <code>ANTHROPIC_API_KEY</code> to turn this on.
-This is the only feature here that makes an outbound API call, and each request has a real (small) cost, so it's
-opt-in rather than on by default.</p>
-</div>"""
+def redesign_form(error: str | None = None, ai_enabled: bool = True) -> str:
     error_html = f'<div class="error">{_esc(error)}</div><div style="height:1rem"></div>' if error else ""
+    mode_options = (
+        '<option value="rewrite" selected>AI rewrite — Claude edits/condenses wording and picks a layout kind</option>'
+        '<option value="brand">Brand only — deterministic, no API call, wording and images kept exactly as written</option>'
+    ) if ai_enabled else (
+        '<option value="brand" selected>Brand only — deterministic, no API call, wording and images kept exactly as written</option>'
+    )
+    ai_note = "" if ai_enabled else (
+        '<p class="muted" style="margin:0 0 1rem;">AI rewrite mode isn\'t enabled on this server — set '
+        '<code>ANTHROPIC_API_KEY</code> to turn it on. Brand mode below needs no key: it never touches your '
+        "wording, it just carries the deck's own text and images onto approved, on-brand layouts.</p>"
+    )
     return f"""{error_html}<div class="card">
-<h2 style="margin-top:0;font-size:1.05rem;">Redesign a deck with AI</h2>
+<h2 style="margin-top:0;font-size:1.05rem;">Redesign a deck</h2>
 <p style="color:var(--ink-muted);font-size:0.88rem;margin:0 0 1rem;">
-  Works from any starting point: upload an existing deck (on-brand or not — Claude judges which layout kind
-  each slide's content should become), add a brief to also author its blank slides, or skip the upload
-  entirely and describe a deck to build from nothing. Every mode runs through the same deterministic engine
-  <code>create</code> uses, so color/font/layout compliance is guaranteed either way — only "what kind of
-  slide is this, and what does it say" is ever delegated to the model. A slide with a table, chart, or
-  embedded media is always left alone and reported, brief or no brief, never guessed at.
+  Two modes: <strong>AI rewrite</strong> works from any starting point (an existing deck, a brief to fill its
+  blank slides, or a brief alone with no deck at all) and lets Claude edit/condense wording and choose each
+  slide's layout kind. <strong>Brand only</strong> needs an existing deck and never changes a word — it carries
+  the deck's own text and images onto approved layouts (picked for visual variety, with the cover/closing slide
+  swapped to the current brand look) and leaves everything else exactly as written. Both modes run the same
+  deterministic engine <code>create</code> uses for color/font/layout compliance. A slide with a table, chart,
+  or embedded media is always left alone and reported, never guessed at, in either mode.
 </p>
-<form method="post" action="/redesign" enctype="multipart/form-data">
+{ai_note}<form method="post" action="/redesign" enctype="multipart/form-data">
   <label style="display:block;font-size:0.82rem;color:var(--ink-muted);margin-bottom:0.3rem;">
-    Existing deck to redesign (optional — omit to build a new deck from just the brief below)
+    Existing deck (required for Brand only; optional for AI rewrite — omit to build a new deck from just the brief below)
   </label>
   <input type="file" name="file" accept=".pptx" style="margin-bottom:1rem;">
+  <label style="display:block;font-size:0.82rem;color:var(--ink-muted);margin-bottom:0.3rem;">Mode</label>
+  <select name="mode" style="display:block;margin-bottom:1rem;">{mode_options}</select>
   <label style="display:block;font-size:0.82rem;color:var(--ink-muted);margin-bottom:0.3rem;">
-    Brief (required if no deck is uploaded; also used to author any blank slides in an uploaded deck)
+    Brief (AI rewrite only — required if no deck is uploaded; also authors any blank slides in an uploaded deck)
   </label>
   <textarea name="brief" rows="2" placeholder="e.g. a short deck on predictive maintenance for facilities managers"
     style="width:100%;font-size:0.85rem;padding:0.6rem;border-radius:8px;border:1px solid var(--border);
     background:var(--surface);color:var(--ink);margin-bottom:1rem;"></textarea>
   <label style="display:block;font-size:0.82rem;color:var(--ink-muted);margin-bottom:0.3rem;">
-    Optional steering notes for the model
+    Optional steering notes for the model (AI rewrite only)
   </label>
   <textarea name="notes" rows="2" placeholder="e.g. prefer stat slides for anything with a percentage"
     style="width:100%;font-size:0.85rem;padding:0.6rem;border-radius:8px;border:1px solid var(--border);
     background:var(--surface);color:var(--ink);margin-bottom:1rem;"></textarea>
   <div style="display:flex;gap:1rem;margin-bottom:1rem;flex-wrap:wrap;">
-    <label style="font-size:0.82rem;color:var(--ink-muted);">Model
+    <label style="font-size:0.82rem;color:var(--ink-muted);">Model (AI rewrite only)
       <select name="model" style="display:block;margin-top:0.3rem;">
         <option value="claude-opus-5" selected>claude-opus-5 (recommended)</option>
         <option value="claude-sonnet-5">claude-sonnet-5 (cheaper)</option>
       </select>
     </label>
-    <label style="font-size:0.82rem;color:var(--ink-muted);">Effort
+    <label style="font-size:0.82rem;color:var(--ink-muted);">Effort (AI rewrite only)
       <select name="effort" style="display:block;margin-top:0.3rem;">
         <option value="low">low</option>
         <option value="medium">medium</option>
@@ -263,12 +270,12 @@ opt-in rather than on by default.</p>
         <option value="xhigh">xhigh</option>
       </select>
     </label>
-    <label style="font-size:0.82rem;color:var(--ink-muted);">Target slide count (optional)
+    <label style="font-size:0.82rem;color:var(--ink-muted);">Target slide count (AI rewrite only)
       <input type="number" name="slides" min="1" max="60" style="display:block;margin-top:0.3rem;width:6rem;">
     </label>
   </div>
   <div class="btn-row">
-    <button type="submit" class="primary">Redesign with AI</button>
+    <button type="submit" class="primary">Redesign</button>
   </div>
 </form>
 </div>"""
@@ -287,17 +294,25 @@ def redesign_result_page(deck_name: str, redesign_dict: dict, compose_dict: dict
         f'<a class="dl secondary" href="/">Redesign another deck</a>'
     )
     layouts_used = ", ".join(sorted(set(compose_dict["layouts_used"])))
+    usage_line = (
+        "brand mode — fully deterministic, no API call made" if usage["model"] == "none" else
+        f"{_esc(usage['input_tokens'])} in / {_esc(usage['output_tokens'])} out tokens ({_esc(usage['model'])})"
+    )
     skipped_rows = "".join(
         f"<tr><td>{_esc(s['slide_index'])}</td><td>{_esc(s['reason'])}</td></tr>" for s in redesign_dict["skipped"]
     ) or '<tr><td colspan="2" class="empty">Every slide was eligible.</td></tr>'
+    skipped_note = (
+        "Left untouched — carry a table, chart, embedded media, or too much text to migrate verbatim."
+        if usage["model"] == "none" else
+        "Never sent to the model — carry a table, chart, embedded media, or too much content to redesign safely."
+    )
     body = f"""<div class="card"><h2 style="margin-top:0;font-size:1.05rem;">Redesigned — {_esc(deck_name)}</h2>
 {stats}
-<p class="muted" style="margin:0.5rem 0 1rem;">Layouts used: {_esc(layouts_used)} &middot;
-{_esc(usage['input_tokens'])} in / {_esc(usage['output_tokens'])} out tokens ({_esc(usage['model'])})</p>
+<p class="muted" style="margin:0.5rem 0 1rem;">Layouts used: {_esc(layouts_used)} &middot; {usage_line}</p>
 {dl}
 </div>
 <div class="card"><h3 style="margin-top:0;font-size:0.95rem;">Skipped slides ({len(redesign_dict['skipped'])})</h3>
-<p class="muted" style="margin:0 0 0.5rem;">Never sent to the model — carry a table, chart, embedded media, or too much content to redesign safely.</p>
+<p class="muted" style="margin:0 0 0.5rem;">{skipped_note}</p>
 <div class="table-wrap"><table>
 <thead><tr><th>Slide</th><th>Reason</th></tr></thead>
 <tbody>{skipped_rows}</tbody>

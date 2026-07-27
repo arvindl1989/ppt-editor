@@ -17,6 +17,7 @@ from deckguard.retemplate import (
     CONTENT_LAYOUT_CANDIDATES,
     LayoutProfile,
     SlideProfile,
+    apply_rebrand,
     apply_retemplate,
     classify_slide,
     match_layout,
@@ -200,6 +201,36 @@ def test_match_layout_returns_none_when_nothing_fits():
     assert match_layout(profile, profiles) is None
 
 
+def test_match_layout_usage_counts_only_break_ties_never_override_a_better_fit():
+    """usage_counts is an anti-repeat tie-break for apply_rebrand's layout
+    variety, not a second scoring signal that can outrank actual fit: a
+    heavily-reused Tight layout must still beat a fresh, but wasteful,
+    Loose one."""
+    profiles = [
+        LayoutProfile(name="Loose", has_title=True, n_body=3, n_picture=2),
+        LayoutProfile(name="Tight", has_title=True, n_body=1, n_picture=0),
+    ]
+    profile = SlideProfile(title="T", text_blocks=[[(0, "x")]], images=[], eligible=True)
+
+    match = match_layout(profile, profiles, usage_counts={"Tight": 10, "Loose": 0})
+
+    assert match.layout_name == "Tight"
+
+
+def test_match_layout_usage_counts_break_ties_among_equally_good_fits():
+    profiles = [
+        LayoutProfile(name="A", has_title=True, n_body=1, n_picture=0),
+        LayoutProfile(name="B", has_title=True, n_body=1, n_picture=0),
+    ]
+    profile = SlideProfile(title="T", text_blocks=[[(0, "x")]], images=[], eligible=True)
+
+    match_no_usage = match_layout(profile, profiles)
+    assert match_no_usage.layout_name == "A"  # ties resolve by candidate-list order, unchanged from before
+
+    match_with_usage = match_layout(profile, profiles, usage_counts={"A": 3, "B": 0})
+    assert match_with_usage.layout_name == "B"  # least-used wins the tie
+
+
 def test_candidate_layouts_all_exist_in_the_bundled_template():
     tmpl_prs = Presentation(str(TEMPLATE_PATH))
     names = {layout.name for master in tmpl_prs.slide_masters for layout in master.slide_layouts}
@@ -353,3 +384,129 @@ def test_apply_retemplate_carries_images_into_the_new_layouts_picture_placeholde
         except (AttributeError, ValueError):
             continue
     assert img_path.read_bytes() in blobs
+
+
+# --------------------------------------------------------------------------
+# apply_rebrand -- verbatim carryover + layout variety + cover/end swap
+# --------------------------------------------------------------------------
+
+
+def _cover_content_end_deck(tmp_path):
+    prs = new_deck()
+    cover = add_slide(prs)
+    title_run(cover).text = "Annual Review"
+
+    content1 = add_slide(prs)
+    title_run(content1).text = "Highlights"
+    body_run(content1).text = "Grew nicely"
+
+    content2 = add_slide(prs)
+    title_run(content2).text = "Next Steps"
+    body_run(content2).text = "Keep going"
+
+    end = add_slide(prs)
+    title_run(end).text = "Thank You"
+
+    path = tmp_path / "src.pptx"
+    prs.save(str(path))
+    return path
+
+
+def test_apply_rebrand_swaps_cover_and_end_slides_onto_current_brand_layout(tmp_path):
+    path = _cover_content_end_deck(tmp_path)
+    out_path = tmp_path / "out.pptx"
+
+    result = apply_rebrand(str(path), str(out_path), template_path=TEMPLATE_PATH)
+
+    assert result.transformed == [1, 2, 3, 4]
+    by_index = {p.slide_index: p for p in result.proposals}
+    assert by_index[1].layout_name == "Cover B"
+    assert by_index[4].layout_name == "Outro"
+
+    prs2 = Presentation(str(out_path))
+    texts = [s.shapes.title.text_frame.text for s in prs2.slides]
+    assert texts == ["Annual Review", "Highlights", "Next Steps", "Thank You"]
+
+
+def test_apply_rebrand_never_changes_wording(tmp_path):
+    """The whole point of brand mode: title/body text survives character
+    for character -- no condensing, no rewording, regardless of what
+    match_layout or the cover/end override picks."""
+    path = _cover_content_end_deck(tmp_path)
+    out_path = tmp_path / "out.pptx"
+
+    apply_rebrand(str(path), str(out_path), template_path=TEMPLATE_PATH)
+
+    prs2 = Presentation(str(out_path))
+    body_texts = {
+        shp.text_frame.text for slide in prs2.slides for shp in slide.shapes
+        if shp.has_text_frame and shp.text_frame.text.strip()
+    }
+    assert "Grew nicely" in body_texts
+    assert "Keep going" in body_texts
+
+
+def test_apply_rebrand_picks_varied_layouts_instead_of_repeating_one(tmp_path):
+    """Several ordinary content slides, identically shaped (title + one
+    body block, no images) -- without anti-repeat scoring they'd all pick
+    the same single tightest-fitting layout; with it, match_layout should
+    spread them across the tied candidates instead."""
+    prs = new_deck()
+    for i in range(4):
+        slide = add_slide(prs)
+        title_run(slide).text = f"Slide {i}"
+        body_run(slide).text = f"Body {i}"
+    path = tmp_path / "src.pptx"
+    prs.save(str(path))
+    out_path = tmp_path / "out.pptx"
+
+    result = apply_rebrand(str(path), str(out_path), template_path=TEMPLATE_PATH)
+
+    layouts_used = [p.layout_name for p in result.proposals if p.eligible]
+    assert len(set(layouts_used)) > 1
+
+
+def test_apply_rebrand_still_hard_skips_a_table_and_leaves_it_untouched(tmp_path):
+    prs = new_deck()
+    cover = add_slide(prs)
+    title_run(cover).text = "Deck"
+    table_slide = add_slide(prs)
+    table_slide.shapes.add_table(2, 2, Inches(1), Inches(1), Inches(3), Inches(2))
+    path = tmp_path / "src.pptx"
+    prs.save(str(path))
+    out_path = tmp_path / "out.pptx"
+
+    result = apply_rebrand(str(path), str(out_path), template_path=TEMPLATE_PATH)
+
+    assert result.skipped == [2]
+    proposal = next(p for p in result.proposals if p.slide_index == 2)
+    assert proposal.reason == "contains a table"
+
+
+def test_apply_rebrand_runs_fix_deck_for_color_and_font_compliance(tmp_path):
+    """Brand mode's whole promise is 'follow the color/font guidelines' --
+    `apply_retemplate` alone never runs `fix_deck`, so a rebuilt slide's
+    freshly-written text (no explicit run color, by design -- see
+    compose.py's own module docstring) is left as an inherited, therefore
+    audit-unresolvable color. `apply_rebrand` finishes that off, the same
+    way `deckguard fix` would."""
+    from deckguard.config import default_config_path, load_config
+    from deckguard.inventory import build_inventory
+    from deckguard.rules_engine import audit_deck
+
+    path = _cover_content_end_deck(tmp_path)
+    retemplate_only = tmp_path / "retemplate_only.pptx"
+    apply_retemplate(str(path), str(retemplate_only), template_path=TEMPLATE_PATH)
+    rebrand_out = tmp_path / "rebrand.pptx"
+    apply_rebrand(str(path), str(rebrand_out), template_path=TEMPLATE_PATH)
+
+    config = load_config(default_config_path())
+    retemplate_contrast = [
+        v for v in audit_deck(build_inventory(Presentation(str(retemplate_only))), config) if v.rule == "text_contrast"
+    ]
+    rebrand_contrast = [
+        v for v in audit_deck(build_inventory(Presentation(str(rebrand_out))), config) if v.rule == "text_contrast"
+    ]
+
+    assert retemplate_contrast  # confirms the premise: retemplate alone leaves this unresolved
+    assert not rebrand_contrast  # apply_rebrand's fix_deck pass resolves it
