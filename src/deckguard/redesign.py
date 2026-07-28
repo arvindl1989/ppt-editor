@@ -351,6 +351,7 @@ class RedesignResult:
     skipped: list  # list[SkippedSlide] -- unsafe-to-touch slides, never sent to the model
     usage: Usage
     review_notes: list = field(default_factory=list)  # brand mode --review's free-text findings, "slide N: ..."
+    reference_match_notes: list = field(default_factory=list)  # "Learn" mode's exact-transplant pass findings
 
 
 def _slide_height_in(prs) -> Optional[float]:
@@ -677,7 +678,7 @@ def _attach_source_images(raw_slides: list, eligible: list) -> list:
 def _rebrand_deck(
     deck_path, out_path, template_path=None, rules_config: Optional[dict] = None,
     review: bool = False, review_model: str = REVIEW_MODEL,
-    api_key: Optional[str] = None, client=None,
+    api_key: Optional[str] = None, client=None, reference_path: Optional[str] = None,
 ):
     """mode='brand' path: no LLM call at all by default, so wrap
     `apply_rebrand`'s result into the same `(ComposeResult,
@@ -696,11 +697,25 @@ def _rebrand_deck(
     short, verbatim-derived title -- nothing it finds is silently
     discarded either: anything else worth a human's attention comes
     back in `RedesignResult.review_notes`.
+
+    `reference_path` (the "Learn from a reference" flow only): after
+    everything above, run `exact_transplant.transplant_exact_treatment`
+    against this reference deck as one final pass -- see that module's
+    own docstring for why this is a DIFFERENT, more precise mechanism
+    than the generic `colors.remap`/`fonts.remap` tables `apply_rebrand`'s
+    own `fix_deck` pass already applied: it copies the reference's exact
+    per-shape answer wherever shape identity survives (same slide index +
+    name), rather than one hex/font substitution applied deck-wide. Never
+    writes to brand_rules.yaml. Findings land in
+    `RedesignResult.reference_match_notes`.
     """
     from deckguard.retemplate import EMPTY_SLIDE_REASON, apply_rebrand, rebuild_slides_as_dividers
     from deckguard.slide_import import default_template_path
 
-    rebrand_result = apply_rebrand(str(deck_path), out_path, template_path=template_path, rules_config=rules_config)
+    rebrand_result = apply_rebrand(
+        str(deck_path), out_path, template_path=template_path, rules_config=rules_config,
+        reference_path=reference_path,
+    )
 
     layouts_used = [p.layout_name for p in rebrand_result.proposals if p.eligible and p.layout_name]
     ineligible = [p for p in rebrand_result.proposals if not p.eligible]
@@ -745,6 +760,35 @@ def _rebrand_deck(
                 fix_report = fix_deck(reopened, config, source_path=str(out_path), output_path=str(out_path), dry_run=False)
                 manual_review = fix_report.manual_review
 
+    reference_match_notes: list = []
+    if reference_path is not None:
+        from deckguard.exact_transplant import transplant_exact_treatment
+
+        config = rules_config if rules_config is not None else load_config(default_config_path())
+        out_prs = Presentation(str(out_path))
+        ref_prs = Presentation(str(reference_path))
+        transplant_result = transplant_exact_treatment(out_prs, ref_prs, rules_config=config)
+        if transplant_result.changes:
+            out_prs.save(str(out_path))
+            touched_slides = sorted({c.slide_index + 1 for c in transplant_result.changes})
+            reference_match_notes.append(
+                f"Reference match: {len(transplant_result.changes)} shape style(s) copied exactly from the "
+                f"reference deck across {len(touched_slides)} slide(s) ({', '.join(map(str, touched_slides))})."
+            )
+        for slide_index in transplant_result.flagged_slides:
+            # A REBUILT slide (e.g. the cover/end swap) is expected to have
+            # entirely new shape names from the org template and will
+            # always show as "no match" here -- that's not a diagram this
+            # pass failed to reconcile, so only flag slides `apply_rebrand`
+            # itself left untouched (still carrying their OLD shape names,
+            # where a low match ratio is actually diagnostic).
+            if (slide_index + 1) not in skipped_indices:
+                continue
+            reference_match_notes.append(
+                f"slide {slide_index + 1}: reference deck uses a different diagram/shape layout here -- "
+                "not auto-matched, review manually."
+            )
+
     compose_result = ComposeResult(
         slide_count=len(rebrand_result.transformed) + rebuilt_divider_count,
         layouts_used=layouts_used, manual_review=manual_review,
@@ -753,7 +797,10 @@ def _rebrand_deck(
         SkippedSlide(slide_index=p.slide_index, reason=p.reason or "not eligible")
         for p in ineligible if p.slide_index in skipped_indices
     ]
-    redesign_result = RedesignResult(outline=Outline(slides=[]), skipped=skipped, usage=usage, review_notes=review_notes)
+    redesign_result = RedesignResult(
+        outline=Outline(slides=[]), skipped=skipped, usage=usage, review_notes=review_notes,
+        reference_match_notes=reference_match_notes,
+    )
     return compose_result, redesign_result
 
 
@@ -772,6 +819,7 @@ def redesign_deck(
     mode: str = "rewrite",
     review: bool = False,
     review_model: str = REVIEW_MODEL,
+    reference_path=None,
 ) -> tuple[ComposeResult, RedesignResult]:
     """One entry point for all three starting points:
 
@@ -811,6 +859,12 @@ def redesign_deck(
     it does (and deliberately doesn't do). Needs an API key, unlike the
     rest of brand mode; `api_key`/`client` are reused for it the same
     way rewrite mode uses them.
+
+    `reference_path` (mode='brand' only, the "Learn from a reference"
+    flow): an already-on-brand deck to copy EXACT per-shape styling from,
+    on top of everything else brand mode already does -- see
+    `_rebrand_deck`'s own comment. No API key needed; never persisted to
+    brand_rules.yaml, purely a per-call source for this one run.
     """
     if out_path is None:
         raise RedesignError("out_path is required")
@@ -826,9 +880,12 @@ def redesign_deck(
         return _rebrand_deck(
             deck_path, out_path, template_path=template_path, rules_config=rules_config,
             review=review, review_model=review_model, api_key=api_key, client=client,
+            reference_path=reference_path,
         )
     if review:
         raise RedesignError("--review only applies to mode='brand' -- mode='rewrite' already sends every eligible slide to the model")
+    if reference_path is not None:
+        raise RedesignError("reference_path only applies to mode='brand' -- mode='rewrite' doesn't have a matching concept")
 
     eligible: list = []
     blank_indices: list = []

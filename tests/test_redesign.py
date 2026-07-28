@@ -622,6 +622,61 @@ def test_redesign_deck_rejects_unknown_mode(tmp_path):
         redesign_deck(str(tmp_path / "x.pptx"), str(tmp_path / "out.pptx"), mode="bogus")
 
 
+def test_redesign_deck_rewrite_mode_rejects_reference_path(tmp_path):
+    with pytest.raises(RedesignError, match="reference_path only applies to mode='brand'"):
+        redesign_deck(str(tmp_path / "x.pptx"), str(tmp_path / "out.pptx"), mode="rewrite", reference_path="ref.pptx")
+
+
+def _add_grouped_chip(slide, name: str, fill_hex: str):
+    """A rectangle inside a group -- GROUP is one of apply_rebrand's
+    disqualifying shape types, so a slide built this way is left
+    untouched (its original shape names intact) rather than rebuilt onto
+    a template layout, matching the real-world "category chip" case
+    exact_transplant.py's own docstring describes."""
+    from pptx.util import Emu
+
+    group = slide.shapes.add_group_shape()
+    group.name = f"{name} group"
+    rect = add_rectangle(group, name=name, fill_hex=fill_hex, left_in=1, top_in=1)
+    group.left, group.top, group.width, group.height = Emu(0), Emu(0), rect.width, rect.height
+    return rect
+
+
+def test_redesign_deck_brand_mode_reports_exact_reference_match(tmp_path):
+    """`reference_path` runs the exact-transplant pass (see
+    exact_transplant.py) as brand mode's last step -- a per-run override
+    that copies the reference's own per-shape treatment, never touching
+    brand_rules.yaml. Findings land in `reference_match_notes`."""
+    from tests.helpers import add_rectangle
+
+    prs = new_deck()
+    slide = add_slide(prs)
+    title_run(slide).text = "Highlights"
+    body_run(slide).text = "Grew nicely"
+    _add_grouped_chip(slide, "Chip", "FF0000")
+    src_path = tmp_path / "source.pptx"
+    prs.save(str(src_path))
+
+    ref_prs = new_deck()
+    ref_slide = add_slide(ref_prs)
+    title_run(ref_slide).text = "Highlights"
+    body_run(ref_slide).text = "Grew nicely"
+    _add_grouped_chip(ref_slide, "Chip", "0000FF")
+    ref_path = tmp_path / "reference.pptx"
+    ref_prs.save(str(ref_path))
+
+    out_path = tmp_path / "rebranded.pptx"
+    compose_result, redesign_result = redesign_deck(
+        str(src_path), str(out_path), mode="brand", reference_path=str(ref_path)
+    )
+
+    assert any("Reference match:" in n for n in redesign_result.reference_match_notes)
+    out_prs = Presentation(str(out_path))
+    group = next(s for s in out_prs.slides[0].shapes if s.shape_type == 6)
+    chip = next(s for s in group.shapes if s.name == "Chip")
+    assert str(chip.fill.fore_color.rgb) == "0000FF"
+
+
 # --------------------------------------------------------------------------
 # redesign_deck(mode="brand", review=True) -- the small, optional AI pass
 # --------------------------------------------------------------------------

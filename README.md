@@ -623,11 +623,26 @@ copy). AI review runs automatically there whenever the server has an
 `ANTHROPIC_API_KEY` configured.
 
 The *proposal* step (plain `learn`, no `--transform`) only ever reasons
-about color/font *usage counts* — it doesn't try to match individual
-shapes between the old and new deck. `--transform`'s layout rebuild
-comes from the same deterministic `retemplate`/`redesign --mode brand`
-matching every other command in this project uses, not from anything
-learned by comparing the two input decks' structure.
+about color/font *usage counts* deck-wide — it doesn't try to match
+individual shapes between the old and new deck, and a single hex/font can
+only ever map to ONE replacement, which is provably wrong when the
+reference deck deliberately assigns two different colors to two
+different shapes that both started from a similar source color (e.g. two
+"category chip" boxes on a real deck pair, where a whole-deck rule got
+3 of 7 chips wrong). `--transform` fixes this with one extra, more
+precise pass on top of the deck-wide rebuild: wherever a shape's
+*identity* survives into the reference deck (same slide position + shape
+name — common for boxes/labels a slide author never renamed), that
+shape's *exact* fill/line/font is copied over verbatim, correcting
+exactly the cases a single deck-wide rule can't express. This never
+writes to `brand_rules.yaml` — it's a per-run override for this one
+deck pair, not a new global rule — and a slide the reference deck
+redraws from scratch (different shapes entirely, most often a hand-built
+diagram) is left alone and flagged for you to finish by hand rather than
+guessed at. See `exact_transplant.py`'s own module docstring for the
+full reasoning. The cover/end swap also borrows the reference deck's own
+cover/closing photo (instead of the org template's generic stock photo)
+whenever the old deck had none of its own to carry over.
 
 ## Worked example
 

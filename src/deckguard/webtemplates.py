@@ -911,6 +911,18 @@ def learn_result_page(
 <ul style="margin:0;padding-left:1.2rem;font-size:0.88rem;">{items}</ul>
 </div>"""
 
+    reference_match_notes = redesign_dict.get("reference_match_notes") or []
+    reference_match_section = ""
+    if reference_match_notes:
+        items = "".join(f"<li>{_esc(n)}</li>" for n in reference_match_notes)
+        reference_match_section = f"""<div class="card"><h3 style="margin-top:0;font-size:0.95rem;">Exact reference match</h3>
+<p class="muted" style="margin:0 0 0.5rem;">Wherever a shape's identity (name, at the same slide position) survives
+into the reference deck, its exact fill/line/font treatment was copied onto that one shape — precise per-element
+matching on top of the color/font differences above, never written to brand_rules.yaml. Slides the reference
+redraws from scratch (different shapes entirely) are flagged for you to finish by hand instead of guessed at.</p>
+<ul style="margin:0;padding-left:1.2rem;font-size:0.88rem;">{items}</ul>
+</div>"""
+
     skipped_rows = "".join(
         f"<tr><td>{_esc(s['slide_index'])}</td><td>{_esc(s['reason'])}</td></tr>" for s in redesign_dict["skipped"]
     ) or '<tr><td colspan="2" class="empty">Every slide was eligible.</td></tr>'
@@ -922,6 +934,7 @@ def learn_result_page(
 {low_note}
 </div>
 {review_section}
+{reference_match_section}
 <div class="card"><h3 style="margin-top:0;font-size:0.95rem;">Skipped slides ({len(redesign_dict['skipped'])})</h3>
 <p class="muted" style="margin:0 0 0.5rem;">Left untouched — carry a table, chart, embedded media, or too much text to migrate verbatim.</p>
 <div class="table-wrap"><table>

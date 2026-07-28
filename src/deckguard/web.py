@@ -349,6 +349,7 @@ async def learn_route(
         output_path = work_dir / "transformed.pptx"
         compose_result, redesign_result = redesign_deck(
             str(old_path), str(output_path), rules_config=updated_config, mode="brand", review=ai_enabled,
+            reference_path=str(new_path),
         )
     except HTTPException as exc:
         shutil.rmtree(work_dir, ignore_errors=True)

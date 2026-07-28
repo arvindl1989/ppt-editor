@@ -413,7 +413,29 @@ def _layout_placeholder_image_blob(layout, idx: int) -> Optional[bytes]:
     return None
 
 
-def _transplant_content(new_slide, profile: SlideProfile, fallback_to_layout_default: bool = False) -> None:
+def _first_picture_blob(slide) -> Optional[bytes]:
+    """The image bytes of the first real picture (plain or placeholder)
+    found directly on `slide`, if any -- used to borrow a reference
+    deck's own cover/end photo (see `apply_rebrand`'s `reference_path`)
+    ahead of falling back to the org template's generic stock photo."""
+    for shape in slide.shapes:
+        blip = shape._element.find(".//" + effects_mod.a_qn("blip"))
+        if blip is None:
+            continue
+        rid = blip.get(f"{{{_R_NS}}}embed")
+        if not rid:
+            continue
+        try:
+            return shape.part.related_part(rid).blob
+        except KeyError:
+            continue
+    return None
+
+
+def _transplant_content(
+    new_slide, profile: SlideProfile, fallback_to_layout_default: bool = False,
+    reference_image_blob: Optional[bytes] = None,
+) -> None:
     body_iter = iter(profile.text_blocks)
     image_iter = iter(profile.images)
     layout = new_slide.slide_layout if fallback_to_layout_default else None
@@ -431,6 +453,14 @@ def _transplant_content(new_slide, profile: SlideProfile, fallback_to_layout_def
             blob = next(image_iter, None)
             if blob is not None:
                 ph.insert_picture(BytesIO(blob))
+            elif reference_image_blob is not None:
+                # No source image of the deck's own to carry over, but a
+                # reference deck was given for this run (see the "Learn
+                # from a reference" flow's per-run image borrow) and it
+                # has its own photo in this same cover/end role -- use
+                # THAT ahead of the org template's generic stock photo,
+                # since it's the deck-specific answer, not a placeholder.
+                ph.insert_picture(BytesIO(reference_image_blob))
             elif layout is not None:
                 # No source image on this slide to carry over -- give
                 # the picture placeholder the layout's own default photo
@@ -494,7 +524,7 @@ def apply_retemplate(
 
 def _rebuild_accepted_slides(
     deck_path, out_path, template_path, accepted: set, layout_by_index: dict,
-    profile_overrides: Optional[dict] = None,
+    profile_overrides: Optional[dict] = None, reference_image_by_index: Optional[dict] = None,
 ) -> None:
     """Shared slide-surgery for `apply_retemplate` and `apply_rebrand`:
     rebuild every slide index in `accepted` on the layout named in
@@ -509,8 +539,13 @@ def _rebuild_accepted_slides(
     divider-like slide onto a Section Divider layout with a short
     AI-suggested title, where the ORIGINAL content is deliberately not
     what should end up on the new slide.
+
+    `reference_image_by_index` (optional, `{index: bytes}`): see
+    `apply_rebrand`'s `reference_path` -- passed straight through to
+    `_transplant_content` for the one index it applies to.
     """
     profile_overrides = profile_overrides or {}
+    reference_image_by_index = reference_image_by_index or {}
     needed_layouts = sorted(set(layout_by_index[i] for i in accepted))
     tmp_path = Path(out_path).with_suffix(".layouts.pptx")
     import_layouts(deck_path, str(template_path), str(tmp_path), needed_layouts)
@@ -550,7 +585,10 @@ def _rebuild_accepted_slides(
 
             new_slide = prs2.slides.add_slide(layout)
             is_cover_or_end_layout = layout_by_index[orig_idx] in (REBRAND_COVER_LAYOUT, REBRAND_END_LAYOUT)
-            _transplant_content(new_slide, profile, fallback_to_layout_default=is_cover_or_end_layout)
+            _transplant_content(
+                new_slide, profile, fallback_to_layout_default=is_cover_or_end_layout,
+                reference_image_blob=reference_image_by_index.get(orig_idx),
+            )
             new_partname_by_old[old_partname] = str(new_slide.part.partname).lstrip("/")
 
         # Phase B: now that every new slide safely exists, move each into
@@ -626,7 +664,10 @@ class RebrandResult:
     manual_review: list  # fix_deck's own post-pass findings it couldn't auto-resolve (e.g. all_caps)
 
 
-def apply_rebrand(deck_path, out_path, template_path=None, rules_config: Optional[dict] = None) -> RebrandResult:
+def apply_rebrand(
+    deck_path, out_path, template_path=None, rules_config: Optional[dict] = None,
+    reference_path: Optional[str] = None,
+) -> RebrandResult:
     """A fully deterministic alternative to `redesign`'s AI content-rewrite
     mode, for a deck whose wording is fine as written and just needs to
     land on brand: every eligible slide's title/body text/images are
@@ -648,6 +689,16 @@ def apply_rebrand(deck_path, out_path, template_path=None, rules_config: Optiona
     engine/config `deckguard fix` uses -- so this is equivalent to
     `deckguard retemplate` immediately followed by `deckguard fix`, plus
     the cover/end swap and layout variety neither of those two do alone.
+
+    `reference_path` (optional -- the "Learn from a reference" flow
+    only): when the swapped-in cover/end slide has no picture of its own
+    to carry over, its picture placeholder is normally padded out with
+    the org template's own generic stock photo (see
+    `_layout_placeholder_image_blob`). If a reference deck is given here,
+    its own first/last slide's picture (if it has one) is tried FIRST --
+    the deck-specific answer for THIS run beats the org template's
+    generic default. Never persisted anywhere; purely a per-call source
+    for this one picture.
     """
     template_path = template_path or default_template_path()
     prs = Presentation(deck_path)
@@ -660,6 +711,8 @@ def apply_rebrand(deck_path, out_path, template_path=None, rules_config: Optiona
     n_slides = len(prs.slides)
     proposals: list = []
     usage_counts: dict = {}
+    cover_index: Optional[int] = None
+    end_index: Optional[int] = None
     for i, slide in enumerate(prs.slides, start=1):
         profile = classify_slide(slide, slide_height_in)
         if not profile.eligible:
@@ -677,6 +730,10 @@ def apply_rebrand(deck_path, out_path, template_path=None, rules_config: Optiona
         is_end = i == n_slides and n_slides > 1 and REBRAND_END_LAYOUT in tmpl_layout_names
         if (is_cover or is_end) and _looks_like_cover_or_end_slide(profile):
             layout_name = REBRAND_COVER_LAYOUT if is_cover else REBRAND_END_LAYOUT
+            if is_cover:
+                cover_index = i
+            else:
+                end_index = i
         else:
             match = match_layout(profile, layout_profiles, usage_counts)
             if match is not None:
@@ -714,7 +771,23 @@ def apply_rebrand(deck_path, out_path, template_path=None, rules_config: Optiona
         return RebrandResult(proposals=proposals, transformed=transformed, skipped=skipped, manual_review=[])
 
     layout_by_index = {i: proposal_by_index[i].layout_name for i in accepted}
-    _rebuild_accepted_slides(deck_path, out_path, template_path, accepted, layout_by_index)
+
+    reference_image_by_index: dict = {}
+    if reference_path is not None:
+        ref_prs = Presentation(str(reference_path))
+        if cover_index in accepted and len(ref_prs.slides) > 0:
+            blob = _first_picture_blob(ref_prs.slides[0])
+            if blob is not None:
+                reference_image_by_index[cover_index] = blob
+        if end_index in accepted and len(ref_prs.slides) > 0:
+            blob = _first_picture_blob(ref_prs.slides[-1])
+            if blob is not None:
+                reference_image_by_index[end_index] = blob
+
+    _rebuild_accepted_slides(
+        deck_path, out_path, template_path, accepted, layout_by_index,
+        reference_image_by_index=reference_image_by_index,
+    )
 
     from deckguard.config import default_config_path, load_config
     from deckguard.fixer import fix_deck

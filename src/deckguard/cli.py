@@ -359,6 +359,7 @@ def learn(
         try:
             compose_result, redesign_result = redesign_deck(
                 old_deck, str(out), rules_config=candidate, mode="brand", review=review,
+                reference_path=new_deck,
             )
         except RedesignError as exc:
             console.print(f"[bold red]error:[/] {exc}")
@@ -380,6 +381,10 @@ def learn(
             console.print("[yellow]--review findings:[/]")
             for note in redesign_result.review_notes:
                 console.print(f"  [yellow]-[/] {note}")
+        if redesign_result.reference_match_notes:
+            console.print("[cyan]exact reference match:[/]")
+            for note in redesign_result.reference_match_notes:
+                console.print(f"  [cyan]-[/] {note}")
 
 
 @main.command()

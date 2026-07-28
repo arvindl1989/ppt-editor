@@ -470,6 +470,30 @@ def test_apply_rebrand_cover_with_no_source_image_gets_a_real_editable_picture(t
         assert "blipFill" in xml and "r:embed" in xml, f"{slide.slide_layout.name}'s picture placeholder was left empty"
 
 
+def test_apply_rebrand_cover_borrows_reference_decks_own_photo_over_the_generic_default(tmp_path):
+    """The "Learn from a reference" flow's per-run image borrow: when the
+    source deck's cover has no picture of its own, a reference deck's own
+    cover photo (when given) is the deck-specific answer for THIS run --
+    it should win over the org template's generic stock photo fallback."""
+    path = _cover_content_end_deck(tmp_path)
+    out_path = tmp_path / "out.pptx"
+
+    ref_prs = new_deck()
+    ref_cover = add_slide(ref_prs)
+    title_run(ref_cover).text = "Reference Cover"
+    img_path = tmp_path / "ref_cover.png"
+    make_pattern_png(img_path, seed=3)
+    add_picture(ref_cover, str(img_path))
+    ref_path = tmp_path / "reference.pptx"
+    ref_prs.save(str(ref_path))
+
+    apply_rebrand(str(path), str(out_path), template_path=TEMPLATE_PATH, reference_path=str(ref_path))
+
+    prs2 = Presentation(str(out_path))
+    pic = next(s for s in prs2.slides[0].shapes if "Picture" in s.name)
+    assert pic.image.blob == img_path.read_bytes()
+
+
 def test_apply_rebrand_picks_varied_layouts_instead_of_repeating_one(tmp_path):
     """Several ordinary content slides, identically shaped (title + one
     body block, no images) -- without anti-repeat scoring they'd all pick
