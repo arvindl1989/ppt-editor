@@ -28,7 +28,7 @@ SPEC_SCHEMA = r"""
         {"label":"<= 18 chars","value":"<= 6 chars","desc":"<= 70 chars"}, {...}, {...}]},
     {"layout":"roadmap","eyebrow":"<label>","title":"<= 60 chars","phases":[                // 2–5 phases
         {"year":"<e.g. 2025>","title":"<= 20 chars","desc":"<= 90 chars"}, ...]},
-    {"layout":"quote","label":"<short>","quote":"<= 140 chars","attribution":"<name, role>"}
+    {"layout":"quote","label":"<= 24 chars","quote":"<= 140 chars","attribution":"<name, role>"}
   ]
 }
 """
@@ -51,7 +51,9 @@ RULES
 Do NOT plan a cover or a thank-you slide. Plan the BODY only.
 - Choose the layout that fits each idea's SHAPE, not by variety for its own sake:
 {LAYOUT_CATALOG}
-- Respect every character limit in the schema. If copy is too long, TIGHTEN it — never overflow.
+- Character limits are guidance, not hard constraints — the renderer shrinks text that would \
+overflow. Prefer to stay under them for the best look, but never reject a spec or truncate \
+mid-word just to hit a number; a slightly-over value is fine.
 - Vary layouts across the deck; don't put everything on title_content.
 - KONE voice: sentence case, plain, confident, no marketing fluff, no emoji.
 - Aim for 5–9 body slides unless the brief implies otherwise. Open with a section_divider \

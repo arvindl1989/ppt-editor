@@ -101,13 +101,16 @@ def test_validate_kone_spec_rejects_wrong_stat_count():
 
 
 @needs_skill
-def test_validate_kone_spec_rejects_overlong_bullet():
+def test_validate_kone_spec_accepts_text_over_the_schemas_character_limits():
+    """Character limits in the skill's SKILL.md/kone_planner.py are
+    guidance, not hard constraints, as of the skill's shrink-to-fit
+    renderer update -- deckguard must not resurrect the old "doesn't
+    fit the skill's layouts" rejection for a merely-long value."""
     spec = {
         "title": "T",
         "slides": [_kone_slide("title_content", title="Fine", bullets=["x" * 200])],
     }
-    with pytest.raises(RedesignError, match="over the 90-char limit"):
-        _validate_kone_spec(spec, _known_layouts())
+    _validate_kone_spec(spec, _known_layouts())  # must not raise
 
 
 @needs_skill
@@ -150,6 +153,27 @@ def test_build_deck_via_skill_renders_a_real_pptx(tmp_path):
     assert compose_result.layouts_used == ["Cover F", "title_content", "Outro"]
     assert redesign_result.outline is None
     assert redesign_result.usage.input_tokens > 0
+
+
+@needs_skill
+def test_build_deck_via_skill_renders_a_quote_label_over_the_old_hard_limit(tmp_path):
+    """Regression test for the real failure this session hit: a 21-char
+    quote label ("Voice of the business") used to be rejected outright
+    (the old 20-char hard limit). The skill's renderer now shrinks it to
+    fit instead, so this must render successfully, not raise."""
+    response_json = _kone_spec_json(
+        "My deck",
+        _kone_slide(
+            "quote", label="Voice of the business", quote="Ship it.", attribution="A KONE engineer",
+        ),
+    )
+    client = _FakeClient(_FakeResponse(response_json))
+
+    out_path = tmp_path / "out.pptx"
+    compose_result, _redesign_result = build_deck_via_skill("A brief.", str(out_path), client=client)
+
+    assert out_path.exists()
+    assert compose_result.slide_count == 3
 
 
 @needs_skill

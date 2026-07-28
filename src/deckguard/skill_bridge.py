@@ -253,30 +253,19 @@ def call_claude_for_kone_spec(
 
 
 # --------------------------------------------------------------------------
-# Validation: the renderer (`kone_deck_creator.py`) hand-places every
-# text box at a fixed geometry with no overflow handling of its own
-# (confirmed by reading it -- no length checks, no auto-shrink), so a
-# spec that violates the character limits its own layout functions were
-# sized for would silently overflow/overlap on the rendered slide.
-# Structured-output schemas constrain shape, not string length, so this
-# re-checks the limits documented in the skill's own SKILL.md/
-# kone_planner.py before anything is rendered, and reports every
-# violation at once rather than failing on the first.
+# Validation: STRUCTURAL only (right layout name, required fields
+# present, the counts each layout function actually indexes into --
+# e.g. `two_content` zips its columns against exactly 2 fixed x-offsets,
+# so a 1- or 3-column spec would silently drop/ignore content, not just
+# look bad). Character-length limits are deliberately NOT re-enforced
+# here anymore: the renderer itself (kone_deck_creator.py, as of the
+# skill's shrink-to-fit update) measures and shrinks single-line text
+# to its box width and falls back to PowerPoint's own shrink-on-overflow
+# for multi-line text, making those limits advisory on the skill's own
+# side -- re-rejecting a slightly-over value here would just resurrect
+# the exact "the model's deck spec doesn't fit" failure the skill's own
+# fix was built to eliminate.
 # --------------------------------------------------------------------------
-
-_LIMITS = {
-    "section_divider": {"eyebrow": 60, "title": 90},
-    "title_content": {"title": 60, "bullet": 90},
-    "two_content": {"title": 60, "heading": 30, "bullet": 90},
-    "three_stats": {"title": 90, "label": 18, "value": 6, "desc": 70},
-    "roadmap": {"eyebrow": 60, "title": 60, "phase_title": 20, "phase_desc": 90},
-    "quote": {"label": 20, "quote": 140, "attribution": 60},
-}
-
-
-def _check_len(errors: list, where: str, value: Optional[str], limit: int) -> None:
-    if value and len(value) > limit:
-        errors.append(f"{where}: {len(value)} chars, over the {limit}-char limit ({value!r})")
 
 
 def _validate_kone_spec(spec: dict, known_layouts: set) -> None:
@@ -293,70 +282,46 @@ def _validate_kone_spec(spec: dict, known_layouts: set) -> None:
         if layout not in known_layouts:
             errors.append(f"{where}: unknown layout {layout!r} -- not one of {sorted(known_layouts)}")
             continue
-        limits = _LIMITS[layout]
 
         if layout == "section_divider":
             if not s.get("title"):
                 errors.append(f"{where}: missing 'title'")
-            _check_len(errors, f"{where} title", s.get("title"), limits["title"])
-            _check_len(errors, f"{where} eyebrow", s.get("eyebrow"), limits["eyebrow"])
 
         elif layout == "title_content":
             if not s.get("title"):
                 errors.append(f"{where}: missing 'title'")
-            _check_len(errors, f"{where} title", s.get("title"), limits["title"])
-            bullets = s.get("bullets") or []
-            if not bullets:
+            if not s.get("bullets"):
                 errors.append(f"{where}: needs at least one bullet")
-            for b in bullets:
-                _check_len(errors, f"{where} bullet", b, limits["bullet"])
 
         elif layout == "two_content":
             if not s.get("title"):
                 errors.append(f"{where}: missing 'title'")
-            _check_len(errors, f"{where} title", s.get("title"), limits["title"])
             columns = s.get("columns") or []
             if len(columns) != 2:
                 errors.append(f"{where}: needs exactly 2 columns, got {len(columns)}")
-            for col in columns:
-                _check_len(errors, f"{where} column heading", col.get("heading"), limits["heading"])
-                for b in col.get("bullets") or []:
-                    _check_len(errors, f"{where} column bullet", b, limits["bullet"])
 
         elif layout == "three_stats":
             if not s.get("title"):
                 errors.append(f"{where}: missing 'title'")
-            _check_len(errors, f"{where} title", s.get("title"), limits["title"])
             stats = s.get("stats") or []
             if len(stats) != 3:
                 errors.append(f"{where}: needs exactly 3 stats, got {len(stats)}")
-            for st in stats:
-                _check_len(errors, f"{where} stat label", st.get("label"), limits["label"])
-                _check_len(errors, f"{where} stat value", st.get("value"), limits["value"])
-                _check_len(errors, f"{where} stat desc", st.get("desc"), limits["desc"])
 
         elif layout == "roadmap":
             if not s.get("title"):
                 errors.append(f"{where}: missing 'title'")
-            _check_len(errors, f"{where} title", s.get("title"), limits["title"])
-            _check_len(errors, f"{where} eyebrow", s.get("eyebrow"), limits["eyebrow"])
             phases = s.get("phases") or []
             if not (2 <= len(phases) <= 5):
                 errors.append(f"{where}: needs 2-5 phases, got {len(phases)}")
             for ph in phases:
                 if not ph.get("year"):
                     errors.append(f"{where}: a phase is missing 'year'")
-                _check_len(errors, f"{where} phase title", ph.get("title"), limits["phase_title"])
-                _check_len(errors, f"{where} phase desc", ph.get("desc"), limits["phase_desc"])
 
         elif layout == "quote":
             if not s.get("quote"):
                 errors.append(f"{where}: missing 'quote'")
             if not s.get("attribution"):
                 errors.append(f"{where}: missing 'attribution'")
-            _check_len(errors, f"{where} quote", s.get("quote"), limits["quote"])
-            _check_len(errors, f"{where} attribution", s.get("attribution"), limits["attribution"])
-            _check_len(errors, f"{where} label", s.get("label"), limits["label"])
 
     if errors:
         raise RedesignError(

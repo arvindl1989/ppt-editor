@@ -18,8 +18,9 @@ import os
 from pptx import Presentation
 from pptx.util import Emu, Pt
 from pptx.dml.color import RGBColor
-from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
+from pptx.enum.text import PP_ALIGN, MSO_ANCHOR, MSO_AUTO_SIZE
 from pptx.enum.shapes import MSO_SHAPE, MSO_CONNECTOR
+from PIL import ImageFont
 
 # ---------- paths (resolve relative to this skill; kone-design is a sibling skill) ----------
 SKILL_DIR   = os.path.dirname(os.path.abspath(__file__))
@@ -40,14 +41,34 @@ INTER="Inter"; INTER_SB="Inter SemiBold"; KINFO="KONE Information"
 FS_DISPLAY,FS_H1,FS_H2,FS_H3=54,40,28,22
 FS_BODY_LG,FS_BODY,FS_LABEL,FS_EY,FS_STAT=20,16,14,12,64
 
+# ---------- shrink-to-fit ----------
+# So no spec value can ever overflow its box: single-line fields are measured and shrunk to
+# fit their width; every box also gets PowerPoint's "shrink text on overflow" as a vertical
+# safety net. This makes the schema's character limits advisory, not load-bearing.
+FONT_FILE={INTER:os.path.join(SKILL_DIR,"fonts","Inter-Regular.ttf"),
+           INTER_SB:os.path.join(SKILL_DIR,"fonts","Inter-SemiBold.ttf"),
+           KINFO:os.path.join(SKILL_DIR,"fonts","KONE_Information.ttf")}
+def _fit_px(text,font,base_px,box_w_px,min_px=9):
+    path=FONT_FILE.get(font)
+    if not path or not os.path.exists(path) or not text.strip(): return base_px
+    try:
+        for size in range(int(base_px),min_px-1,-1):
+            if ImageFont.truetype(path,size).getlength(text) <= box_w_px*0.97: return size
+        return min_px
+    except Exception:
+        return base_px   # never break a build over measurement
+
 # ---------- text helpers ----------
 def _tf(slide,x,y,w,h,anchor=MSO_ANCHOR.TOP):
     tb=slide.shapes.add_textbox(X(x),X(y),X(w),X(h)); tf=tb.text_frame
     tf.word_wrap=True; tf.vertical_anchor=anchor
+    tf.auto_size=MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE     # vertical safety net
     for m in("margin_left","margin_right","margin_top","margin_bottom"): setattr(tf,m,0)
     return tf
-def _run(p,text,font,px,color,caps=False,bold=False):
-    r=p.add_run(); r.text=text.upper() if caps else text
+def _run(p,text,font,px,color,caps=False,bold=False,fit_w=None):
+    disp=text.upper() if caps else text
+    if fit_w: px=_fit_px(disp,font,px,fit_w)          # single-line width fit
+    r=p.add_run(); r.text=disp
     f=r.font; f.name=font; f.size=PT(px); f.color.rgb=color; f.bold=bold; return r
 def _bullets(tf,items,color=BLACK):
     for i,it in enumerate(items):
@@ -58,7 +79,7 @@ def _bullets(tf,items,color=BLACK):
 
 # ---------- BODY LAYOUT LIBRARY (ported from LAYOUTS.md) ----------
 def section_divider(slide,spec):                  # slideLayout11
-    tf=_tf(slide,45,110,600,24); _run(tf.paragraphs[0],spec.get("eyebrow",""),KINFO,FS_EY,BLUE,caps=True)
+    tf=_tf(slide,45,110,600,24); _run(tf.paragraphs[0],spec.get("eyebrow",""),KINFO,FS_EY,BLUE,caps=True,fit_w=600)
     tf=_tf(slide,45,150,900,430); _run(tf.paragraphs[0],spec["title"],INTER,FS_DISPLAY,BLACK)
 
 def title_content(slide,spec):                    # slideLayout16
@@ -69,7 +90,7 @@ def two_content(slide,spec):                      # slideLayout20
     tf=_tf(slide,45,91,1189,104); _run(tf.paragraphs[0],spec["title"],INTER,FS_H1,BLACK)
     for x,col in zip((45,657),spec["columns"]):
         tf=_tf(slide,x,227,578,402)
-        _run(tf.paragraphs[0],col["heading"],INTER_SB,FS_H3,BLACK,bold=True)
+        _run(tf.paragraphs[0],col["heading"],INTER_SB,FS_H3,BLACK,bold=True,fit_w=578)
         b=tf.add_paragraph(); b.space_before=Pt(10)
         for j,it in enumerate(col["bullets"]):
             p=b if j==0 else tf.add_paragraph(); p.space_after=Pt(8)
@@ -79,12 +100,12 @@ def three_stats(slide,spec):                      # slideLayout49 (body variant)
     tf=_tf(slide,46,92,985,180); _run(tf.paragraphs[0],spec["title"],INTER,FS_H1,BLACK)
     for x,st in zip((46,453,861),spec["stats"]):
         tf=_tf(slide,x,364,374,265)
-        _run(tf.paragraphs[0],st["label"],KINFO,FS_LABEL,BLUE,caps=True)
-        p=tf.add_paragraph(); p.space_before=Pt(6); _run(p,st["value"],INTER,FS_STAT,BLACK)
+        _run(tf.paragraphs[0],st["label"],KINFO,FS_LABEL,BLUE,caps=True,fit_w=374)
+        p=tf.add_paragraph(); p.space_before=Pt(6); _run(p,st["value"],INTER,FS_STAT,BLACK,fit_w=374)
         p=tf.add_paragraph(); p.space_before=Pt(10); _run(p,st["desc"],INTER,FS_BODY,GREY)
 
 def roadmap(slide,spec):                          # 3-content grid + timeline axis
-    tf=_tf(slide,45,60,700,20); _run(tf.paragraphs[0],spec.get("eyebrow",""),KINFO,FS_EY,BLUE,caps=True)
+    tf=_tf(slide,45,60,700,20); _run(tf.paragraphs[0],spec.get("eyebrow",""),KINFO,FS_EY,BLUE,caps=True,fit_w=700)
     tf=_tf(slide,45,86,1000,60); _run(tf.paragraphs[0],spec["title"],INTER,FS_H1,BLACK)
     phases=spec["phases"]; n=len(phases); MARGIN,GUT,RIGHT=45,34,1235
     colw=(RIGHT-MARGIN-(n-1)*GUT)/n; cols=[MARGIN+i*(colw+GUT) for i in range(n)]; ay=300
@@ -93,17 +114,17 @@ def roadmap(slide,spec):                          # 3-content grid + timeline ax
     for cx,ph in zip(cols,phases):
         d=slide.shapes.add_shape(MSO_SHAPE.OVAL,X(cx),X(ay-7),X(14),X(14))
         d.fill.solid(); d.fill.fore_color.rgb=BLUE; d.line.fill.background(); d.shadow.inherit=False
-        tf=_tf(slide,cx,324,colw,34); _run(tf.paragraphs[0],ph["year"],KINFO,24,BLUE,caps=True)
-        tf=_tf(slide,cx,366,colw,70); _run(tf.paragraphs[0],ph["title"],INTER_SB,FS_H3,BLACK,bold=True)
+        tf=_tf(slide,cx,324,colw,34); _run(tf.paragraphs[0],ph["year"],KINFO,24,BLUE,caps=True,fit_w=colw)
+        tf=_tf(slide,cx,366,colw,70); _run(tf.paragraphs[0],ph["title"],INTER_SB,FS_H3,BLACK,bold=True,fit_w=colw)
         tf=_tf(slide,cx,440,colw,160); _run(tf.paragraphs[0],ph["desc"],INTER,FS_BODY,GREY)
 
 def quote(slide,spec):                            # slideLayout40
     panel=slide.shapes.add_shape(MSO_SHAPE.RECTANGLE,X(453),X(136),X(782),X(493))
     panel.fill.solid(); panel.fill.fore_color.rgb=BLUE; panel.line.fill.background(); panel.shadow.inherit=False
-    tf=_tf(slide,45,136,272,104); _run(tf.paragraphs[0],spec.get("label","QUOTE"),KINFO,FS_LABEL,BLACK,caps=True)
+    tf=_tf(slide,45,136,272,104); _run(tf.paragraphs[0],spec.get("label","QUOTE"),KINFO,FS_LABEL,BLACK,caps=True,fit_w=272)
     tf=_tf(slide,510,212,657,349,anchor=MSO_ANCHOR.MIDDLE)
     _run(tf.paragraphs[0],"\u201c"+spec["quote"]+"\u201d",INTER,FS_H2,WHITE)
-    tf=_tf(slide,510,561,657,40); _run(tf.paragraphs[0],spec["attribution"],KINFO,FS_LABEL,WHITE,caps=True)
+    tf=_tf(slide,510,561,657,40); _run(tf.paragraphs[0],spec["attribution"],KINFO,FS_LABEL,WHITE,caps=True,fit_w=657)
 
 REGISTRY={"section_divider":section_divider,"title_content":title_content,
           "two_content":two_content,"three_stats":three_stats,
