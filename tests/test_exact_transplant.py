@@ -1,7 +1,8 @@
 from pptx import Presentation
+from pptx.enum.dml import MSO_THEME_COLOR
 
 from deckguard.exact_transplant import transplant_exact_treatment
-from tests.helpers import add_rectangle, set_run
+from tests.helpers import add_rectangle, set_run, set_run_theme_color, set_theme_slot
 
 
 def _blank_slide(prs: Presentation):
@@ -216,4 +217,77 @@ def test_transplant_skips_text_color_that_would_match_shapes_own_fill():
     assert str(run.font.color.rgb) == "141414"  # left alone, not made invisible
     fill_changes = [c for c in result.changes if c.field == "fill"]
     assert fill_changes and fill_changes[0].new == "F3EEE6"  # fill copy still applied
+    assert not [c for c in result.changes if c.field == "font_color"]
+
+
+def test_transplant_copies_scheme_color_uniformly_from_reference():
+    """Real-world case: a generic contrast-fix pass upstream (fix_deck)
+    forced an explicit literal color onto some, but not all, of a row of
+    identically-styled "category chip" boxes -- each colored differently,
+    each meant to keep the SAME theme-relative text color (e.g.
+    background1) regardless of its own fill, per the reference deck's own
+    design. Copying the reference's scheme reference itself (not just its
+    currently-resolved RGB) restores that uniform, correct treatment."""
+    old_prs = Presentation()
+    set_theme_slot(old_prs, "lt1", "FFFFFF")
+    old_slide = _blank_slide(old_prs)
+    box = add_rectangle(old_slide, name="Chip", fill_hex="FFA023")
+    set_run(box.text_frame.paragraphs[0].add_run(), text="Safety", color_hex="141414")  # wrongly forced explicit black
+
+    new_prs = Presentation()
+    set_theme_slot(new_prs, "lt1", "FFFFFF")
+    new_slide = _blank_slide(new_prs)
+    new_box = add_rectangle(new_slide, name="Chip", fill_hex="FFA023")
+    new_run = new_box.text_frame.paragraphs[0].add_run()
+    new_run.text = "Safety"
+    set_run_theme_color(new_run, MSO_THEME_COLOR.BACKGROUND_1)
+
+    result = transplant_exact_treatment(old_prs, new_prs)
+
+    run = _by_name(old_prs.slides[0], "Chip").text_frame.paragraphs[0].runs[0]
+    assert run.font.color.theme_color == MSO_THEME_COLOR.BACKGROUND_1
+    assert any(c.field == "font_color" for c in result.changes)
+
+
+def test_transplant_scheme_color_no_op_when_already_matching():
+    old_prs = Presentation()
+    set_theme_slot(old_prs, "lt1", "FFFFFF")
+    old_slide = _blank_slide(old_prs)
+    box = add_rectangle(old_slide, name="Chip", fill_hex="FFA023")
+    old_run = box.text_frame.paragraphs[0].add_run()
+    old_run.text = "Safety"
+    set_run_theme_color(old_run, MSO_THEME_COLOR.BACKGROUND_1)
+
+    new_prs = Presentation()
+    set_theme_slot(new_prs, "lt1", "FFFFFF")
+    new_slide = _blank_slide(new_prs)
+    new_box = add_rectangle(new_slide, name="Chip", fill_hex="FFA023")
+    new_run = new_box.text_frame.paragraphs[0].add_run()
+    new_run.text = "Safety"
+    set_run_theme_color(new_run, MSO_THEME_COLOR.BACKGROUND_1)
+
+    result = transplant_exact_treatment(old_prs, new_prs)
+
+    assert not [c for c in result.changes if c.field == "font_color"]
+
+
+def test_transplant_skips_scheme_color_that_would_match_shapes_own_fill():
+    old_prs = Presentation()
+    set_theme_slot(old_prs, "lt1", "F3EEE6")
+    old_slide = _blank_slide(old_prs)
+    box = add_rectangle(old_slide, name="Chip", fill_hex="F3EEE6")
+    set_run(box.text_frame.paragraphs[0].add_run(), text="Code", color_hex="141414")
+
+    new_prs = Presentation()
+    set_theme_slot(new_prs, "lt1", "F3EEE6")
+    new_slide = _blank_slide(new_prs)
+    new_box = add_rectangle(new_slide, name="Chip", fill_hex="F3EEE6")
+    new_run = new_box.text_frame.paragraphs[0].add_run()
+    new_run.text = "Code"
+    set_run_theme_color(new_run, MSO_THEME_COLOR.BACKGROUND_1)  # resolves to F3EEE6 -- same as its own fill
+
+    result = transplant_exact_treatment(old_prs, new_prs)
+
+    run = _by_name(old_prs.slides[0], "Chip").text_frame.paragraphs[0].runs[0]
+    assert str(run.font.color.rgb) == "141414"  # left alone, not made invisible
     assert not [c for c in result.changes if c.field == "font_color"]

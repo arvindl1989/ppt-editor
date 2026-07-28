@@ -38,6 +38,7 @@ from pptx.dml.color import RGBColor
 from pptx.enum.dml import MSO_COLOR_TYPE, MSO_FILL_TYPE
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 
+from deckguard.colors import ThemeColorScheme, effective_rgb, get_theme_scheme
 from deckguard.fonts import normalize_key
 
 # Below this fraction of an old slide's (leaf) shapes finding a name-match
@@ -160,9 +161,72 @@ def _copy_line(old_shape, new_shape, slide_index: int, path: str, color_remap: d
     changes.append(TransplantChange(slide_index, path, "line", old_hex, new_hex))
 
 
+def _hex_str(rgb: Optional[tuple]) -> Optional[str]:
+    return "%02X%02X%02X" % rgb if rgb is not None else None
+
+
+def _copy_font_color(
+    old_run, new_run, own_fill_hex: Optional[str], color_remap: dict,
+    old_theme_scheme: Optional[ThemeColorScheme], ref_theme_scheme: Optional[ThemeColorScheme],
+    slide_index: int, path: str, changes: list,
+) -> None:
+    try:
+        new_color_type = new_run.font.color.type
+    except Exception:
+        return
+    if new_color_type == MSO_COLOR_TYPE.RGB:
+        new_hex = _canonical_hex(str(new_run.font.color.rgb), color_remap)
+        old_hex = str(old_run.font.color.rgb) if old_run.font.color.type == MSO_COLOR_TYPE.RGB else None
+        # Never transplant a text color that would land exactly on the
+        # shape's own (just-transplanted) fill -- e.g. a hidden duplicate/
+        # decoy shape in the reference deck with a stale text/fill pairing
+        # that happens to canonicalize to the same approved token for both
+        # roles. Applying it would make the text invisible; better to
+        # leave the old color as-is than regress contrast for a value
+        # this pass isn't confident about.
+        if old_hex != new_hex and new_hex != own_fill_hex:
+            old_run.font.color.rgb = RGBColor.from_string(new_hex)
+            changes.append(TransplantChange(slide_index, path, "font_color", old_hex, new_hex))
+        return
+
+    if new_color_type == MSO_COLOR_TYPE.SCHEME:
+        # A THEME-relative reference (e.g. "this text is always background1,
+        # whatever that currently renders as") -- the reference deck's own
+        # design intent, not a literal color, and specifically how real
+        # decks keep text uniformly on-brand across several differently
+        # colored "category chip" boxes (accent1/accent2/.../background1
+        # each pick their own contrast-appropriate slot). A generic
+        # contrast-fix pass upstream (fix_deck) has no notion of this --
+        # it only ever sees/sets literal RGB -- and can end up "fixing"
+        # some chips in a uniformly-scheme-colored row to an explicit
+        # literal color while leaving others alone, which is exactly the
+        # kind of inconsistency this whole module exists to eliminate.
+        # Copying the theme reference itself (not just its current
+        # resolved RGB) keeps it correct even if the theme changes again.
+        new_theme_color = new_run.font.color.theme_color
+        new_brightness = new_run.font.color.brightness or 0.0
+        new_effective = effective_rgb(new_run.font.color, ref_theme_scheme)
+        new_hex = _hex_str(new_effective)
+        if new_hex is not None and new_hex == own_fill_hex:
+            return
+        old_effective = effective_rgb(old_run.font.color, old_theme_scheme)
+        old_hex = _hex_str(old_effective)
+        if old_hex == new_hex and old_run.font.color.type == MSO_COLOR_TYPE.SCHEME:
+            return
+        try:
+            old_run.font.color.theme_color = new_theme_color
+            if new_brightness:
+                old_run.font.color.brightness = new_brightness
+        except Exception:
+            return
+        changes.append(TransplantChange(slide_index, path, "font_color", old_hex, new_hex))
+
+
 def _copy_text_style(
     old_shape, new_shape, slide_index: int, path: str, color_remap: dict,
-    font_remap: dict, font_approved_keys: set, changes: list,
+    font_remap: dict, font_approved_keys: set,
+    old_theme_scheme: Optional[ThemeColorScheme], ref_theme_scheme: Optional[ThemeColorScheme],
+    changes: list,
 ) -> None:
     if not (getattr(old_shape, "has_text_frame", False) and getattr(new_shape, "has_text_frame", False)):
         return
@@ -191,23 +255,10 @@ def _copy_text_style(
                 old_run.font.bold = new_val
                 changes.append(TransplantChange(slide_index, path, "font_bold", str(old_val), str(new_val)))
             try:
-                if new_run.font.color.type == MSO_COLOR_TYPE.RGB:
-                    new_hex = _canonical_hex(str(new_run.font.color.rgb), color_remap)
-                    old_hex = (
-                        str(old_run.font.color.rgb)
-                        if old_run.font.color.type == MSO_COLOR_TYPE.RGB else None
-                    )
-                    # Never transplant a text color that would land exactly
-                    # on the shape's own (just-transplanted) fill -- e.g. a
-                    # hidden duplicate/decoy shape in the reference deck
-                    # with a stale text/fill pairing that happens to
-                    # canonicalize to the same approved token for both
-                    # roles. Applying it would make the text invisible;
-                    # better to leave the old color as-is than regress
-                    # contrast for a value this pass isn't confident about.
-                    if old_hex != new_hex and new_hex != own_fill_hex:
-                        old_run.font.color.rgb = RGBColor.from_string(new_hex)
-                        changes.append(TransplantChange(slide_index, path, "font_color", old_hex, new_hex))
+                _copy_font_color(
+                    old_run, new_run, own_fill_hex, color_remap,
+                    old_theme_scheme, ref_theme_scheme, slide_index, path, changes,
+                )
             except Exception:
                 pass
 
@@ -233,14 +284,31 @@ def transplant_exact_treatment(prs, reference_prs, rules_config: Optional[dict] 
     }
     font_approved_keys = {normalize_key(n) for n in (fonts_cfg.get("approved", []) or [])}
     result = TransplantResult()
+
+    theme_scheme_cache: dict = {}
+
+    def theme_scheme_for(slide):
+        master = slide.slide_layout.slide_master
+        key = id(master.part)
+        if key not in theme_scheme_cache:
+            try:
+                theme_scheme_cache[key] = get_theme_scheme(master)
+            except Exception:
+                theme_scheme_cache[key] = None
+        return theme_scheme_cache[key]
+
     n = min(len(prs.slides), len(reference_prs.slides))
     for i in range(n):
-        old_shapes = list(prs.slides[i].shapes)
+        old_slide = prs.slides[i]
+        old_shapes = list(old_slide.shapes)
         old_map = _shape_path_map(old_shapes)
         ref_map = _shape_path_map(list(reference_prs.slides[i].shapes))
         old_leaf_count = sum(1 for _ in _leaf_shapes(old_shapes))
         if old_leaf_count == 0:
             continue
+
+        old_theme_scheme = theme_scheme_for(old_slide)
+        ref_theme_scheme = theme_scheme_for(reference_prs.slides[i])
 
         matched_leaf_count = 0
         for path, old_shape in old_map.items():
@@ -253,7 +321,8 @@ def transplant_exact_treatment(prs, reference_prs, rules_config: Optional[dict] 
             _copy_fill(old_shape, new_shape, i, path, color_remap, result.changes)
             _copy_line(old_shape, new_shape, i, path, color_remap, result.changes)
             _copy_text_style(
-                old_shape, new_shape, i, path, color_remap, font_remap, font_approved_keys, result.changes
+                old_shape, new_shape, i, path, color_remap, font_remap, font_approved_keys,
+                old_theme_scheme, ref_theme_scheme, result.changes,
             )
 
         if matched_leaf_count / old_leaf_count < LOW_MATCH_THRESHOLD:
