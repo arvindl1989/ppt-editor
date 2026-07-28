@@ -761,6 +761,13 @@ def _rebrand_deck(
                 manual_review = fix_report.manual_review
 
     reference_match_notes: list = []
+    if rebrand_result.reference_layout_indices:
+        touched = rebrand_result.reference_layout_indices
+        reference_match_notes.append(
+            f"Reference layout: {len(touched)} slide(s) had their layout/chrome (logo, footer/date format) "
+            f"refreshed directly from the reference deck's own matching layout, content untouched: "
+            f"{', '.join(map(str, touched))}."
+        )
     if reference_path is not None:
         from deckguard.exact_transplant import transplant_exact_treatment
 

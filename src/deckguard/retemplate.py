@@ -522,9 +522,47 @@ def apply_retemplate(
     return result
 
 
+def _resolve_imported_layouts(prs, partname_by_name: dict) -> dict:
+    """{layout_name: SlideLayout} for every entry in `partname_by_name`
+    (as returned by `import_layouts`) resolved against `prs`'s CURRENT
+    part graph -- robust regardless of which/how-many slide masters the
+    import(s) landed on (`import_layouts` may be called more than once,
+    from different source decks, in the same rebuild -- see
+    `reference_layout_by_index` below)."""
+    all_layouts = {
+        str(layout.part.partname).lstrip("/"): layout
+        for master in prs.slide_masters for layout in master.slide_layouts
+    }
+    return {name: all_layouts[partname] for name, partname in partname_by_name.items()}
+
+
+def _reparent_slide_layout(slide, new_layout) -> None:
+    """Re-point `slide`'s single required slideLayout relationship at
+    `new_layout`, leaving every one of the slide's own shapes untouched.
+
+    Used for the "Learn from a reference" flow's layout carryover (see
+    `apply_rebrand`'s `reference_path`): when an old slide and its
+    reference counterpart already sit on a layout of the SAME NAME (most
+    often a deck-specific custom layout with no equivalent in the org
+    template at all -- e.g. a big internal catalog deck's own one-off
+    layout), the right fix isn't a content reflow onto something else,
+    it's just pointing the slide at a fresh, on-brand copy of the exact
+    layout it already used -- carrying over whatever chrome (logo,
+    footer/date format) lives on that layout's own master, without
+    touching the slide's body content at all.
+    """
+    from pptx.opc.constants import RELATIONSHIP_TYPE as RT
+
+    part = slide.part
+    old_rid = next(rid for rid, rel in part.rels.items() if rel.reltype == RT.SLIDE_LAYOUT)
+    part.drop_rel(old_rid)
+    part.relate_to(new_layout.part, RT.SLIDE_LAYOUT)
+
+
 def _rebuild_accepted_slides(
     deck_path, out_path, template_path, accepted: set, layout_by_index: dict,
     profile_overrides: Optional[dict] = None, reference_image_by_index: Optional[dict] = None,
+    reference_path=None, reference_layout_by_index: Optional[dict] = None,
 ) -> None:
     """Shared slide-surgery for `apply_retemplate` and `apply_rebrand`:
     rebuild every slide index in `accepted` on the layout named in
@@ -543,17 +581,31 @@ def _rebuild_accepted_slides(
     `reference_image_by_index` (optional, `{index: bytes}`): see
     `apply_rebrand`'s `reference_path` -- passed straight through to
     `_transplant_content` for the one index it applies to.
+
+    `reference_layout_by_index` (optional, `{index: layout_name}`, disjoint
+    from `accepted`): indices to re-parent onto a layout of that name
+    IMPORTED FROM `reference_path` instead of `template_path` -- see
+    `_reparent_slide_layout`. These slides' own content is never touched.
     """
     profile_overrides = profile_overrides or {}
     reference_image_by_index = reference_image_by_index or {}
+    reference_layout_by_index = reference_layout_by_index or {}
     needed_layouts = sorted(set(layout_by_index[i] for i in accepted))
     tmp_path = Path(out_path).with_suffix(".layouts.pptx")
-    import_layouts(deck_path, str(template_path), str(tmp_path), needed_layouts)
+    partname_by_name = import_layouts(deck_path, str(template_path), str(tmp_path), needed_layouts) if needed_layouts else {}
+
+    reference_partname_by_name: dict = {}
+    if reference_layout_by_index:
+        needed_reference_layouts = sorted(set(reference_layout_by_index.values()))
+        source_path = str(tmp_path) if needed_layouts else deck_path
+        reference_partname_by_name = import_layouts(
+            source_path, str(reference_path), str(tmp_path), needed_reference_layouts
+        )
 
     try:
         prs2 = Presentation(str(tmp_path))
-        imported_master = prs2.slide_masters[-1]
-        layout_by_name = {layout.name: layout for layout in imported_master.slide_layouts}
+        layout_by_name = _resolve_imported_layouts(prs2, partname_by_name)
+        reference_layout_objs = _resolve_imported_layouts(prs2, reference_partname_by_name)
         slide_height_in = prs2.slide_height / 914400 if prs2.slide_height else None
 
         # Captured once, before any add/move/delete -- a slide's OPC
@@ -561,6 +613,14 @@ def _rebuild_accepted_slides(
         # "the original slide at position N" as the deck's slide list
         # shifts underneath us with every replacement.
         original_partnames = [str(s.part.partname).lstrip("/") for s in prs2.slides]
+
+        # Reference-layout carryover: a straight relationship swap, no
+        # content surgery at all, so it's safe to do before the
+        # add/move/delete dance below (touches a disjoint set of slides).
+        for orig_idx, layout_name in reference_layout_by_index.items():
+            old_partname = original_partnames[orig_idx - 1]
+            old_slide = next(s for s in prs2.slides if str(s.part.partname).lstrip("/") == old_partname)
+            _reparent_slide_layout(old_slide, reference_layout_objs[layout_name])
 
         # Phase A: create every new slide and transplant its content FIRST,
         # with no deletions interleaved. python-pptx's own new-slide
@@ -662,6 +722,7 @@ class RebrandResult:
     transformed: list  # slide_index (1-based, ORIGINAL numbering) actually rebuilt
     skipped: list  # slide_index left untouched (ineligible, or no layout fit)
     manual_review: list  # fix_deck's own post-pass findings it couldn't auto-resolve (e.g. all_caps)
+    reference_layout_indices: list = field(default_factory=list)  # subset of `transformed` handled by reference layout carryover, not org-template rebuild
 
 
 def apply_rebrand(
@@ -699,6 +760,22 @@ def apply_rebrand(
     the deck-specific answer for THIS run beats the org template's
     generic default. Never persisted anywhere; purely a per-call source
     for this one picture.
+
+    `reference_path` also drives a SECOND, independent mechanism for
+    every slide EXCEPT the cover/end positions (which keep their own
+    dedicated handling above): wherever an old slide and its reference
+    counterpart at the SAME index already sit on a layout of the exact
+    same name, that's ground truth for what this slide should look like
+    -- often a deck-specific custom layout the org template has no
+    equivalent for at all (a large internal catalog deck's own one-off
+    layout, say), which `classify_slide`/`match_layout` below can never
+    correctly handle since they only ever draw from the org template.
+    These slides are re-parented onto a fresh copy of that exact layout
+    IMPORTED FROM THE REFERENCE DECK (see `_reparent_slide_layout`) --
+    content stays 100% untouched, only the layout/master (and therefore
+    its chrome: logo, footer/date format) is refreshed. They're excluded
+    from `classify_slide`/`match_layout` entirely -- there's no content
+    reflow to evaluate eligibility for.
     """
     template_path = template_path or default_template_path()
     prs = Presentation(deck_path)
@@ -709,11 +786,34 @@ def apply_rebrand(
     tmpl_layout_names = {layout.name for master in tmpl_prs.slide_masters for layout in master.slide_layouts}
 
     n_slides = len(prs.slides)
+
+    reference_layout_by_index: dict = {}
+    ref_prs = None
+    if reference_path is not None:
+        ref_prs = Presentation(str(reference_path))
+        for i in range(2, n_slides):  # excludes slide 1 (cover) and n_slides (end)
+            if i > len(ref_prs.slides):
+                break
+            old_layout_name = prs.slides[i - 1].slide_layout.name
+            if old_layout_name == ref_prs.slides[i - 1].slide_layout.name:
+                reference_layout_by_index[i] = old_layout_name
+
     proposals: list = []
     usage_counts: dict = {}
     cover_index: Optional[int] = None
     end_index: Optional[int] = None
     for i, slide in enumerate(prs.slides, start=1):
+        if i in reference_layout_by_index:
+            title, text_blocks, images, _reason = _extract_slide_content(slide, slide_height_in)
+            body_preview = _preview(text_blocks[0][0][1]) if text_blocks and text_blocks[0] else None
+            proposals.append(
+                SlideProposal(
+                    slide_index=i, eligible=True, layout_name=reference_layout_by_index[i],
+                    title_preview=_preview(title), body_preview=body_preview, image_count=len(images),
+                )
+            )
+            continue
+
         profile = classify_slide(slide, slide_height_in)
         if not profile.eligible:
             body_preview = _preview(profile.text_blocks[0][0][1]) if profile.text_blocks and profile.text_blocks[0] else None
@@ -759,22 +859,28 @@ def apply_rebrand(
         )
 
     proposal_by_index = {p.slide_index: p for p in proposals}
-    accepted = {p.slide_index for p in proposals if p.eligible}
+    accepted = {
+        p.slide_index for p in proposals if p.eligible and p.slide_index not in reference_layout_by_index
+    }
     all_indexes = set(range(1, n_slides + 1))
-    transformed = sorted(accepted)
-    skipped = sorted(all_indexes - accepted)
+    transformed = sorted(accepted | set(reference_layout_by_index))
+    skipped = sorted(all_indexes - accepted - set(reference_layout_by_index))
 
-    if not accepted:
+    if not accepted and not reference_layout_by_index:
         import shutil
 
         shutil.copy(deck_path, out_path)
-        return RebrandResult(proposals=proposals, transformed=transformed, skipped=skipped, manual_review=[])
+        return RebrandResult(
+            proposals=proposals, transformed=transformed, skipped=skipped, manual_review=[],
+            reference_layout_indices=[],
+        )
 
     layout_by_index = {i: proposal_by_index[i].layout_name for i in accepted}
 
     reference_image_by_index: dict = {}
     if reference_path is not None:
-        ref_prs = Presentation(str(reference_path))
+        if ref_prs is None:
+            ref_prs = Presentation(str(reference_path))
         if cover_index in accepted and len(ref_prs.slides) > 0:
             blob = _first_picture_blob(ref_prs.slides[0])
             if blob is not None:
@@ -787,6 +893,7 @@ def apply_rebrand(
     _rebuild_accepted_slides(
         deck_path, out_path, template_path, accepted, layout_by_index,
         reference_image_by_index=reference_image_by_index,
+        reference_path=reference_path, reference_layout_by_index=reference_layout_by_index,
     )
 
     from deckguard.config import default_config_path, load_config
@@ -797,5 +904,6 @@ def apply_rebrand(
     fix_report = fix_deck(out_prs, config, source_path=str(out_path), output_path=str(out_path), dry_run=False)
 
     return RebrandResult(
-        proposals=proposals, transformed=transformed, skipped=skipped, manual_review=fix_report.manual_review
+        proposals=proposals, transformed=transformed, skipped=skipped, manual_review=fix_report.manual_review,
+        reference_layout_indices=sorted(reference_layout_by_index),
     )

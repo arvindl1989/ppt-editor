@@ -494,6 +494,102 @@ def test_apply_rebrand_cover_borrows_reference_decks_own_photo_over_the_generic_
     assert pic.image.blob == img_path.read_bytes()
 
 
+def test_apply_rebrand_reparents_a_middle_slide_onto_the_reference_decks_own_layout(tmp_path):
+    """The "Learn from a reference" flow's layout carryover: when an old
+    slide and its reference counterpart at the SAME index already sit on
+    a layout of the exact same name -- here "Title and Content", which
+    (like the real deck pair this was built against) isn't in the org
+    template's own candidate list at all -- that name is ground truth for
+    what the slide should look like. Content stays 100% untouched (proven
+    here by title text AND a non-placeholder decorative shape surviving
+    verbatim, since this bypasses classify_slide/match_layout's content
+    caps entirely); only the layout/master is refreshed from the
+    reference's own copy."""
+    old = new_deck()
+    title_run(add_slide(old, layout_idx=0)).text = "Cover"
+    middle = add_slide(old, layout_idx=1)  # "Title and Content"
+    title_run(middle).text = "Middle slide"
+    add_rectangle(middle, name="Chip", fill_hex="1450F5")  # already-approved KONE blue -- fix_deck leaves it alone
+    title_run(add_slide(old, layout_idx=0)).text = "The End"
+    old_path = tmp_path / "old.pptx"
+    old.save(str(old_path))
+
+    ref = new_deck()
+    add_slide(ref, layout_idx=0)
+    add_slide(ref, layout_idx=1)  # same layout name, no content needed -- only its NAME matters
+    add_slide(ref, layout_idx=0)
+    ref_path = tmp_path / "reference.pptx"
+    ref.save(str(ref_path))
+
+    out_path = tmp_path / "out.pptx"
+    result = apply_rebrand(str(old_path), str(out_path), template_path=TEMPLATE_PATH, reference_path=str(ref_path))
+
+    assert result.reference_layout_indices == [2]
+    assert 2 in result.transformed
+    assert 2 not in result.skipped
+
+    prs2 = Presentation(str(out_path))
+    reparented = prs2.slides[1]
+    assert reparented.slide_layout.name == "Title and Content"
+    assert reparented.shapes.title.text_frame.text == "Middle slide"
+    chip = next(s for s in reparented.shapes if s.name == "Chip")
+    assert str(chip.fill.fore_color.rgb) == "1450F5"
+
+
+def test_apply_rebrand_does_not_reparent_when_layout_names_differ(tmp_path):
+    """Negative case: an old slide and its reference counterpart at the
+    same index sitting on DIFFERENTLY-named layouts have no confirmed
+    correspondence -- falls back to ordinary classify_slide/match_layout
+    against the org template, same as with no reference_path at all."""
+    old = new_deck()
+    title_run(add_slide(old, layout_idx=0)).text = "Cover"
+    middle = add_slide(old, layout_idx=1)  # "Title and Content"
+    title_run(middle).text = "Middle slide"
+    title_run(add_slide(old, layout_idx=0)).text = "The End"
+    old_path = tmp_path / "old.pptx"
+    old.save(str(old_path))
+
+    ref = new_deck()
+    add_slide(ref, layout_idx=0)
+    add_slide(ref, layout_idx=2)  # "Section Header" -- different name at the same index
+    add_slide(ref, layout_idx=0)
+    ref_path = tmp_path / "reference.pptx"
+    ref.save(str(ref_path))
+
+    out_path = tmp_path / "out.pptx"
+    result = apply_rebrand(str(old_path), str(out_path), template_path=TEMPLATE_PATH, reference_path=str(ref_path))
+
+    assert result.reference_layout_indices == []
+
+
+def test_apply_rebrand_reference_layout_carryover_survives_full_deckguard_fix_afterward(tmp_path):
+    """The reparented slide's own package (rels/media/master) must be
+    completely valid -- e.g. no dangling relationships or duplicate zip
+    entries -- since fix_deck touches every shape/run in the deck
+    immediately afterward as part of apply_rebrand itself."""
+    old = new_deck()
+    title_run(add_slide(old, layout_idx=0)).text = "Cover"
+    middle = add_slide(old, layout_idx=1)
+    title_run(middle).text = "Middle slide"
+    title_run(add_slide(old, layout_idx=0)).text = "The End"
+    old_path = tmp_path / "old.pptx"
+    old.save(str(old_path))
+
+    ref = new_deck()
+    add_slide(ref, layout_idx=0)
+    add_slide(ref, layout_idx=1)
+    add_slide(ref, layout_idx=0)
+    ref_path = tmp_path / "reference.pptx"
+    ref.save(str(ref_path))
+
+    out_path = tmp_path / "out.pptx"
+    apply_rebrand(str(old_path), str(out_path), template_path=TEMPLATE_PATH, reference_path=str(ref_path))
+
+    assert _no_duplicate_zip_entries(out_path)
+    assert _no_malformed_xml(out_path) == []
+    Presentation(str(out_path))  # reopens cleanly
+
+
 def test_apply_rebrand_picks_varied_layouts_instead_of_repeating_one(tmp_path):
     """Several ordinary content slides, identically shaped (title + one
     body block, no images) -- without anti-repeat scoring they'd all pick

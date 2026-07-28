@@ -301,3 +301,42 @@ def test_import_layouts_raises_for_unknown_layout_name(tmp_path):
 
     with pytest.raises(KeyError):
         import_layouts(str(target_path), str(TEMPLATE_PATH), str(tmp_path / "out.pptx"), ["Not A Real Layout"])
+
+
+def test_import_layouts_preserves_a_picture_placed_directly_on_the_source_master(tmp_path):
+    """Regression test for a real bug found against a real deck pair: a
+    logo picture placed directly on a slide MASTER (not any one layout --
+    a real case, since branding sometimes lives on the master) went
+    completely unreadable after import -- the new master's rels were
+    rebuilt from scratch (just theme + the imported layouts), discarding
+    the master's own media relationship entirely, even though the
+    (otherwise verbatim-copied) master XML still had its own shape
+    pointing at that now-nonexistent relationship ID.
+
+    Deliberately uses a SYNTHETIC source template (unlike every other
+    test in this file) since the real bundled template has no master-
+    level picture to exercise this against -- this scenario only shows
+    up on decks whose branding happens to live on the master itself.
+    """
+    from tests.helpers import add_picture_to_container, make_solid_png
+
+    source = new_deck()
+    img_path = tmp_path / "logo.png"
+    make_solid_png(img_path, rgb=(20, 80, 245))
+    add_picture_to_container(source.slide_masters[0], str(img_path), name="Logo")
+    source_path = tmp_path / "source.pptx"
+    source.save(str(source_path))
+
+    target = new_deck()
+    add_slide(target, layout_idx=1)
+    target_path = tmp_path / "target.pptx"
+    target.save(str(target_path))
+
+    out_path = tmp_path / "out.pptx"
+    import_layouts(str(target_path), str(source_path), str(out_path), ["Title and Content"])
+
+    prs = Presentation(str(out_path))
+    imported_master = prs.slide_masters[-1]
+    pic = next(s for s in imported_master.shapes if s.shape_type == MSO_SHAPE_TYPE.PICTURE)
+    blob = pic.image.blob  # raises if the relationship/media chain is broken
+    assert blob == img_path.read_bytes()

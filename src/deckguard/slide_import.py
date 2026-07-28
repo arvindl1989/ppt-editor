@@ -377,6 +377,15 @@ def import_layouts(target_path, template_path, out_path, layout_names: list[str]
             raise KeyError(f"template has no layout named {name!r}")
         src_paths.append(str(layout_by_name[name].part.partname).lstrip("/"))
 
+    # All requested layouts share one imported master (this function's own
+    # "single shared master trimmed to just those layouts" design) -- that
+    # master's own TOP-LEVEL shapes (e.g. a logo picture placed directly
+    # on the master itself, not any one layout -- a real case: a deck
+    # whose branding lives on the master, not the layout) can reference
+    # media too, so its own rels need to survive the trim below, not just
+    # each layout's.
+    src_master_path = str(layout_by_name[layout_names[0]].slide_master.part.partname).lstrip("/")
+
     media_map: dict[str, str] = {}
 
     def copy_media(tmpl_media_path: str) -> str:
@@ -421,9 +430,34 @@ def import_layouts(target_path, template_path, out_path, layout_names: list[str]
 
     # --- master (trimmed to just the imported layouts) ---
     new_master_path = f"ppt/slideMasters/slideMaster{next_master_num}.xml"
-    master_xml = tmpl["ppt/slideMasters/slideMaster1.xml"].decode()
+    master_xml = tmpl[src_master_path].decode()
+
+    # The trimmed master_xml above still has whatever r:embed="rIdN" its
+    # own top-level shapes originally used (unchanged -- only the
+    # <p:sldLayoutIdLst> is rewritten below), so any of the SOURCE
+    # master's own media relationships must survive at their ORIGINAL
+    # rIds, pointing at the now-locally-copied media file. Its other
+    # original relationships (its own full ~60-layout list, its own old
+    # theme) aren't needed -- this master keeps only the requested
+    # layouts and gets a fresh theme relationship, built below at rIds
+    # guaranteed not to collide with whatever the source master already
+    # used for its own media.
+    src_master_rels = _parse_rels(tmpl.get(_rels_path(src_master_path)))
+    max_src_rid = 0
+    preserved_media_rels = []
+    for rid, (rtype, rtarget) in src_master_rels.items():
+        max_src_rid = max(max_src_rid, int(rid[len("rId"):]))
+        if rtype.endswith("/image"):
+            resolved = _resolve_relative(src_master_path, rtarget)
+            new_media_path = copy_media(resolved)
+            preserved_media_rels.append(
+                f'<Relationship Id="{rid}" Type="{rtype}" Target="../media/{new_media_path.rsplit("/", 1)[-1]}"/>'
+            )
+
+    theme_rid_num = max_src_rid + 1
+    layout_rid_start = theme_rid_num + 1
     layout_entries = "".join(
-        f'<p:sldLayoutId id="{layout_id}" r:id="rId{101 + i}"/>' for i, layout_id in enumerate(layout_ids)
+        f'<p:sldLayoutId id="{layout_id}" r:id="rId{layout_rid_start + i}"/>' for i, layout_id in enumerate(layout_ids)
     )
     master_xml = re.sub(
         r"<p:sldLayoutIdLst>.*?</p:sldLayoutIdLst>",
@@ -433,13 +467,14 @@ def import_layouts(target_path, template_path, out_path, layout_names: list[str]
     )
     target[new_master_path] = master_xml.encode()
 
-    master_rels = [
-        f'<Relationship Id="rId100" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" '
+    master_rels = list(preserved_media_rels)
+    master_rels.append(
+        f'<Relationship Id="rId{theme_rid_num}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" '
         f'Target="../theme/theme{next_theme_num}.xml"/>'
-    ]
+    )
     for i, new_layout_path in enumerate(layout_new_paths):
         master_rels.append(
-            f'<Relationship Id="rId{101 + i}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" '
+            f'<Relationship Id="rId{layout_rid_start + i}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" '
             f'Target="../slideLayouts/{new_layout_path.rsplit("/", 1)[-1]}"/>'
         )
     target[_rels_path(new_master_path)] = (

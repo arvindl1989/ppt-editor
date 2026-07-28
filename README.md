@@ -644,6 +644,26 @@ full reasoning. The cover/end swap also borrows the reference deck's own
 cover/closing photo (instead of the org template's generic stock photo)
 whenever the old deck had none of its own to carry over.
 
+`--transform` also fixes a structural gap that plain color/font remap
+can't touch at all: a deck built on its own custom layout (an internal
+catalog deck's own one-off layout, say) that has no equivalent whatsoever
+in the org template. `apply_rebrand` can only rebuild a slide onto
+something from the org template, so every slide on a layout like that
+was previously left completely untouched -- keeping 100% of its old
+chrome (logo, footer/date format) forever, since nothing ever replaces
+it. Wherever an old slide and its reference counterpart at the SAME
+index already sit on a layout of the exact same name, that's ground
+truth for what the slide should look like: the slide is re-parented onto
+a fresh copy of that exact layout imported FROM THE REFERENCE DECK
+itself (bringing its updated master along -- logo, footer/date format,
+whatever chrome lives there), while its own content stays 100%
+untouched. Verified end-to-end against a real 168-slide production
+catalog deck where the dominant custom layout had zero equivalent in the
+org template: 164 of 165 non-cover/end slides got their branding
+refreshed this way (the one exception being a genuine structural
+mismatch between the two decks at that position, correctly left to the
+ordinary org-template matching instead of guessed at).
+
 ## Worked example
 
 ```bash
