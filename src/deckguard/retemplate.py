@@ -536,9 +536,47 @@ def _resolve_imported_layouts(prs, partname_by_name: dict) -> dict:
     return {name: all_layouts[partname] for name, partname in partname_by_name.items()}
 
 
+def _freeze_placeholder_geometry(slide) -> None:
+    """Snapshot each of `slide`'s placeholders' CURRENT effective
+    position (its own explicit xfrm if it has one, else whatever it
+    currently inherits from its layout) as an explicit xfrm on the
+    placeholder itself.
+
+    Called before `_reparent_slide_layout` swaps which layout the slide
+    inherits from, because a REAL slide routinely has a MIX: one
+    placeholder was never touched (no xfrm of its own, purely inherited)
+    while another was manually adjusted at some point (has its own
+    xfrm) -- both perfectly fine under the OLD layout, where the two
+    happened to line up without overlapping. If the reference deck's
+    version of a same-NAMED layout was itself redesigned (not just
+    re-branded) and moved that inherited placeholder, only the
+    inheriting one would silently follow -- producing an internally
+    INCONSISTENT slide where the moved placeholder now overlaps the one
+    that stayed put. This is exactly what surfaced on a real slide: an
+    inherited title jumped to the reference layout's own (differently
+    positioned) title placeholder while an explicitly-positioned body
+    placeholder stayed at the old slide's position, and the two
+    overlapped into an unreadable mess. Freezing every placeholder's
+    geometry first keeps the whole slide internally consistent with
+    itself, unaffected by whatever the new layout's own placeholders
+    are positioned at -- this only ever touches geometry, never the
+    chrome (background art, logo, footer format) the reparent is for.
+    """
+    for ph in slide.placeholders:
+        spPr = effects_mod.get_spPr(ph)
+        if spPr is not None and spPr.find(effects_mod.a_qn("xfrm")) is not None:
+            continue  # already has its own explicit position
+        left, top, width, height = ph.left, ph.top, ph.width, ph.height
+        if left is None or top is None or width is None or height is None:
+            continue  # nothing resolvable to freeze
+        ph.left, ph.top, ph.width, ph.height = left, top, width, height
+
+
 def _reparent_slide_layout(slide, new_layout) -> None:
     """Re-point `slide`'s single required slideLayout relationship at
-    `new_layout`, leaving every one of the slide's own shapes untouched.
+    `new_layout`, leaving every one of the slide's own shapes' CONTENT
+    untouched (their geometry is frozen first -- see
+    `_freeze_placeholder_geometry`).
 
     Used for the "Learn from a reference" flow's layout carryover (see
     `apply_rebrand`'s `reference_path`): when an old slide and its
@@ -549,9 +587,11 @@ def _reparent_slide_layout(slide, new_layout) -> None:
     it's just pointing the slide at a fresh, on-brand copy of the exact
     layout it already used -- carrying over whatever chrome (logo,
     footer/date format) lives on that layout's own master, without
-    touching the slide's body content at all.
+    touching the slide's body content or position at all.
     """
     from pptx.opc.constants import RELATIONSHIP_TYPE as RT
+
+    _freeze_placeholder_geometry(slide)
 
     part = slide.part
     old_rid = next(rid for rid, rel in part.rels.items() if rel.reltype == RT.SLIDE_LAYOUT)

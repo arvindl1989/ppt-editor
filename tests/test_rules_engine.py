@@ -427,16 +427,13 @@ def test_text_contrast_still_wcag_computed_for_tints_below_the_override_list():
     assert viol[0].details["target"] == "#141414"
 
 
-def test_text_contrast_heading_is_always_dark_even_on_a_blue_background():
-    """Regression test for an explicit brand-consistency request:
-    PowerPoint title/heading text must always be black -- not computed
-    against its background at all, unlike ordinary body text/panels,
-    even when that background is one of the always-white-text blues."""
+def test_text_contrast_heading_on_plain_canvas_is_always_dark():
+    """The default, overwhelmingly common case: a heading with no
+    confidently-resolved background behind it (the slide's own plain
+    canvas) is always black -- a fixed editorial choice for that role,
+    not a legibility default among two acceptable options."""
     prs = new_deck()
     slide = add_slide(prs)
-    title = slide.shapes.title
-    title.fill.solid()
-    title.fill.fore_color.rgb = RGBColor.from_string("1450F5")
     run = title_run(slide)
     run.text = "Heading"
     run.font.name = "Inter"
@@ -448,7 +445,24 @@ def test_text_contrast_heading_is_always_dark_even_on_a_blue_background():
     assert "always dark" in viol[0].message
 
 
-def test_text_contrast_heading_already_dark_is_not_flagged():
+def test_text_contrast_heading_on_plain_canvas_already_dark_is_not_flagged():
+    prs = new_deck()
+    slide = add_slide(prs)
+    run = title_run(slide)
+    run.text = "Heading"
+    run.font.name = "Inter"
+    run.font.color.rgb = RGBColor.from_string("141414")
+
+    assert by_rule(violations_for(prs), "text_contrast") == []
+
+
+def test_text_contrast_heading_on_a_known_blue_background_needs_white_not_black():
+    """Regression test for a real bug report: a heading placed directly
+    on a solid KONE Blue panel ("Key Points") still rendered in black,
+    because the old blanket "headings are always dark" rule overrode
+    contrast computation even when the background was confidently
+    known. When a background IS known, headings now get the same
+    contrast-aware answer ordinary text already gets."""
     prs = new_deck()
     slide = add_slide(prs)
     title = slide.shapes.title
@@ -457,7 +471,24 @@ def test_text_contrast_heading_already_dark_is_not_flagged():
     run = title_run(slide)
     run.text = "Heading"
     run.font.name = "Inter"
-    run.font.color.rgb = RGBColor.from_string("141414")
+    run.font.color.rgb = RGBColor.from_string("141414")  # wrong -- this background needs white
+
+    viol = by_rule(violations_for(prs), "text_contrast")
+    assert len(viol) == 1
+    assert viol[0].details["target"] == "#FFFFFF"
+    assert "always dark" not in viol[0].message
+
+
+def test_text_contrast_heading_on_a_known_blue_background_already_white_is_not_flagged():
+    prs = new_deck()
+    slide = add_slide(prs)
+    title = slide.shapes.title
+    title.fill.solid()
+    title.fill.fore_color.rgb = RGBColor.from_string("1450F5")
+    run = title_run(slide)
+    run.text = "Heading"
+    run.font.name = "Inter"
+    run.font.color.rgb = RGBColor.from_string("FFFFFF")
 
     assert by_rule(violations_for(prs), "text_contrast") == []
 

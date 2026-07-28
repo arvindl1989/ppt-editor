@@ -59,17 +59,44 @@ def test_transplant_canonicalizes_reference_color_through_remap():
 def test_transplant_leaves_shape_alone_with_no_name_match_in_reference():
     old_prs = Presentation()
     old_slide = _blank_slide(old_prs)
-    add_rectangle(old_slide, name="Box A", fill_hex="FF0000")
+    add_rectangle(old_slide, name="Box A", fill_hex="FF0000", left_in=1)
 
     new_prs = Presentation()
     new_slide = _blank_slide(new_prs)
-    add_rectangle(new_slide, name="Box B", fill_hex="0000FF")  # different name -- no correspondence
+    # Different name AND different position -- no correspondence by
+    # either signal (contrast this with the position-fallback tests
+    # below, where a shared position DOES count as a match).
+    add_rectangle(new_slide, name="Box B", fill_hex="0000FF", left_in=5)
 
     result = transplant_exact_treatment(old_prs, new_prs)
 
     box = _by_name(old_prs.slides[0], "Box A")
     assert str(box.fill.fore_color.rgb) == "FF0000"
     assert result.changes == []
+
+
+def test_transplant_matches_by_position_when_name_does_not_survive():
+    """Real-world case: PowerPoint's own auto-generated shape names are
+    sequential by creation order, not stable across independently-edited
+    copies of the same repeating design element (a footer "category
+    chip" row copy-pasted across a whole catalog deck, say) -- the exact
+    same visual chip can end up "Rectangle 27" on one slide and
+    "Rectangle 10" on another. Falling back to position keeps the
+    transplant working for exactly this pattern instead of silently
+    finding no match at all."""
+    old_prs = Presentation()
+    old_slide = _blank_slide(old_prs)
+    add_rectangle(old_slide, name="Rectangle 27", fill_hex="FF0000", left_in=2, top_in=3)
+
+    new_prs = Presentation()
+    new_slide = _blank_slide(new_prs)
+    add_rectangle(new_slide, name="Rectangle 10", fill_hex="0000FF", left_in=2, top_in=3)
+
+    result = transplant_exact_treatment(old_prs, new_prs)
+
+    box = _by_name(old_prs.slides[0], "Rectangle 27")
+    assert str(box.fill.fore_color.rgb) == "0000FF"
+    assert len(result.changes) == 1
 
 
 def test_transplant_flags_slide_with_low_shape_name_match_ratio():
@@ -82,8 +109,10 @@ def test_transplant_flags_slide_with_low_shape_name_match_ratio():
     new_prs = Presentation()
     new_slide = _blank_slide(new_prs)
     add_rectangle(new_slide, name="Matched", fill_hex="0000FF", left_in=1)
-    add_rectangle(new_slide, name="Different A", fill_hex="00FF00", left_in=2)
-    add_rectangle(new_slide, name="Different B", fill_hex="00FF00", left_in=3)
+    # Different name AND different position from anything on the old
+    # slide -- position fallback must not manufacture a match either.
+    add_rectangle(new_slide, name="Different A", fill_hex="00FF00", left_in=6)
+    add_rectangle(new_slide, name="Different B", fill_hex="00FF00", left_in=7)
 
     result = transplant_exact_treatment(old_prs, new_prs)
 

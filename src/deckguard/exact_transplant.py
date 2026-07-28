@@ -20,13 +20,23 @@ truth -- this reads it directly and applies it only to that one shape,
 for this one run. It never writes to brand_rules.yaml and never mutates
 the config used elsewhere in the pipeline.
 
-Shapes with no name-identity match in the reference at the same slide
-index (most often a hand-built diagram redrawn from scratch, with
-different connector shapes/counts) are left completely alone -- this
-never guesses at a correspondence, only acts on an exact one. A slide
-where fewer than half its shapes have a match at all is reported back via
-`TransplantResult.flagged_slides` so a human knows that specific slide's
-look needs to be reproduced by hand rather than by this pass.
+Shapes with no name match fall back to a POSITION match against whatever
+in the reference deck's same slide is still unclaimed (see
+`_match_by_position`) -- real decks routinely lose shape-name stability
+for a design element repeated across many slides (PowerPoint's own
+auto-generated names are sequential by creation order, not stable across
+independently-edited copies), and without this fallback those shapes
+silently fall through to whatever the deck-wide color/font remap already
+did, which is exactly the "same source color, different target per
+shape" case this whole module exists to fix correctly.
+
+Shapes with no match at all (most often a hand-built diagram redrawn
+from scratch, with different connector shapes/counts) are left
+completely alone -- this never guesses at a correspondence, only acts on
+an exact one. A slide where fewer than half its shapes have a match at
+all is reported back via `TransplantResult.flagged_slides` so a human
+knows that specific slide's look needs to be reproduced by hand rather
+than by this pass.
 """
 
 from __future__ import annotations
@@ -47,6 +57,15 @@ from deckguard.fonts import normalize_key
 # unrelated, so applying the handful of coincidental name matches (if any)
 # would read as arbitrary rather than a faithful transplant.
 LOW_MATCH_THRESHOLD = 0.5
+
+# Summed left/top/width/height difference (EMU) within which two leaf
+# shapes are treated as "the same shape, name lost" for the position
+# fallback below -- deliberately tight (a small fraction of an inch):
+# this is for a design element repeated at a genuinely FIXED spot across
+# many slides (a footer chip row, say), not a loose "roughly similar
+# shape" match, so it should only ever catch a real repeat, never two
+# merely-nearby unrelated shapes on a busy slide.
+POSITION_MATCH_TOLERANCE_EMU = 91440
 
 
 @dataclass
@@ -80,6 +99,63 @@ def _leaf_shapes(shapes):
             yield from _leaf_shapes(shape.shapes)
         else:
             yield shape
+
+
+def _shape_pos(shape) -> Optional[tuple]:
+    try:
+        l, t, w, h = shape.left, shape.top, shape.width, shape.height
+    except Exception:
+        return None
+    if l is None or t is None or w is None or h is None:
+        return None
+    return (l, t, w, h)
+
+
+def _match_by_position(old_items: list, ref_shapes: list) -> list:
+    """Greedy nearest-position match for leaf shapes whose NAME didn't
+    survive between decks -- a real, common case for a design element
+    repeated at a fixed spot across many slides (a footer "category chip"
+    row copy-pasted across a whole catalog deck, say): PowerPoint's own
+    auto-generated shape names are sequential by creation order within
+    each slide, not stable across independently-touched copies, so the
+    exact same visual chip can end up "Rectangle 27" on one slide and
+    "Rectangle 10" on another. Name matching alone silently misses these
+    -- not an error, just no match found -- so the shape falls back to
+    whatever the deck-wide color/font remap already did, which is
+    provably wrong for exactly this "same source color, different target
+    per chip" pattern (see this module's own docstring). Position is the
+    reliable identity signal here instead: same design, same fixed spot,
+    every time.
+
+    `old_items`: [(path, shape), ...] for old shapes with no name match.
+    `ref_shapes`: reference leaf shapes with no name match, at the same
+    slide index. Returns [(path, old_shape, new_shape), ...].
+    """
+    candidates = []
+    for oi, (_path, old_shape) in enumerate(old_items):
+        old_pos = _shape_pos(old_shape)
+        if old_pos is None:
+            continue
+        for ni, new_shape in enumerate(ref_shapes):
+            new_pos = _shape_pos(new_shape)
+            if new_pos is None:
+                continue
+            dist = sum(abs(a - b) for a, b in zip(old_pos, new_pos))
+            if dist <= POSITION_MATCH_TOLERANCE_EMU:
+                candidates.append((dist, oi, ni))
+    candidates.sort(key=lambda c: c[0])
+
+    used_old: set = set()
+    used_new: set = set()
+    pairs = []
+    for _dist, oi, ni in candidates:
+        if oi in used_old or ni in used_new:
+            continue
+        used_old.add(oi)
+        used_new.add(ni)
+        path, old_shape = old_items[oi]
+        pairs.append((path, old_shape, ref_shapes[ni]))
+    return pairs
 
 
 def _canonical_hex(hexval: str, color_remap: dict) -> str:
@@ -310,7 +386,17 @@ def transplant_exact_treatment(prs, reference_prs, rules_config: Optional[dict] 
         old_theme_scheme = theme_scheme_for(old_slide)
         ref_theme_scheme = theme_scheme_for(reference_prs.slides[i])
 
+        def apply_copies(old_shape, new_shape, path):
+            _copy_fill(old_shape, new_shape, i, path, color_remap, result.changes)
+            _copy_line(old_shape, new_shape, i, path, color_remap, result.changes)
+            _copy_text_style(
+                old_shape, new_shape, i, path, color_remap, font_remap, font_approved_keys,
+                old_theme_scheme, ref_theme_scheme, result.changes,
+            )
+
         matched_leaf_count = 0
+        name_matched_paths: set = set()
+        used_ref_ids: set = set()
         for path, old_shape in old_map.items():
             if old_shape.shape_type == MSO_SHAPE_TYPE.GROUP:
                 continue
@@ -318,12 +404,24 @@ def transplant_exact_treatment(prs, reference_prs, rules_config: Optional[dict] 
             if new_shape is None or new_shape.shape_type == MSO_SHAPE_TYPE.GROUP:
                 continue
             matched_leaf_count += 1
-            _copy_fill(old_shape, new_shape, i, path, color_remap, result.changes)
-            _copy_line(old_shape, new_shape, i, path, color_remap, result.changes)
-            _copy_text_style(
-                old_shape, new_shape, i, path, color_remap, font_remap, font_approved_keys,
-                old_theme_scheme, ref_theme_scheme, result.changes,
-            )
+            name_matched_paths.add(path)
+            used_ref_ids.add(id(new_shape))
+            apply_copies(old_shape, new_shape, path)
+
+        # Position fallback for leaf shapes whose name didn't survive --
+        # see _match_by_position's own docstring for why this matters
+        # (repeating design elements copy-pasted across many slides).
+        unmatched_old = [
+            (path, s) for path, s in old_map.items()
+            if s.shape_type != MSO_SHAPE_TYPE.GROUP and path not in name_matched_paths
+        ]
+        unmatched_ref = [
+            s for path, s in ref_map.items()
+            if s.shape_type != MSO_SHAPE_TYPE.GROUP and id(s) not in used_ref_ids
+        ]
+        for path, old_shape, new_shape in _match_by_position(unmatched_old, unmatched_ref):
+            matched_leaf_count += 1
+            apply_copies(old_shape, new_shape, path)
 
         if matched_leaf_count / old_leaf_count < LOW_MATCH_THRESHOLD:
             result.flagged_slides.append(i)

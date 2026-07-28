@@ -17,6 +17,8 @@ from deckguard.retemplate import (
     CONTENT_LAYOUT_CANDIDATES,
     LayoutProfile,
     SlideProfile,
+    _freeze_placeholder_geometry,
+    _reparent_slide_layout,
     apply_rebrand,
     apply_retemplate,
     classify_slide,
@@ -588,6 +590,52 @@ def test_apply_rebrand_reference_layout_carryover_survives_full_deckguard_fix_af
     assert _no_duplicate_zip_entries(out_path)
     assert _no_malformed_xml(out_path) == []
     Presentation(str(out_path))  # reopens cleanly
+
+
+def test_reparent_slide_layout_freezes_inherited_geometry(tmp_path):
+    """Regression test for a real bug: a placeholder with no explicit
+    position of its own (purely inherited from its layout) silently
+    followed the NEW layout's own (differently positioned) placeholder
+    after a reparent -- while a placeholder that already had an explicit
+    position on the slide stayed put, since reparenting never touches
+    shape content. On a real deck this produced an internally
+    inconsistent slide: a title jumped to the reference layout's spot
+    while the body text below it stayed at the old slide's position,
+    and the two overlapped into unreadable garbled text. Freezing the
+    inherited geometry BEFORE the layout swap keeps the slide
+    self-consistent regardless of where the new layout's own version of
+    that placeholder sits."""
+    prs = new_deck()
+    slide = add_slide(prs, layout_idx=1)  # "Title and Content"
+    title = slide.shapes.title
+    old_pos = (title.left, title.top, title.width, title.height)
+
+    new_layout = prs.slide_layouts[2]  # "Section Header" -- a different title position
+    new_title_pos = None
+    for ph in new_layout.placeholders:
+        if ph.placeholder_format.idx == 0:
+            new_title_pos = (ph.left, ph.top, ph.width, ph.height)
+    assert new_title_pos != old_pos  # the two layouts must actually differ for this test to mean anything
+
+    _reparent_slide_layout(slide, new_layout)
+
+    assert slide.slide_layout.name == "Section Header"
+    reopened_title = slide.shapes.title
+    assert (reopened_title.left, reopened_title.top, reopened_title.width, reopened_title.height) == old_pos
+
+
+def test_freeze_placeholder_geometry_leaves_an_explicit_position_untouched(tmp_path):
+    """A placeholder that already has its own explicit position (was
+    manually adjusted at some point) must not be touched -- freezing is
+    only for placeholders that were purely inheriting."""
+    prs = new_deck()
+    slide = add_slide(prs, layout_idx=1)
+    title = slide.shapes.title
+    title.left, title.top, title.width, title.height = 111111, 222222, 333333, 444444
+
+    _freeze_placeholder_geometry(slide)
+
+    assert (title.left, title.top, title.width, title.height) == (111111, 222222, 333333, 444444)
 
 
 def test_apply_rebrand_picks_varied_layouts_instead_of_repeating_one(tmp_path):

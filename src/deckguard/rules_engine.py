@@ -454,13 +454,26 @@ def _check_shape(
                 elif (
                     is_heading
                     and heading_always_dark
+                    and bg_hex is None
                     and matched_approved in contrast_fonts
                     and contrast_dark is not None
                 ):
                     # Explicit brand-consistency rule: PowerPoint title/
                     # heading text is always black -- overrides contrast/
-                    # background computation entirely for headings, not
-                    # just a default choice among two legible options.
+                    # background computation entirely for headings, but
+                    # ONLY when there's no confidently-resolved background
+                    # behind it (the overwhelmingly common case: a heading
+                    # on the slide's own plain canvas), not just a default
+                    # choice among two legible options. A real bug report
+                    # showed why the `bg_hex is None` guard matters: a
+                    # heading placed directly on a solid KONE Blue panel
+                    # ("Key Points") still rendered in black -- this rule
+                    # was overriding the correct white-on-blue answer with
+                    # a blanket "headings are always dark" that assumed no
+                    # colored background ever sits behind one. When a
+                    # background IS confidently known, the more specific
+                    # contrast-aware branch below takes over instead,
+                    # exactly as it already does for non-heading text.
                     current_hex = run.color.hex if run.color and run.color.kind != "none" else None
                     if current_hex != contrast_dark:
                         violations.append(
