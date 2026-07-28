@@ -33,6 +33,23 @@ points (an existing deck, with or without a brief): the skill's
 has no notion of appending onto an incoming deck, so real extracted
 slide content stays on `compose.py`'s path, which already has that
 (`existing_deck_path` / `import_layouts`).
+
+Where the skill is loaded from (`_skill_dir`, in order):
+1. `KONE_DECK_GENERATOR_DIR`, if set -- an explicit override, e.g. for
+   a developer actively co-editing the live skill.
+2. `~/.claude/skills/kone-deck-generator`, if present -- the standard
+   Claude Code interactive-session location, so nothing changes for
+   anyone developing deckguard and the skill together right here.
+3. deckguard's OWN bundled copy under `deckguard/assets/kone_deck_generator/`
+   -- a plain file copy (not a symlink, not re-fetched at build time),
+   vendored so the capability actually works wherever deckguard itself
+   is deployed (a Railway build has no `~/.claude/skills/` at all).
+   `kone_deck_creator.py`/`kone_planner.py` are copied byte-for-byte,
+   never modified -- keeping them re-syncable from the skill by just
+   copying the files again, not a fork to keep merging. Its `MASTER`
+   pptx path resolves as a sibling `kone-design/uploads/...` directory
+   (the skill's own default, unmodified), which is why that file lives
+   at `deckguard/assets/kone-design/uploads/...` here too.
 """
 
 from __future__ import annotations
@@ -55,20 +72,22 @@ from deckguard.redesign import (
     _stream_final_message,
 )
 
-# Mirrors the kone-design skill's own KONE_DESIGN_DIR convention: an
-# out-of-repo, per-machine directory, not something deckguard vendors
-# or pins a version of -- see this module's own docstring for why
-# that's the right trade for this one capability. Overridable for a
-# machine where the skill lives somewhere other than the default
-# Claude Code skills directory.
-_DEFAULT_SKILL_DIR = "~/.claude/skills/kone-deck-generator"
+_INTERACTIVE_SKILL_DIR = "~/.claude/skills/kone-deck-generator"
+_VENDORED_SKILL_DIR = Path(__file__).with_name("assets") / "kone_deck_generator"
 
 _creator_module = None  # cached after first successful import
 
 
 def _skill_dir() -> Path:
-    raw = os.environ.get("KONE_DECK_GENERATOR_DIR") or _DEFAULT_SKILL_DIR
-    return Path(raw).expanduser()
+    """Resolve the skill's directory -- see this module's own docstring
+    for the full 3-step fallback and why each step exists."""
+    env = os.environ.get("KONE_DECK_GENERATOR_DIR")
+    if env:
+        return Path(env).expanduser()
+    interactive = Path(_INTERACTIVE_SKILL_DIR).expanduser()
+    if (interactive / "kone_deck_creator.py").is_file():
+        return interactive
+    return _VENDORED_SKILL_DIR
 
 
 def _ensure_skill_on_path() -> Path:
