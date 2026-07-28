@@ -69,13 +69,13 @@ def test_index_renders(tmp_path, monkeypatch):
 
 
 def test_index_consolidates_all_four_methods_into_one_tool(tmp_path, monkeypatch):
-    """The landing page is one unified tool (a method dropdown + one
-    pane per method), not four separate cards -- each pane still posts
+    """The landing page is one unified tool (a segmented method switcher +
+    one pane per method), not four separate cards -- each pane still posts
     to its own existing route with the fields that route expects."""
     client, _ = _client(tmp_path, monkeypatch)
     resp = client.get("/")
     assert resp.status_code == 200
-    assert 'id="method-select"' in resp.text
+    assert 'name="method"' in resp.text
     for method, action, field in (
         ("fix", "/fix", 'name="file"'),
         ("learn", "/learn", 'name="old_file"'),
@@ -355,7 +355,7 @@ def test_index_shows_redesign_form_without_api_key_but_flags_ai_rewrite_disabled
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     client, _ = _client(tmp_path, monkeypatch)
     resp = client.get("/")
-    assert "AI rewrite mode isn't enabled on this server" in resp.text
+    assert "AI rewrite is unavailable" in resp.text
     assert 'name="mode"' in resp.text
     assert 'value="brand"' in resp.text
 

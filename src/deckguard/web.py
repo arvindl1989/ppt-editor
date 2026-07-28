@@ -127,13 +127,7 @@ def _open_presentation_or_error(path: Path) -> Presentation:
 @app.get("/", response_class=HTMLResponse)
 def index(_auth: None = Depends(_require_auth)):
     ai_enabled = bool(os.environ.get("ANTHROPIC_API_KEY"))
-    body = f"""<div class="section-head" id="tool">
-  <h2>Deck tool<span class="badge-working">Working</span></h2>
-  <p>Fix an existing deck, learn from a reference and transform onto it, compose from an outline, or let
-  Claude redesign one end to end — one dropdown picks the method.</p>
-</div>
-{tpl.unified_tool_card(ai_enabled)}"""
-    return tpl.page_shell("deckguard", body, home=True)
+    return tpl.page_shell("deckguard", tpl.unified_tool_card(ai_enabled), home=True)
 
 
 @app.post("/audit", response_class=HTMLResponse)
