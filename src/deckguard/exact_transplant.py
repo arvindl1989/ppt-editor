@@ -50,6 +50,8 @@ from pptx.enum.shapes import MSO_SHAPE_TYPE
 
 from deckguard.colors import ThemeColorScheme, effective_rgb, get_theme_scheme
 from deckguard.fonts import normalize_key
+from deckguard.inventory import build_inventory, iter_shapes_recursive
+from deckguard.rules_engine import _resolve_effective_bg_hex
 
 # Below this fraction of an old slide's (leaf) shapes finding a name-match
 # in the reference deck's same-index slide, the slide is treated as having
@@ -111,6 +113,33 @@ def _shape_pos(shape) -> Optional[tuple]:
     return (l, t, w, h)
 
 
+def _placeholder_role(shape):
+    """The placeholder TYPE a shape claims to be (e.g. TITLE, BODY), or
+    None if it isn't a placeholder at all."""
+    try:
+        if not shape.is_placeholder:
+            return None
+        return shape.placeholder_format.type
+    except Exception:
+        return None
+
+
+def _roles_compatible(old_shape, new_shape) -> bool:
+    """Guards both the name-match and position-fallback passes against a
+    coincidental match between structurally unrelated shapes -- a real
+    design element carried across decks keeps its placeholder identity
+    (a title stays a title), so if OLD's shape is a recognized
+    PLACEHOLDER (or reference's same-name/same-position shape is), but
+    the other side isn't a placeholder at all, or is a placeholder of a
+    DIFFERENT type, that's a red flag the "match" is coincidental --
+    e.g. a deck's real TITLE placeholder named "Title 1" matching an
+    unrelated free-standing TEXT_BOX that happens to carry the same
+    auto-generated name on the reference deck's differently-laid-out
+    slide. Treating that as a match would transplant a style meant for
+    an unrelated shape onto the real title."""
+    return _placeholder_role(old_shape) == _placeholder_role(new_shape)
+
+
 def _match_by_position(old_items: list, ref_shapes: list) -> list:
     """Greedy nearest-position match for leaf shapes whose NAME didn't
     survive between decks -- a real, common case for a design element
@@ -137,6 +166,8 @@ def _match_by_position(old_items: list, ref_shapes: list) -> list:
         if old_pos is None:
             continue
         for ni, new_shape in enumerate(ref_shapes):
+            if not _roles_compatible(old_shape, new_shape):
+                continue
             new_pos = _shape_pos(new_shape)
             if new_pos is None:
                 continue
@@ -242,7 +273,7 @@ def _hex_str(rgb: Optional[tuple]) -> Optional[str]:
 
 
 def _copy_font_color(
-    old_run, new_run, own_fill_hex: Optional[str], color_remap: dict,
+    old_run, new_run, effective_bg_hex: Optional[str], color_remap: dict,
     old_theme_scheme: Optional[ThemeColorScheme], ref_theme_scheme: Optional[ThemeColorScheme],
     slide_index: int, path: str, changes: list,
 ) -> None:
@@ -254,13 +285,16 @@ def _copy_font_color(
         new_hex = _canonical_hex(str(new_run.font.color.rgb), color_remap)
         old_hex = str(old_run.font.color.rgb) if old_run.font.color.type == MSO_COLOR_TYPE.RGB else None
         # Never transplant a text color that would land exactly on the
-        # shape's own (just-transplanted) fill -- e.g. a hidden duplicate/
-        # decoy shape in the reference deck with a stale text/fill pairing
-        # that happens to canonicalize to the same approved token for both
-        # roles. Applying it would make the text invisible; better to
-        # leave the old color as-is than regress contrast for a value
-        # this pass isn't confident about.
-        if old_hex != new_hex and new_hex != own_fill_hex:
+        # shape's EFFECTIVE background -- its own fill if it has one,
+        # else the nearest same-slide shape behind it, else the layout's
+        # own decorative panel, else the deck's plain page canvas (see
+        # `_resolve_effective_bg_hex`). A hidden duplicate/decoy shape in
+        # the reference deck can have a stale text/fill pairing that
+        # canonicalizes to the same approved token for both roles;
+        # applying it would make the text invisible -- better to leave
+        # the old color as-is than regress contrast for a value this
+        # pass isn't confident about.
+        if old_hex != new_hex and new_hex != effective_bg_hex:
             old_run.font.color.rgb = RGBColor.from_string(new_hex)
             changes.append(TransplantChange(slide_index, path, "font_color", old_hex, new_hex))
         return
@@ -283,7 +317,7 @@ def _copy_font_color(
         new_brightness = new_run.font.color.brightness or 0.0
         new_effective = effective_rgb(new_run.font.color, ref_theme_scheme)
         new_hex = _hex_str(new_effective)
-        if new_hex is not None and new_hex == own_fill_hex:
+        if new_hex is not None and new_hex == effective_bg_hex:
             return
         old_effective = effective_rgb(old_run.font.color, old_theme_scheme)
         old_hex = _hex_str(old_effective)
@@ -302,17 +336,10 @@ def _copy_text_style(
     old_shape, new_shape, slide_index: int, path: str, color_remap: dict,
     font_remap: dict, font_approved_keys: set,
     old_theme_scheme: Optional[ThemeColorScheme], ref_theme_scheme: Optional[ThemeColorScheme],
-    changes: list,
+    effective_bg_hex: Optional[str], changes: list,
 ) -> None:
     if not (getattr(old_shape, "has_text_frame", False) and getattr(new_shape, "has_text_frame", False)):
         return
-    own_fill_hex = None
-    try:
-        fill = old_shape.fill
-        if fill.type == MSO_FILL_TYPE.SOLID and fill.fore_color.type == MSO_COLOR_TYPE.RGB:
-            own_fill_hex = str(fill.fore_color.rgb)
-    except Exception:
-        pass
     for old_para, new_para in zip(old_shape.text_frame.paragraphs, new_shape.text_frame.paragraphs):
         if new_para.alignment is not None and new_para.alignment != old_para.alignment:
             old_val, new_val = old_para.alignment, new_para.alignment
@@ -332,7 +359,7 @@ def _copy_text_style(
                 changes.append(TransplantChange(slide_index, path, "font_bold", str(old_val), str(new_val)))
             try:
                 _copy_font_color(
-                    old_run, new_run, own_fill_hex, color_remap,
+                    old_run, new_run, effective_bg_hex, color_remap,
                     old_theme_scheme, ref_theme_scheme, slide_index, path, changes,
                 )
             except Exception:
@@ -373,6 +400,42 @@ def transplant_exact_treatment(prs, reference_prs, rules_config: Optional[dict] 
                 theme_scheme_cache[key] = None
         return theme_scheme_cache[key]
 
+    # For the invisible-text guard: `prs`'s own EFFECTIVE background per
+    # shape (own fill -> nearest same-slide shape behind it -> the
+    # slide's layout's own decorative panel -- see
+    # `rules_engine._resolve_effective_bg_hex`, reused as-is rather than
+    # reimplemented). A shape with none of those (most real text: a
+    # plain textbox sitting directly on the page) falls back to white,
+    # this brand's own plain-canvas color -- a text box with nothing
+    # behind it on THIS deck can still get a reference color that was
+    # only ever meant for a run positioned over something else entirely
+    # (a photo, a colored panel) on the reference's OWN slide.
+    old_inventory = build_inventory(prs)
+
+    def bg_context_for(slide_index):
+        slide_rec = old_inventory.slides[slide_index]
+        top_shapes = slide_rec.shapes
+        top_shape_index = {s.shape_id: idx for idx, s in enumerate(top_shapes)}
+        shape_rec_by_id = {s.shape_id: s for s in iter_shapes_recursive(top_shapes)}
+        return top_shapes, top_shape_index, shape_rec_by_id, slide_rec.layout_background_shapes
+
+    def effective_bg_hex_for(old_shape, bg_ctx) -> Optional[str]:
+        # Own fill checked LIVE, not from the (possibly stale) inventory
+        # snapshot: `_copy_fill` may have just changed this very shape's
+        # fill moments ago, earlier in this same pass.
+        try:
+            fill = old_shape.fill
+            if fill.type == MSO_FILL_TYPE.SOLID and fill.fore_color.type == MSO_COLOR_TYPE.RGB:
+                return str(fill.fore_color.rgb)
+        except Exception:
+            pass
+        top_shapes, top_shape_index, shape_rec_by_id, layout_bg_shapes = bg_ctx
+        shape_rec = shape_rec_by_id.get(old_shape.shape_id)
+        if shape_rec is None:
+            return "FFFFFF"
+        resolved = _resolve_effective_bg_hex(shape_rec, top_shapes, top_shape_index, layout_bg_shapes)
+        return resolved.upper() if resolved else "FFFFFF"
+
     n = min(len(prs.slides), len(reference_prs.slides))
     for i in range(n):
         old_slide = prs.slides[i]
@@ -385,13 +448,14 @@ def transplant_exact_treatment(prs, reference_prs, rules_config: Optional[dict] 
 
         old_theme_scheme = theme_scheme_for(old_slide)
         ref_theme_scheme = theme_scheme_for(reference_prs.slides[i])
+        bg_ctx = bg_context_for(i)
 
         def apply_copies(old_shape, new_shape, path):
             _copy_fill(old_shape, new_shape, i, path, color_remap, result.changes)
             _copy_line(old_shape, new_shape, i, path, color_remap, result.changes)
             _copy_text_style(
                 old_shape, new_shape, i, path, color_remap, font_remap, font_approved_keys,
-                old_theme_scheme, ref_theme_scheme, result.changes,
+                old_theme_scheme, ref_theme_scheme, effective_bg_hex_for(old_shape, bg_ctx), result.changes,
             )
 
         matched_leaf_count = 0
@@ -402,6 +466,8 @@ def transplant_exact_treatment(prs, reference_prs, rules_config: Optional[dict] 
                 continue
             new_shape = ref_map.get(path)
             if new_shape is None or new_shape.shape_type == MSO_SHAPE_TYPE.GROUP:
+                continue
+            if not _roles_compatible(old_shape, new_shape):
                 continue
             matched_leaf_count += 1
             name_matched_paths.add(path)

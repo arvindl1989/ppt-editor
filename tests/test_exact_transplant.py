@@ -249,6 +249,36 @@ def test_transplant_skips_text_color_that_would_match_shapes_own_fill():
     assert not [c for c in result.changes if c.field == "font_color"]
 
 
+def test_transplant_does_not_match_a_real_placeholder_to_a_same_named_unrelated_shape():
+    """Real-world bug: a deck's actual TITLE placeholder and an unrelated
+    free-standing textbox on the reference deck's (differently-laid-out)
+    slide can coincidentally share PowerPoint's auto-generated name
+    ("Title 1") -- and even land at the same position, since the
+    reference's decoy textbox often visually resembles a title. Matching
+    by name (or position fallback) alone would transplant the decoy's
+    color onto the real title; the placeholder-role check refuses this."""
+    old_prs = Presentation()
+    old_slide = old_prs.slides.add_slide(old_prs.slide_layouts[5])  # "Title Only"
+    title = old_slide.shapes.title
+    title.name = "Title 1"
+    set_run(title.text_frame.paragraphs[0].add_run(), text="Elevator Plan", color_hex="141414")
+
+    new_prs = Presentation()
+    new_slide = _blank_slide(new_prs)  # "Blank" -- no placeholders at all
+    decoy = add_rectangle(
+        new_slide, name="Title 1",
+        left_in=title.left / 914400, top_in=title.top / 914400,
+        width_in=title.width / 914400, height_in=title.height / 914400,
+    )
+    set_run(decoy.text_frame.paragraphs[0].add_run(), text="Decoy", color_hex="1450F5")
+
+    result = transplant_exact_treatment(old_prs, new_prs)
+
+    run = old_prs.slides[0].shapes.title.text_frame.paragraphs[0].runs[0]
+    assert str(run.font.color.rgb) == "141414"  # untouched -- not the decoy's blue
+    assert not [c for c in result.changes if c.field == "font_color"]
+
+
 def test_transplant_copies_scheme_color_uniformly_from_reference():
     """Real-world case: a generic contrast-fix pass upstream (fix_deck)
     forced an explicit literal color onto some, but not all, of a row of
