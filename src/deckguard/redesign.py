@@ -894,6 +894,20 @@ def redesign_deck(
     if reference_path is not None:
         raise RedesignError("reference_path only applies to mode='brand' -- mode='rewrite' doesn't have a matching concept")
 
+    if deck_path is None and brief is not None:
+        # No source content at all -- the kone-deck-generator skill's own
+        # renderer produces a better-looking, brand-guaranteed-by-construction
+        # deck for exactly this case than compose.py's placeholder-fitting
+        # path does. See skill_bridge.py's own docstring for why this is
+        # scoped to ONLY this starting point (deck_path is None) and not the
+        # other two `redesign_deck` modes.
+        from deckguard.skill_bridge import build_deck_via_skill
+
+        return build_deck_via_skill(
+            brief, out_path, target_slides=target_slides, model=model, effort=effort,
+            notes=notes, api_key=api_key, client=client,
+        )
+
     eligible: list = []
     blank_indices: list = []
     skipped: list = []

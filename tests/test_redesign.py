@@ -25,11 +25,21 @@ from deckguard.redesign import (
     partition_skipped,
     redesign_deck,
 )
+from deckguard.skill_bridge import _skill_dir
 from deckguard.slide_import import default_template_path
 from tests.helpers import add_picture, add_rectangle, add_slide, body_run, make_pattern_png, new_deck, title_run
 
 TEMPLATE_PATH = default_template_path()
 pytestmark = pytest.mark.skipif(not TEMPLATE_PATH.exists(), reason="bundled template asset not present")
+
+
+def _kone_skill_available() -> bool:
+    """The kone-deck-generator skill is an out-of-repo, per-machine
+    install (see skill_bridge.py's own docstring) -- tests exercising it
+    for real (fake AI response, real deterministic render) skip cleanly
+    where it isn't present, same as this file already does for the
+    bundled org template."""
+    return (_skill_dir() / "kone_deck_creator.py").is_file()
 
 
 # --------------------------------------------------------------------------
@@ -125,6 +135,20 @@ def _slide_item(index, kind="content", **overrides):
         "stats": [],
         "milestones": [],
         "variant": None,
+    }
+    item.update(overrides)
+    return item
+
+
+def _kone_spec_json(title, *slides):
+    return json.dumps({"title": title, "slides": list(slides)})
+
+
+def _kone_slide(layout, **overrides):
+    item = {
+        "layout": layout, "eyebrow": None, "title": None, "bullets": [],
+        "columns": [], "stats": [], "phases": [], "label": None, "quote": None,
+        "attribution": None,
     }
     item.update(overrides)
     return item
@@ -499,12 +523,15 @@ def test_partition_skipped_splits_blank_from_real_skips():
 # --------------------------------------------------------------------------
 
 
+@pytest.mark.skipif(not _kone_skill_available(), reason="kone-deck-generator skill not installed")
 def test_redesign_deck_builds_from_scratch_with_no_source_deck(tmp_path):
-    """The pure "Claude, design me a deck" mode -- no deck_path at all."""
-    response_json = _outline_json(
-        _slide_item(None, kind="cover", title="Predictive Maintenance", subtitle="A new era", bullets=[]),
-        _slide_item(None, kind="content", title="Why it matters", bullets=["Less downtime", "Lower cost"]),
-        _slide_item(None, kind="end", title="Thank you", bullets=[]),
+    """The pure "Claude, design me a deck" mode -- no deck_path at all --
+    routes through the kone-deck-generator skill (skill_bridge.py), not
+    compose.py's outline path: see redesign_deck's own branch for why."""
+    response_json = _kone_spec_json(
+        "Predictive Maintenance",
+        _kone_slide("section_divider", eyebrow="Overview", title="A new era of predictive maintenance"),
+        _kone_slide("title_content", title="Why it matters", bullets=["Less downtime", "Lower cost"]),
     )
     client = _FakeClient(_FakeResponse(response_json, input_tokens=1800, output_tokens=900))
 
@@ -513,12 +540,11 @@ def test_redesign_deck_builds_from_scratch_with_no_source_deck(tmp_path):
         None, str(out_path), brief="A short deck on predictive maintenance for facilities managers.", client=client
     )
 
-    assert compose_result.slide_count == 3
+    assert compose_result.slide_count == 4  # retained Cover F + 2 body + retained Outro
     assert redesign_result.skipped == []
+    assert len(Presentation(str(out_path)).slides) == 4
 
-    # the model saw "no source deck" framing, not per-slide extracted content
     sent_content = client.messages.calls[0]["messages"][0]["content"]
-    assert "no source deck" in sent_content.lower()
     assert "predictive maintenance" in sent_content.lower()
 
 
