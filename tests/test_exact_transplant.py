@@ -116,7 +116,8 @@ def test_transplant_copies_font_name_bold_and_color_from_matched_run():
     new_run = new_box.text_frame.paragraphs[0].add_run()
     set_run(new_run, text="Bonjour", font="Inter", bold=True, color_hex="1450F5")
 
-    result = transplant_exact_treatment(old_prs, new_prs)
+    config = {"fonts": {"approved": ["Inter"]}}
+    result = transplant_exact_treatment(old_prs, new_prs, rules_config=config)
 
     run = _by_name(old_prs.slides[0], "Box A").text_frame.paragraphs[0].runs[0]
     assert run.text == "Hello"  # content stays verbatim
@@ -125,6 +126,72 @@ def test_transplant_copies_font_name_bold_and_color_from_matched_run():
     assert str(run.font.color.rgb) == "1450F5"
     fields = {c.field for c in result.changes}
     assert {"font_name", "font_bold", "font_color"} <= fields
+
+
+def test_transplant_never_copies_a_font_the_reference_deck_uses_that_is_not_approved():
+    """Hard rule, independent of the reference deck's own quality: this
+    deck must only ever end up with KONE-approved fonts. If the reference
+    itself carries something off-brand (never fixed, or hand-edited after
+    the fact) with no known remap for it, the font_name copy is skipped
+    entirely rather than propagating it -- unlike colors, there's no
+    canonicalization fallback here, just a hard no."""
+    old_prs = Presentation()
+    old_slide = _blank_slide(old_prs)
+    old_box = add_rectangle(old_slide, name="Box A")
+    set_run(old_box.text_frame.paragraphs[0].add_run(), text="Hello", font="Inter")
+
+    new_prs = Presentation()
+    new_slide = _blank_slide(new_prs)
+    new_box = add_rectangle(new_slide, name="Box A")
+    set_run(new_box.text_frame.paragraphs[0].add_run(), text="Bonjour", font="Comic Sans MS")
+
+    config = {"fonts": {"approved": ["Inter"], "remap": {}}}
+    result = transplant_exact_treatment(old_prs, new_prs, rules_config=config)
+
+    run = _by_name(old_prs.slides[0], "Box A").text_frame.paragraphs[0].runs[0]
+    assert run.font.name == "Inter"  # left alone, never regressed to the reference's off-brand font
+    assert not [c for c in result.changes if c.field == "font_name"]
+
+
+def test_transplant_canonicalizes_reference_font_through_remap():
+    old_prs = Presentation()
+    old_slide = _blank_slide(old_prs)
+    old_box = add_rectangle(old_slide, name="Box A")
+    set_run(old_box.text_frame.paragraphs[0].add_run(), text="Hello", font="Inter")
+
+    new_prs = Presentation()
+    new_slide = _blank_slide(new_prs)
+    new_box = add_rectangle(new_slide, name="Box A")
+    set_run(new_box.text_frame.paragraphs[0].add_run(), text="Bonjour", font="Arial")  # legacy, but remapped
+
+    config = {"fonts": {"approved": ["Inter"], "remap": {"Arial": "Inter"}}}
+    result = transplant_exact_treatment(old_prs, new_prs, rules_config=config)
+
+    run = _by_name(old_prs.slides[0], "Box A").text_frame.paragraphs[0].runs[0]
+    assert run.font.name == "Inter"
+    assert not [c for c in result.changes if c.field == "font_name"]  # already matched the canonical value
+
+
+def test_transplant_copies_paragraph_alignment_from_matched_reference_shape():
+    from pptx.enum.text import PP_ALIGN
+
+    old_prs = Presentation()
+    old_slide = _blank_slide(old_prs)
+    old_box = add_rectangle(old_slide, name="Box A")
+    old_box.text_frame.paragraphs[0].add_run().text = "Code"
+    old_box.text_frame.paragraphs[0].alignment = PP_ALIGN.LEFT
+
+    new_prs = Presentation()
+    new_slide = _blank_slide(new_prs)
+    new_box = add_rectangle(new_slide, name="Box A")
+    new_box.text_frame.paragraphs[0].add_run().text = "Code"
+    new_box.text_frame.paragraphs[0].alignment = PP_ALIGN.CENTER
+
+    result = transplant_exact_treatment(old_prs, new_prs)
+
+    para = _by_name(old_prs.slides[0], "Box A").text_frame.paragraphs[0]
+    assert para.alignment == PP_ALIGN.CENTER
+    assert any(c.field == "alignment" for c in result.changes)
 
 
 def test_transplant_skips_text_color_that_would_match_shapes_own_fill():

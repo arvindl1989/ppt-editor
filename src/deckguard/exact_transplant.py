@@ -38,6 +38,8 @@ from pptx.dml.color import RGBColor
 from pptx.enum.dml import MSO_COLOR_TYPE, MSO_FILL_TYPE
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 
+from deckguard.fonts import normalize_key
+
 # Below this fraction of an old slide's (leaf) shapes finding a name-match
 # in the reference deck's same-index slide, the slide is treated as having
 # no real structural correspondence to the reference -- most of it is
@@ -50,7 +52,7 @@ LOW_MATCH_THRESHOLD = 0.5
 class TransplantChange:
     slide_index: int  # 0-based
     shape_path: str
-    field: str  # "fill" | "line" | "font_name" | "font_color" | "font_bold"
+    field: str  # "fill" | "line" | "font_name" | "font_color" | "font_bold" | "alignment"
     old: Optional[str]
     new: Optional[str]
 
@@ -90,6 +92,23 @@ def _canonical_hex(hexval: str, color_remap: dict) -> str:
     approved target before it's used as a transplant source or compared
     against the old shape's current value."""
     return color_remap.get(hexval.upper(), hexval.upper())
+
+
+def _canonical_font(font_name: str, font_remap: dict, font_approved_keys: set) -> Optional[str]:
+    """Unlike colors (where a stale-but-known legacy hex still canonicalizes
+    to something usable), a font the brand rules have never heard of gets a
+    hard NO here, not a best-effort pass-through: this deck must never end
+    up carrying a non-KONE font just because the reference deck happened to
+    use one (e.g. it was never brand-fixed itself, or was hand-edited after
+    the fact). Returns the canonical approved name to use, or None to skip
+    the font_name copy entirely and leave the old run's own (already
+    brand-fixed) font alone."""
+    key = normalize_key(font_name)
+    if key in font_remap:
+        return font_remap[key]
+    if key in font_approved_keys:
+        return font_name
+    return None
 
 
 def _copy_fill(old_shape, new_shape, slide_index: int, path: str, color_remap: dict, changes: list) -> None:
@@ -141,7 +160,10 @@ def _copy_line(old_shape, new_shape, slide_index: int, path: str, color_remap: d
     changes.append(TransplantChange(slide_index, path, "line", old_hex, new_hex))
 
 
-def _copy_text_style(old_shape, new_shape, slide_index: int, path: str, color_remap: dict, changes: list) -> None:
+def _copy_text_style(
+    old_shape, new_shape, slide_index: int, path: str, color_remap: dict,
+    font_remap: dict, font_approved_keys: set, changes: list,
+) -> None:
     if not (getattr(old_shape, "has_text_frame", False) and getattr(new_shape, "has_text_frame", False)):
         return
     own_fill_hex = None
@@ -152,11 +174,16 @@ def _copy_text_style(old_shape, new_shape, slide_index: int, path: str, color_re
     except Exception:
         pass
     for old_para, new_para in zip(old_shape.text_frame.paragraphs, new_shape.text_frame.paragraphs):
+        if new_para.alignment is not None and new_para.alignment != old_para.alignment:
+            old_val, new_val = old_para.alignment, new_para.alignment
+            old_para.alignment = new_val
+            changes.append(TransplantChange(slide_index, path, "alignment", str(old_val), str(new_val)))
         for old_run, new_run in zip(old_para.runs, new_para.runs):
             if not old_run.text.strip():
                 continue
-            if new_run.font.name and new_run.font.name != old_run.font.name:
-                old_val, new_val = old_run.font.name, new_run.font.name
+            canonical_font = _canonical_font(new_run.font.name, font_remap, font_approved_keys) if new_run.font.name else None
+            if canonical_font and canonical_font != old_run.font.name:
+                old_val, new_val = old_run.font.name, canonical_font
                 old_run.font.name = new_val
                 changes.append(TransplantChange(slide_index, path, "font_name", old_val, new_val))
             if new_run.font.bold is not None and new_run.font.bold != old_run.font.bold:
@@ -190,13 +217,21 @@ def transplant_exact_treatment(prs, reference_prs, rules_config: Optional[dict] 
     the two decks have in common (by index). `reference_prs` is read-only.
 
     `rules_config`: the SAME brand_rules.yaml-shaped dict the rest of the
-    pipeline uses -- read-only here too, only for its `colors.remap` table
-    (see `_canonical_hex`). Never written back to.
+    pipeline uses -- read-only here too, only for its `colors.remap`/
+    `fonts.remap`/`fonts.approved` tables (see `_canonical_hex` and
+    `_canonical_font`). Never written back to.
     """
+    colors_cfg = (rules_config or {}).get("colors", {}) or {}
     color_remap = {
         k.lstrip("#").upper(): v.lstrip("#").upper()
-        for k, v in ((rules_config or {}).get("colors", {}).get("remap", {}) or {}).items()
+        for k, v in (colors_cfg.get("remap", {}) or {}).items()
     }
+    fonts_cfg = (rules_config or {}).get("fonts", {}) or {}
+    font_remap = {
+        normalize_key(k): v
+        for k, v in (fonts_cfg.get("remap", {}) or {}).items()
+    }
+    font_approved_keys = {normalize_key(n) for n in (fonts_cfg.get("approved", []) or [])}
     result = TransplantResult()
     n = min(len(prs.slides), len(reference_prs.slides))
     for i in range(n):
@@ -217,7 +252,9 @@ def transplant_exact_treatment(prs, reference_prs, rules_config: Optional[dict] 
             matched_leaf_count += 1
             _copy_fill(old_shape, new_shape, i, path, color_remap, result.changes)
             _copy_line(old_shape, new_shape, i, path, color_remap, result.changes)
-            _copy_text_style(old_shape, new_shape, i, path, color_remap, result.changes)
+            _copy_text_style(
+                old_shape, new_shape, i, path, color_remap, font_remap, font_approved_keys, result.changes
+            )
 
         if matched_leaf_count / old_leaf_count < LOW_MATCH_THRESHOLD:
             result.flagged_slides.append(i)
