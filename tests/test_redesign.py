@@ -144,14 +144,13 @@ def _kone_spec_json(title, *slides):
     return json.dumps({"title": title, "slides": list(slides)})
 
 
-def _kone_slide(layout, **overrides):
-    item = {
-        "layout": layout, "eyebrow": None, "title": None, "bullets": [],
-        "columns": [], "stats": [], "phases": [], "label": None, "quote": None,
-        "attribution": None,
-    }
-    item.update(overrides)
-    return item
+def _kone_slide(archetype, **content):
+    """A kone-deck-generator spec slide: {"archetype": <name>, ...that
+    archetype's own content fields...} -- content shape varies per
+    archetype (see skill_bridge.py's own docstring), so this takes
+    whatever content keys the caller passes, unlike the old fixed
+    layout schema's always-present, often-null fields."""
+    return {"archetype": archetype, **content}
 
 
 # --------------------------------------------------------------------------
@@ -530,8 +529,18 @@ def test_redesign_deck_builds_from_scratch_with_no_source_deck(tmp_path):
     compose.py's outline path: see redesign_deck's own branch for why."""
     response_json = _kone_spec_json(
         "Predictive Maintenance",
-        _kone_slide("section_divider", eyebrow="Overview", title="A new era of predictive maintenance"),
-        _kone_slide("title_content", title="Why it matters", bullets=["Less downtime", "Lower cost"]),
+        _kone_slide(
+            "agenda_contents", title="Agenda",
+            items=[{"number": "01", "item": "Why predictive maintenance"}, {"number": "02", "item": "What changes"}],
+        ),
+        _kone_slide(
+            "three_stats", title="Predictive maintenance pays for itself fast.",
+            stats=[
+                {"label": "Downtime", "value": "-30%", "desc": "fewer unplanned callouts."},
+                {"label": "Cost", "value": "-18%", "desc": "lower maintenance spend."},
+                {"label": "Payback", "value": "9 mo", "desc": "typical time to break even."},
+            ],
+        ),
     )
     client = _FakeClient(_FakeResponse(response_json, input_tokens=1800, output_tokens=900))
 

@@ -16,16 +16,28 @@ purpose-built, hand-tuned renderer instead.
 But for the pure "nothing but a brief" case, the `kone-deck-generator`
 skill (an independently maintained sibling of the `kone-design` skill,
 normally installed under `~/.claude/skills/`) is a BETTER renderer for
-exactly this one job: 6 body layouts, each a near-literal transcription
-of the org LAYOUTS.md spec with hand-placed geometry and hardcoded,
-already-compliant KONE brand colors -- compliant by construction, not
-by a subsequent inherited-color-resolution pass. This module imports
-that skill's own `kone_deck_creator.build_deck` (never copies it, so
-improving a layout there benefits both the standalone skill and
-deckguard at once) and does the planning step (brief -> spec JSON) the
-same way `redesign.py`'s own `call_claude_for_outline` does -- same
-client/model/effort/Usage conventions -- but targeting the skill's own
-flatter, layout-name-keyed spec schema instead of compose.py's.
+exactly this one job: a library of 23 real slide ARCHETYPES (data, not
+code -- `kone_engine.py`'s declarative region/group renderer plus
+`archetypes_batch1/2/3.py`'s definitions), each a near-literal
+transcription of a real KONE slide with real icons/charts/backgrounds,
+already-compliant KONE brand colors and shrink-to-fit text -- compliant
+by construction, not by a subsequent inherited-color-resolution pass.
+This module imports that skill's own `kone_deck_creator.build_deck`
+(never copies it, so improving an archetype there benefits both the
+standalone skill and deckguard at once) and does the planning step
+(brief -> spec JSON) the same way `redesign.py`'s own
+`call_claude_for_outline` does -- same client/model/Usage conventions
+-- but targeting the skill's own archetype-keyed spec schema instead
+of compose.py's, with per-archetype guidance built at call time from
+the skill's own `catalog.json` (purpose/keywords/slots) and
+`archetypes.SAMPLES` (a worked content example per archetype), not
+hand-duplicated here. Content shape varies too much archetype-to-
+archetype (a 5-icon row vs. a 2x2 matrix vs. a comparison table) for a
+single rigid structured-output schema the way the old 6-layout system
+had one, so this asks for plain JSON in the response and validates/
+parses it here instead -- the same approach the skill's own (now
+retired) `kone_planner.call_claude` used before deckguard had any
+tighter integration at all.
 
 Deliberately NOT used for the other two `redesign_deck` starting
 points (an existing deck, with or without a brief): the skill's
@@ -76,6 +88,8 @@ _INTERACTIVE_SKILL_DIR = "~/.claude/skills/kone-deck-generator"
 _VENDORED_SKILL_DIR = Path(__file__).with_name("assets") / "kone_deck_generator"
 
 _creator_module = None  # cached after first successful import
+_archetypes_module = None  # cached after first successful import
+_catalog_cache: Optional[dict] = None
 
 
 def _skill_dir() -> Path:
@@ -121,80 +135,100 @@ def _load_creator():
     return _creator_module
 
 
+def _load_archetypes():
+    """Import the skill's `archetypes` module -- `ARCHETYPES` (the known
+    names) and `SAMPLES` (one worked content example per name), both
+    used to build the planning prompt and to validate a spec, dynamically
+    rather than hand-duplicated here."""
+    global _archetypes_module
+    if _archetypes_module is not None:
+        return _archetypes_module
+    skill_dir = _ensure_skill_on_path()
+    try:
+        _archetypes_module = importlib.import_module("archetypes")
+    except Exception as exc:
+        raise RedesignError(f"failed to load the kone-deck-generator skill from {skill_dir}: {exc}") from exc
+    return _archetypes_module
+
+
+def _kone_catalog() -> dict:
+    """`catalog.json` -- purpose/keywords/slots per archetype, for
+    routing a brief's ideas onto the archetype whose shape fits. Not
+    every archetype has a catalog entry (a few predate the catalog and
+    are self-explanatory, e.g. `three_stats`); those just get a shorter
+    prompt entry built from their sample alone."""
+    global _catalog_cache
+    if _catalog_cache is not None:
+        return _catalog_cache
+    skill_dir = _ensure_skill_on_path()
+    catalog_path = skill_dir / "catalog.json"
+    _catalog_cache = json.loads(catalog_path.read_text()) if catalog_path.is_file() else {}
+    return _catalog_cache
+
+
 # --------------------------------------------------------------------------
 # Planning: brief -> the skill's own spec JSON (title + slides, each a
-# {"layout": ..., ...that layout's own fields}). A flat schema with
-# every layout's fields always present (nulled/emptied when unused),
-# same convention `redesign.py`'s own OUTLINE_ITEM_SCHEMA uses -- one
-# object shape a structured-output call can hold to, rather than a
-# discriminated union.
+# {"archetype": <name>, ...that archetype's own content fields...}).
+# Content shape varies too much archetype-to-archetype (a 5-icon row vs.
+# a 2x2 matrix vs. a comparison table) for one rigid structured-output
+# schema, so this builds a plain-text prompt (rules + the full archetype
+# guide, generated from the skill's own catalog.json + archetypes.SAMPLES)
+# and parses the model's JSON response directly, same approach the
+# skill's own (now retired) kone_planner.call_claude used.
 # --------------------------------------------------------------------------
 
-_COLUMN_SCHEMA = {
-    "type": "object",
-    "properties": {"heading": {"type": "string"}, "bullets": {"type": "array", "items": {"type": "string"}}},
-    "required": ["heading", "bullets"],
-    "additionalProperties": False,
-}
-_STAT_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "label": {"type": "string"}, "value": {"type": "string"}, "desc": {"type": "string"},
-    },
-    "required": ["label", "value", "desc"],
-    "additionalProperties": False,
-}
-_PHASE_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "year": {"type": "string"}, "title": {"type": "string"}, "desc": {"type": "string"},
-    },
-    "required": ["year", "title", "desc"],
-    "additionalProperties": False,
-}
+_KONE_SYSTEM_RULES = """\
+You are the deck planner for KONE's deck generator. You do NOT design visuals -- a
+separate engine renders each archetype to exact KONE brand spec (geometry, fonts,
+colors, icons, charts, backgrounds). Your only job: turn a brief into a slide-by-slide
+plan as strict JSON.
 
-KONE_SLIDE_LAYOUTS = ["section_divider", "title_content", "two_content", "three_stats", "roadmap", "quote"]
-
-KONE_SLIDE_ITEM_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "layout": {"type": "string", "enum": KONE_SLIDE_LAYOUTS},
-        "eyebrow": {"type": ["string", "null"]},
-        "title": {"type": ["string", "null"]},
-        "bullets": {"type": "array", "items": {"type": "string"}},
-        "columns": {"type": "array", "items": _COLUMN_SCHEMA},
-        "stats": {"type": "array", "items": _STAT_SCHEMA},
-        "phases": {"type": "array", "items": _PHASE_SCHEMA},
-        "label": {"type": ["string", "null"]},
-        "quote": {"type": ["string", "null"]},
-        "attribution": {"type": ["string", "null"]},
-    },
-    "required": [
-        "layout", "eyebrow", "title", "bullets", "columns", "stats", "phases",
-        "label", "quote", "attribution",
-    ],
-    "additionalProperties": False,
-}
-
-KONE_SPEC_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "title": {"type": "string"},
-        "slides": {"type": "array", "items": KONE_SLIDE_ITEM_SCHEMA},
-    },
-    "required": ["title", "slides"],
-    "additionalProperties": False,
-}
+RULES
+- The cover (intro) and closing (outro) are added automatically from the KONE master.
+  Do NOT plan a cover or a thank-you slide. Plan the BODY only.
+- For each idea in the brief, pick the archetype whose PURPOSE and shape fit best --
+  use the "Use when"/keywords guidance below, not variety for its own sake.
+- Fill only that archetype's own content fields, matching the shape of its worked
+  example below (same keys; a "groups"-style example is a list of dicts, keep it a
+  list of dicts with the same per-item keys).
+- Never invent facts, numbers, or names beyond what the brief supports -- if the
+  brief doesn't give you enough for a specific claim, write a more general but still
+  concrete statement rather than a fabricated number.
+- KONE voice: sentence case, plain, confident, no marketing fluff, no emoji.
+- Vary archetypes across the deck; don't reuse one archetype for everything.
+- Output ONLY a JSON object, no prose, no markdown fences, of this exact shape:
+  {"title": "<deck title, fills the retained cover>",
+   "slides": [{"archetype": "<name>", ...that archetype's own content fields...}, ...]}
+"""
 
 
-def _kone_planner_system_prompt() -> str:
-    """The skill's own planning rules/schema guidance (`kone_planner.py`),
-    imported rather than restated here -- deckguard's structured-output
-    `KONE_SPEC_SCHEMA` above is what actually constrains the model's
-    JSON shape; this text is guidance on top of that, and living in the
-    skill keeps it in sync with the skill's own layout catalog."""
-    _ensure_skill_on_path()
-    return importlib.import_module("kone_planner").SYSTEM_PROMPT
+def _kone_archetype_guide() -> str:
+    """One entry per known archetype: purpose, routing keywords, slots
+    (all from catalog.json when present) and a worked content example
+    (from archetypes.SAMPLES) -- built at call time from the skill's own
+    data so it can never drift out of sync with whatever archetypes the
+    skill actually ships."""
+    archetypes = _load_archetypes()
+    catalog = _kone_catalog()
+    parts = []
+    for name in sorted(archetypes.ARCHETYPES.keys()):
+        info = catalog.get(name, {})
+        lines = [f"### {name}"]
+        if info.get("purpose"):
+            lines.append(f"Purpose: {info['purpose']}")
+        if info.get("keywords"):
+            lines.append(f"Use when: {', '.join(info['keywords'])}")
+        if info.get("slots"):
+            lines.append(f"Slots: {info['slots']}")
+        sample = archetypes.SAMPLES.get(name)
+        if sample is not None:
+            lines.append(f"Example content: {json.dumps(sample, ensure_ascii=False)}")
+        parts.append("\n".join(lines))
+    return "\n\n".join(parts)
+
+
+def _kone_system_prompt() -> str:
+    return _KONE_SYSTEM_RULES + "\n\nAvailable archetypes:\n\n" + _kone_archetype_guide()
 
 
 def _build_kone_messages(brief: str, target_slides: Optional[int], notes: Optional[str]) -> list:
@@ -216,16 +250,22 @@ def call_claude_for_kone_spec(
     client=None,
 ) -> tuple[dict, Usage]:
     """Same call shape as `redesign.call_claude_for_outline`, targeting
-    the skill's spec schema instead of compose.py's outline schema.
+    the skill's archetype-keyed spec instead of compose.py's outline
+    schema. `effort` is accepted for interface parity with the rest of
+    `redesign_deck`'s callers but currently unused: this call doesn't use
+    structured-output's `output_config` (see module docstring for why),
+    and that's the only place this codebase's `effort` knob attaches.
     `client` is the same test-injection point (any `.messages.stream(...)`
-    Anthropic-SDK-shaped object)."""
+    Anthropic-SDK-shaped object) the rest of the redesign test suite uses.
+    """
+    del effort
     if client is None:
         key = api_key or os.environ.get("ANTHROPIC_API_KEY")
         if not key:
             raise RedesignError("ANTHROPIC_API_KEY is not set -- redesign needs an Anthropic API key")
         client = anthropic.Anthropic(api_key=key)
 
-    system = _kone_planner_system_prompt()
+    system = _kone_system_prompt()
     messages = _build_kone_messages(brief, target_slides, notes)
     response = _stream_final_message(
         client,
@@ -233,7 +273,6 @@ def call_claude_for_kone_spec(
         max_tokens=16000,
         thinking={"type": "adaptive"},
         system=system,
-        output_config={"effort": effort, "format": {"type": "json_schema", "schema": KONE_SPEC_SCHEMA}},
         messages=messages,
     )
 
@@ -243,6 +282,10 @@ def call_claude_for_kone_spec(
     text = next((b.text for b in response.content if b.type == "text"), None)
     if not text:
         raise RedesignError(f"no text content in the model response (stop_reason={response.stop_reason!r})")
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.strip("`")
+        text = text[text.find("\n") + 1:] if "\n" in text else text
     try:
         spec = json.loads(text)
     except json.JSONDecodeError as exc:
@@ -253,22 +296,22 @@ def call_claude_for_kone_spec(
 
 
 # --------------------------------------------------------------------------
-# Validation: STRUCTURAL only (right layout name, required fields
-# present, the counts each layout function actually indexes into --
-# e.g. `two_content` zips its columns against exactly 2 fixed x-offsets,
-# so a 1- or 3-column spec would silently drop/ignore content, not just
-# look bad). Character-length limits are deliberately NOT re-enforced
-# here anymore: the renderer itself (kone_deck_creator.py, as of the
-# skill's shrink-to-fit update) measures and shrinks single-line text
-# to its box width and falls back to PowerPoint's own shrink-on-overflow
-# for multi-line text, making those limits advisory on the skill's own
-# side -- re-rejecting a slightly-over value here would just resurrect
-# the exact "the model's deck spec doesn't fit" failure the skill's own
-# fix was built to eliminate.
+# Validation: STRUCTURAL only (known archetype name, a slide dict that
+# actually names one) -- content shape is deliberately NOT re-validated
+# per-archetype here: `kone_engine.render_archetype` is already
+# defensive about a missing/short content list (a region whose content
+# key is absent is just skipped; a `groups` list shorter than its origin
+# slots just leaves the extra slots empty -- see its own `zip` over
+# `origins`/`items`), so there's no missing-content failure mode this
+# needs to catch before rendering the way the old fixed 6-layout system
+# did (exactly-N-columns, exactly-N-stats). Character/length limits
+# were dropped from validation entirely back when the skill's own
+# shrink-to-fit renderer made them advisory (see the commit that did
+# that for the previous archetype set) -- still true here.
 # --------------------------------------------------------------------------
 
 
-def _validate_kone_spec(spec: dict, known_layouts: set) -> None:
+def _validate_kone_spec(spec: dict, known_archetypes: set) -> None:
     errors: list = []
     if not spec.get("title"):
         errors.append("spec: missing deck 'title'")
@@ -277,55 +320,16 @@ def _validate_kone_spec(spec: dict, known_layouts: set) -> None:
         errors.append("spec: zero slides")
 
     for i, s in enumerate(slides, start=1):
-        layout = s.get("layout")
-        where = f"slide {i} ({layout})"
-        if layout not in known_layouts:
-            errors.append(f"{where}: unknown layout {layout!r} -- not one of {sorted(known_layouts)}")
+        if not isinstance(s, dict):
+            errors.append(f"slide {i}: not a JSON object")
             continue
-
-        if layout == "section_divider":
-            if not s.get("title"):
-                errors.append(f"{where}: missing 'title'")
-
-        elif layout == "title_content":
-            if not s.get("title"):
-                errors.append(f"{where}: missing 'title'")
-            if not s.get("bullets"):
-                errors.append(f"{where}: needs at least one bullet")
-
-        elif layout == "two_content":
-            if not s.get("title"):
-                errors.append(f"{where}: missing 'title'")
-            columns = s.get("columns") or []
-            if len(columns) != 2:
-                errors.append(f"{where}: needs exactly 2 columns, got {len(columns)}")
-
-        elif layout == "three_stats":
-            if not s.get("title"):
-                errors.append(f"{where}: missing 'title'")
-            stats = s.get("stats") or []
-            if len(stats) != 3:
-                errors.append(f"{where}: needs exactly 3 stats, got {len(stats)}")
-
-        elif layout == "roadmap":
-            if not s.get("title"):
-                errors.append(f"{where}: missing 'title'")
-            phases = s.get("phases") or []
-            if not (2 <= len(phases) <= 5):
-                errors.append(f"{where}: needs 2-5 phases, got {len(phases)}")
-            for ph in phases:
-                if not ph.get("year"):
-                    errors.append(f"{where}: a phase is missing 'year'")
-
-        elif layout == "quote":
-            if not s.get("quote"):
-                errors.append(f"{where}: missing 'quote'")
-            if not s.get("attribution"):
-                errors.append(f"{where}: missing 'attribution'")
+        archetype = s.get("archetype")
+        if archetype not in known_archetypes:
+            errors.append(f"slide {i}: unknown archetype {archetype!r} -- not one of {sorted(known_archetypes)}")
 
     if errors:
         raise RedesignError(
-            "the model's deck spec doesn't fit the kone-deck-generator skill's layouts:\n  - "
+            "the model's deck spec doesn't fit the kone-deck-generator skill's archetypes:\n  - "
             + "\n  - ".join(errors)
         )
 
@@ -346,15 +350,16 @@ def build_deck_via_skill(
     tests) don't need to know which renderer produced a given result.
     """
     creator = _load_creator()
+    archetypes = _load_archetypes()
     spec, usage = call_claude_for_kone_spec(
         brief, target_slides=target_slides, model=model, effort=effort, notes=notes,
         api_key=api_key, client=client,
     )
-    _validate_kone_spec(spec, set(creator.REGISTRY.keys()))
+    _validate_kone_spec(spec, set(archetypes.ARCHETYPES.keys()))
 
     creator.build_deck(spec, str(out_path))
 
-    layouts_used = ["Cover F"] + [s["layout"] for s in spec["slides"]] + ["Outro"]
+    layouts_used = ["Cover F"] + [s["archetype"] for s in spec["slides"]] + ["Outro"]
     compose_result = ComposeResult(slide_count=len(layouts_used), layouts_used=layouts_used, manual_review=[])
     # No compose.py `Outline` exists for this path -- nothing downstream
     # reads `RedesignResult.outline`, so this is left None rather than

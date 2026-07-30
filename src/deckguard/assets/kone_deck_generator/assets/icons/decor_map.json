@@ -1,0 +1,207 @@
+{
+ "segment_breakdown": [
+  {
+   "image": "seg_ill0.png",
+   "box": [
+    47,
+    152,
+    165,
+    165
+   ]
+  },
+  {
+   "image": "seg_ill1.png",
+   "box": [
+    250,
+    152,
+    165,
+    165
+   ]
+  },
+  {
+   "image": "seg_ill2.png",
+   "box": [
+    452,
+    152,
+    165,
+    165
+   ]
+  },
+  {
+   "image": "seg_chart.png",
+   "box": [
+    940,
+    480,
+    300,
+    170
+   ]
+  }
+ ],
+ "resource_links": [
+  {
+   "image": "rl0.png",
+   "box": [
+    48,
+    230,
+    28,
+    28
+   ]
+  },
+  {
+   "image": "rl1.png",
+   "box": [
+    349,
+    230,
+    28,
+    28
+   ]
+  },
+  {
+   "image": "rl2.png",
+   "box": [
+    48,
+    348,
+    28,
+    28
+   ]
+  },
+  {
+   "image": "rl3.png",
+   "box": [
+    349,
+    348,
+    28,
+    28
+   ]
+  }
+ ],
+ "icon_columns_5": [
+  {
+   "image": "ic0.png",
+   "box": [
+    58,
+    391,
+    45,
+    45
+   ]
+  },
+  {
+   "image": "ic1.png",
+   "box": [
+    304,
+    391,
+    45,
+    45
+   ]
+  },
+  {
+   "image": "ic2.png",
+   "box": [
+    550,
+    391,
+    45,
+    45
+   ]
+  },
+  {
+   "image": "ic3.png",
+   "box": [
+    796,
+    391,
+    45,
+    45
+   ]
+  },
+  {
+   "image": "ic4.png",
+   "box": [
+    1042,
+    391,
+    45,
+    45
+   ]
+  }
+ ],
+ "chart_commentary": [
+  {
+   "image": "cc_chart.png",
+   "box": [
+    8,
+    322,
+    362,
+    320
+   ]
+  }
+ ],
+ "statement_links": [
+  {
+   "image": "sl_icon.png",
+   "box": [
+    1153,
+    473,
+    96,
+    96
+   ]
+  }
+ ],
+ "lifecycle_4stage": [
+  {
+   "image": "lc0.png",
+   "box": [
+    50,
+    403,
+    41,
+    41
+   ]
+  },
+  {
+   "image": "lc1.png",
+   "box": [
+    355,
+    403,
+    41,
+    41
+   ]
+  },
+  {
+   "image": "lc2.png",
+   "box": [
+    656,
+    403,
+    41,
+    41
+   ]
+  },
+  {
+   "image": "lc3.png",
+   "box": [
+    965,
+    403,
+    41,
+    41
+   ]
+  }
+ ],
+ "offer_cta": [
+  {
+   "image": "oc_icon.png",
+   "box": [
+    1133,
+    573,
+    73,
+    73
+   ]
+  }
+ ],
+ "org_functions": [
+  {
+   "image": "org_diagram.png",
+   "box": [
+    271,
+    206,
+    952,
+    431
+   ]
+  }
+ ]
+}

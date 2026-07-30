@@ -1,0 +1,256 @@
+{
+ "segment_breakdown": {
+  "purpose": "Show audience/market composition as % across several categories with icons",
+  "keywords": [
+   "customer profile",
+   "segmentation",
+   "market split",
+   "audience mix",
+   "share by category",
+   "breakdown"
+  ],
+  "slots": "title; 3-4 category groups each [icon, %, label]; 1 highlight stat [label,value]; optional mini-chart"
+ },
+ "resource_links": {
+  "purpose": "Point readers to related resources/dashboards as labelled link tiles",
+  "keywords": [
+   "find out more",
+   "links",
+   "resources",
+   "learn more",
+   "dashboards",
+   "sharepoint",
+   "qlik"
+  ],
+  "slots": "title; 4 link tiles each [icon, label]; contact line; optional visual"
+ },
+ "text_stats_picture_right": {
+  "purpose": "Explain a topic with supporting stats beside a full-height photo",
+  "keywords": [
+   "overview with image",
+   "feature",
+   "highlight with photo",
+   "picture right"
+  ],
+  "slots": "title; body paragraph; 2 stats [value, caption]; full-height picture right"
+ },
+ "icon_columns_5": {
+  "purpose": "Lay out 4-6 parallel pillars/items as an icon row",
+  "keywords": [
+   "pillars",
+   "strategic shifts",
+   "principles",
+   "focus areas",
+   "priorities",
+   "icon row"
+  ],
+  "slots": "eyebrow; title; intro; 5 items each [icon, text]"
+ },
+ "chart_commentary": {
+  "purpose": "Present a chart with interpretive commentary columns",
+  "keywords": [
+   "chart",
+   "results",
+   "analysis",
+   "survey results",
+   "data with insight"
+  ],
+  "slots": "subtitle; title; chart + highlight stat; 2-3 comment columns [heading, text]"
+ },
+ "statement_links": {
+  "purpose": "Closing statement with grouped resource links",
+  "keywords": [
+   "summary statement",
+   "closing",
+   "wrap-up with links",
+   "key message plus resources"
+  ],
+  "slots": "statement title; intro; 3 link groups [heading, links]; icon"
+ },
+ "lifecycle_4stage": {
+  "purpose": "Show an end-to-end lifecycle/process across 4 connected stages with header image",
+  "keywords": [
+   "lifecycle",
+   "value chain",
+   "end-to-end",
+   "stages",
+   "phases",
+   "cradle to grave"
+  ],
+  "slots": "header image; eyebrow; title; 4 stages each [icon, heading, bullets] on a connected axis"
+ },
+ "two_picture_compare": {
+  "purpose": "Compare two themes/options, each with a picture and points",
+  "keywords": [
+   "compare",
+   "two options",
+   "differentiate vs deliver",
+   "two themes",
+   "versus"
+  ],
+  "slots": "title; 2 items each [picture, heading, bullets]"
+ },
+ "numbered_summary_picture": {
+  "purpose": "Recap 3 key points as a numbered list beside a full-height photo",
+  "keywords": [
+   "summary",
+   "recap",
+   "takeaways",
+   "key points",
+   "numbered",
+   "to summarize"
+  ],
+  "slots": "title; 3 items [number, text]; full-height picture right"
+ },
+ "three_picture_cards": {
+  "purpose": "Present three options/benefits as picture cards",
+  "keywords": [
+   "three options",
+   "three benefits",
+   "cards",
+   "features",
+   "choices"
+  ],
+  "slots": "title; 3 cards each [picture, heading, bullets]"
+ },
+ "quote_context": {
+  "purpose": "Customer quote with supporting context and attribution",
+  "keywords": [
+   "quote",
+   "testimonial",
+   "customer voice",
+   "case study",
+   "client story"
+  ],
+  "slots": "label; context paragraph; big quote; attribution"
+ },
+ "offer_cta": {
+  "purpose": "Present an offer/price with fine print and a call-to-action, header image",
+  "keywords": [
+   "price",
+   "offer",
+   "pricing",
+   "CTA",
+   "book a call",
+   "buy",
+   "package"
+  ],
+  "slots": "header image; title; price + fine print; CTA box [heading, text, icon]"
+ },
+ "four_point_value": {
+  "purpose": "Introduce a concept via a 4-point value grid with supporting images",
+  "keywords": [
+   "value",
+   "benefits",
+   "four points",
+   "introduction",
+   "journey",
+   "why"
+  ],
+  "slots": "eyebrow; title; 4 points [number, heading, text]; 2 images"
+ },
+ "how_it_works_3step": {
+  "purpose": "Explain how something works in 3 numbered steps with header image",
+  "keywords": [
+   "how it works",
+   "steps",
+   "guide",
+   "process",
+   "3 steps",
+   "walkthrough"
+  ],
+  "slots": "header image; title; 3 steps [number, text]"
+ },
+ "numbered_icon_row_6": {
+  "purpose": "Present up to 6 sequential items as a numbered icon row",
+  "keywords": [
+   "steps",
+   "features",
+   "checklist",
+   "maintenance",
+   "six items",
+   "sequence"
+  ],
+  "slots": "title; 6 items [number, icon, label]"
+ },
+ "org_functions": {
+  "purpose": "Show organisational functions/teams (list + diagram)",
+  "keywords": [
+   "org",
+   "team",
+   "structure",
+   "functions",
+   "departments",
+   "org chart",
+   "operating model"
+  ],
+  "slots": "title; function rows; org diagram"
+ },
+ "quarterly_plan_4col": {
+  "purpose": "Lay out a plan across 4 quarters with supporting columns",
+  "keywords": [
+   "quarterly",
+   "Q1 Q2 Q3 Q4",
+   "phased plan",
+   "by quarter",
+   "annual plan"
+  ],
+  "slots": "subtitle; title; intro; 4 columns; 4 quarter blocks [quarter, items]"
+ },
+ "agenda_contents": {
+  "purpose": "Agenda / table of contents opener",
+  "keywords": [
+   "agenda",
+   "contents",
+   "outline",
+   "what we'll cover",
+   "topics"
+  ],
+  "slots": "title; numbered contents list [number, item]"
+ },
+ "comparison_table": {
+  "purpose": "True side-by-side comparison across criteria",
+  "keywords": [
+   "comparison",
+   "versus",
+   "options table",
+   "feature comparison",
+   "criteria"
+  ],
+  "slots": "title; column headers; N rows x M columns"
+ },
+ "hero_stat": {
+  "purpose": "One dominant headline number as the whole message",
+  "keywords": [
+   "one big number",
+   "headline stat",
+   "single KPI",
+   "impact figure",
+   "the number"
+  ],
+  "slots": "eyebrow; huge value; caption; supporting line"
+ },
+ "image_section_divider": {
+  "purpose": "Section divider with a full-bleed image and overlaid title",
+  "keywords": [
+   "section",
+   "chapter",
+   "part",
+   "transition",
+   "divider with image"
+  ],
+  "slots": "full-bleed image; eyebrow; section title"
+ },
+ "matrix_2x2": {
+  "purpose": "Strategic 2x2 matrix / quadrant",
+  "keywords": [
+   "2x2",
+   "matrix",
+   "quadrant",
+   "prioritisation",
+   "effort vs impact",
+   "positioning"
+  ],
+  "slots": "title; 2 axis labels; 4 quadrants [heading, items]"
+ }
+}
