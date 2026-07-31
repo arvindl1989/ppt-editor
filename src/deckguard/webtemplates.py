@@ -15,6 +15,10 @@ SEVERITY_COLOR = {"critical": "#FF5F28", "major": "#FFA023", "minor": "#8C8C8C"}
 # and square-leaning (the brand's own note: "a geometric, square-cornered brand").
 BASE_CSS = """
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+  @font-face {
+    font-family: 'KONE Information'; src: url('/static/KONE_Information.ttf') format('truetype');
+    font-weight: 400; font-style: normal; font-display: swap;
+  }
   :root {
     --bg: #FFFFFF; --surface: #FFFFFF; --surface-sunken: #F3EEE6;
     --ink: #141414; --ink-muted: #727272; --ink-faint: #A1A1A1;
@@ -43,7 +47,7 @@ BASE_CSS = """
   }
   a { color: var(--accent); text-decoration: none; }
   a:hover { color: var(--accent-hover); text-decoration: underline; }
-  .wrap { max-width: 720px; margin: 0 auto; padding: 0 1.5rem 5rem; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 0 1.5rem 5rem; }
   .topbar {
     display: flex; align-items: center; gap: 0.65rem;
     padding: 1.6rem 0 1.2rem;
@@ -51,6 +55,8 @@ BASE_CSS = """
   .brand { display: flex; align-items: center; gap: 0.6rem; }
   .brand svg { width: 26px; height: auto; flex: none; }
   .brand h1 { font-size: 1.05rem; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+  /* KONE Information: the brand's secondary caps typeface, for labels/eyebrows/page numbers */
+  .tag, .stat span, th, .hero .eyebrow { font-family: 'KONE Information', 'Inter', sans-serif; }
   .tag {
     font-size: 0.68rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em;
     color: var(--accent); background: var(--accent-softer); padding: 0.25rem 0.6rem; border-radius: 999px;
@@ -174,6 +180,28 @@ BASE_CSS = """
   }
   .method-pane { display: none; }
   .method-pane.active { display: block; }
+
+  /* -- home hero: orientation for a first-time visitor, above the tool card -- */
+  .hero { padding: 0.4rem 0 2.4rem; }
+  .hero .eyebrow {
+    display: inline-block;
+    font-size: 0.72rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--accent); margin-bottom: 0.7rem;
+  }
+  .hero h1 { font-size: 1.9rem; font-weight: 600; letter-spacing: -0.015em; margin: 0 0 0.6rem; line-height: 1.15; }
+  .hero p.lede { font-size: 1rem; max-width: 56ch; margin: 0; }
+  .capstrip {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; margin-top: 1.9rem;
+    border-top: 1px solid var(--border); border-left: 1px solid var(--border);
+  }
+  .capstrip .cap {
+    padding: 1rem 1.1rem; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border);
+  }
+  .capstrip .cap b { display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.25rem; }
+  .capstrip .cap span { display: block; font-size: 0.78rem; color: var(--ink-muted); line-height: 1.45; }
+  @media (max-width: 640px) {
+    .capstrip { grid-template-columns: 1fr 1fr; }
+  }
 """
 
 KONE_LOGO_SVG = (
@@ -227,6 +255,29 @@ you use AI rewrite or review, which need an API key set by the operator.</footer
 }})();
 </script>
 </body></html>"""
+
+
+def home_hero() -> str:
+    """Orientation for a first-time visitor, above the tool card -- the
+    tool card's tabs are self-explanatory once you know which of the
+    four you want, but nothing on the page previously said what
+    deckguard actually does before you had to guess from tab labels."""
+    caps = [
+        ("Fix & audit", "Find and correct off-brand colors, fonts, effects and layout in an existing deck."),
+        ("Learn", "Diff two decks to learn a client's palette/font choices, then apply them consistently."),
+        ("Create", "Compose a new deck from a plain-text outline, entirely on the org template's own layouts."),
+        ("AI redesign", "Rework a deck's content onto approved layouts, or author one from a brief using "
+                         "KONE's 23-archetype slide library."),
+    ]
+    cap_html = "".join(f'<div class="cap"><b>{_esc(t)}</b><span>{_esc(d)}</span></div>' for t, d in caps)
+    return f"""<div class="hero">
+  <span class="eyebrow">KONE &middot; Dedicated to People Flow&trade;</span>
+  <h1>Every deck, on brand.</h1>
+  <p class="lede">Deterministic brand compliance for PowerPoint, with AI assistance where it earns its keep --
+    color, font, effect and layout rules apply the same way whether a deck is fixed, redesigned, or built
+    from nothing.</p>
+  <div class="capstrip">{cap_html}</div>
+</div>"""
 
 
 def unified_tool_card(ai_enabled: bool = True) -> str:
@@ -333,7 +384,9 @@ def unified_tool_card(ai_enabled: bool = True) -> str:
     <textarea name="brief" rows="2" placeholder="e.g. a short deck on predictive maintenance for facilities managers"
       style="width:100%;font-size:0.85rem;padding:0.6rem;border-radius:8px;border:1px solid var(--border);
       background:var(--surface);color:var(--ink);"></textarea>
-    <p class="field-hint">Required if no deck is uploaded; also authors any blank slides in an uploaded one.</p>
+    <p class="field-hint">Required if no deck is uploaded; also authors any blank slides in an uploaded one.
+      With no deck uploaded, the brief builds a fresh deck from KONE's own 23-archetype slide library
+      (real icons, charts and photos) rather than plain org-template layouts.</p>
   </div>
   <details class="advanced">
     <summary>Advanced options</summary>

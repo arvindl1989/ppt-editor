@@ -30,6 +30,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi.staticfiles import StaticFiles
 from pptx import Presentation
 from starlette.datastructures import UploadFile as _FormUploadFile
 from pptx.exc import PackageNotFoundError
@@ -52,6 +53,11 @@ MAX_STORAGE_AGE_SECONDS = 2 * 60 * 60  # best-effort cleanup of anything older t
 
 app = FastAPI(title="deckguard")
 security = HTTPBasic(auto_error=False)
+# Self-hosted brand assets for the web UI itself (the KONE Information
+# @font-face webtemplates.py's CSS references) -- separate from the
+# kone-deck-generator skill's own vendored copy under assets/, which is
+# there to build .pptx files, not to serve the web app's own pages.
+app.mount("/static", StaticFiles(directory=Path(__file__).with_name("assets") / "fonts"), name="static")
 
 
 @app.exception_handler(RequestValidationError)
@@ -127,7 +133,8 @@ def _open_presentation_or_error(path: Path) -> Presentation:
 @app.get("/", response_class=HTMLResponse)
 def index(_auth: None = Depends(_require_auth)):
     ai_enabled = bool(os.environ.get("ANTHROPIC_API_KEY"))
-    return tpl.page_shell("deckguard", tpl.unified_tool_card(ai_enabled), home=True)
+    body = tpl.home_hero() + tpl.unified_tool_card(ai_enabled)
+    return tpl.page_shell("deckguard", body, home=True)
 
 
 @app.post("/audit", response_class=HTMLResponse)
