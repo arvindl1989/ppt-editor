@@ -118,10 +118,15 @@ def inspect(deck: str, fmt: str):
 @click.option("--rules", "rules_path", type=click.Path(exists=True, dir_okay=False), default=None)
 @click.option("--dry-run", is_flag=True, help="Compute and report fixes without writing an output file.")
 @click.option("--out", "out_dir", type=click.Path(file_okay=False), default=None, help="Output directory (default: alongside DECK).")
-def fix(deck: str, rules_path: Optional[str], dry_run: bool, out_dir: Optional[str]):
+@click.option(
+    "--rebuild-layouts", is_flag=True,
+    help="Also rebuild any slide flagged non_standard_layout onto an approved layout, verbatim, before "
+    "patching colors/fonts -- fix_deck's own patches can correct anything on a slide's EXISTING layout, "
+    "never the layout itself. Deterministic, no AI, no API key.",
+)
+def fix(deck: str, rules_path: Optional[str], dry_run: bool, out_dir: Optional[str], rebuild_layouts: bool):
     """Apply deterministic brand-compliance fixes to DECK, writing <name>_fixed.pptx."""
     config = _load_rules(rules_path)
-    prs = _open_presentation(deck)
 
     deck_path = Path(deck)
     out_directory = Path(out_dir) if out_dir else deck_path.parent
@@ -130,9 +135,26 @@ def fix(deck: str, rules_path: Optional[str], dry_run: bool, out_dir: Optional[s
     changelog_json_path = out_directory / f"{deck_path.stem}_changelog.json"
     changelog_md_path = out_directory / f"{deck_path.stem}_changelog.md"
 
-    fix_report = fix_deck(
-        prs, config, source_path=str(deck_path), output_path=str(output_path), dry_run=dry_run
-    )
+    retemplate_result = None
+    fix_source = str(deck_path)
+    tmp_retemplated: Optional[Path] = None
+    if rebuild_layouts:
+        import tempfile
+
+        from deckguard.retemplate import rebuild_non_standard_layout_slides
+
+        tmp_retemplated = Path(tempfile.mkstemp(suffix=".pptx")[1])
+        retemplate_result = rebuild_non_standard_layout_slides(fix_source, str(tmp_retemplated), rules_config=config)
+        fix_source = str(tmp_retemplated)
+
+    try:
+        prs = _open_presentation(fix_source)
+        fix_report = fix_deck(
+            prs, config, source_path=str(deck_path), output_path=str(output_path), dry_run=dry_run
+        )
+    finally:
+        if tmp_retemplated:
+            tmp_retemplated.unlink(missing_ok=True)
 
     changelog_json_path.write_text(report_mod.to_json(report_mod.fix_report_to_dict(fix_report)), encoding="utf-8")
     changelog_md_path.write_text(report_mod.render_fix_md(fix_report), encoding="utf-8")
@@ -145,6 +167,11 @@ def fix(deck: str, rules_path: Optional[str], dry_run: bool, out_dir: Optional[s
         f"{len(fix_report.changes)} changes applied, "
         f"[yellow]{len(fix_report.manual_review)} need manual review[/]"
     )
+    if retemplate_result and retemplate_result.transformed:
+        console.print(
+            f"[cyan]{len(retemplate_result.transformed)} slide(s)[/] rebuilt onto an approved layout: "
+            f"{retemplate_result.transformed}"
+        )
 
 
 def _audit_one(deck_path: Path, config: dict) -> tuple[list, dict]:

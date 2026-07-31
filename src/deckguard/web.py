@@ -26,7 +26,7 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
-from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, Form, HTTPException, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
@@ -168,11 +168,17 @@ async def audit_route(file: UploadFile, _auth: None = Depends(_require_auth)):
     return tpl.page_shell(f"Audit — {file.filename}", body)
 
 
-def _migrate_and_fix(source_path: Path, deck_name: str, config: dict, work_dir: Path):
+def _migrate_and_fix(source_path: Path, deck_name: str, config: dict, work_dir: Path, rebuild_layouts: bool = False):
     """Shared by /fix and /regenerate: run best-effort cover/outro
-    migration, then fix_deck, writing fixed.pptx + changelogs into
-    work_dir. Returns (fix_report, migrate_result)."""
+    migration, optionally rebuild any non-standard-layout slide onto an
+    approved layout (verbatim, deterministic -- see
+    `retemplate.rebuild_non_standard_layout_slides`'s own docstring for
+    why this exists: fix_deck's own color/font patches can never fix a
+    slide's LAYOUT), then fix_deck, writing fixed.pptx + changelogs into
+    work_dir. Returns (fix_report, migrate_result, retemplate_result) --
+    `retemplate_result` is None when `rebuild_layouts` is False."""
     migrated_path = work_dir / "migrated.pptx"
+    retemplated_path = work_dir / "retemplated.pptx"
     output_path = work_dir / "fixed.pptx"
 
     # Cover/outro migration runs first (best-effort -- if it fails for any
@@ -186,6 +192,15 @@ def _migrate_and_fix(source_path: Path, deck_name: str, config: dict, work_dir: 
     except Exception:  # noqa: BLE001
         pass
 
+    retemplate_result = None
+    if rebuild_layouts:
+        from deckguard.retemplate import rebuild_non_standard_layout_slides
+
+        retemplate_result = rebuild_non_standard_layout_slides(
+            str(fix_source_path), str(retemplated_path), rules_config=config,
+        )
+        fix_source_path = retemplated_path
+
     prs = _open_presentation_or_error(fix_source_path)
     fix_report = fix_deck(
         prs, config, source_path=deck_name, output_path=str(output_path), dry_run=False
@@ -194,24 +209,34 @@ def _migrate_and_fix(source_path: Path, deck_name: str, config: dict, work_dir: 
     report_dict = report_mod.fix_report_to_dict(fix_report)
     (work_dir / "changelog.json").write_text(report_mod.to_json(report_dict), encoding="utf-8")
     (work_dir / "changelog.md").write_text(report_mod.render_fix_md(fix_report), encoding="utf-8")
-    return fix_report, migrate_result
+    return fix_report, migrate_result, retemplate_result
 
 
-def _fix_result_body(deck_name: str, fix_report, migrate_result: dict, config: dict, token: str) -> str:
+def _fix_result_body(
+    deck_name: str, fix_report, migrate_result: dict, config: dict, token: str, retemplate_result=None,
+) -> str:
     report_dict = report_mod.fix_report_to_dict(fix_report)
     download_links = {
         "pptx": f"/download/{token}/fixed.pptx",
         "json": f"/download/{token}/changelog.json",
         "md": f"/download/{token}/changelog.md",
     }
-    migrate_note = None
+    notes = []
     if migrate_result["cover_replaced"] or migrate_result["outro_replaced"]:
         parts = []
         if migrate_result["cover_replaced"]:
             parts.append("cover")
         if migrate_result["outro_replaced"]:
             parts.append("outro")
-        migrate_note = f"Also replaced the {' and '.join(parts)} slide with the org template's (title carried over)."
+        notes.append(f"Also replaced the {' and '.join(parts)} slide with the org template's (title carried over).")
+    if retemplate_result is not None and retemplate_result.transformed:
+        n = len(retemplate_result.transformed)
+        slides = ", ".join(map(str, retemplate_result.transformed))
+        notes.append(
+            f"Also rebuilt {n} slide{'s' if n != 1 else ''} onto an approved layout, verbatim "
+            f"(slide{'s' if n != 1 else ''} {slides} used a non-approved layout Fix's color/font patches couldn't correct)."
+        )
+    migrate_note = " ".join(notes) or None
     remap_summary = report_mod.remap_overrides_summary(fix_report)
     approved_colors = config.get("colors", {}).get("approved", []) or []
     approved_fonts = config.get("fonts", {}).get("approved", []) or []
@@ -230,19 +255,26 @@ def _fix_result_body(deck_name: str, fix_report, migrate_result: dict, config: d
 
 
 @app.post("/fix", response_class=HTMLResponse)
-async def fix_route(file: UploadFile, _auth: None = Depends(_require_auth)):
+async def fix_route(
+    file: UploadFile, rebuild_layouts: Optional[str] = Form(None), _auth: None = Depends(_require_auth),
+):
     _cleanup_old_uploads()
     if not file.filename or not file.filename.lower().endswith(".pptx"):
         return tpl.page_shell("deckguard", tpl.upload_form("Please upload a .pptx file."))
 
+    rebuild_layouts_flag = bool(rebuild_layouts)
     token = uuid.uuid4().hex
     work_dir = STORAGE_ROOT / token
     source_path = await _save_upload(file, work_dir)
-    (work_dir / "meta.json").write_text(json.dumps({"deck_name": file.filename}), encoding="utf-8")
+    (work_dir / "meta.json").write_text(
+        json.dumps({"deck_name": file.filename, "rebuild_layouts": rebuild_layouts_flag}), encoding="utf-8",
+    )
 
     try:
         config = _load_engine_config()
-        fix_report, migrate_result = _migrate_and_fix(source_path, file.filename, config, work_dir)
+        fix_report, migrate_result, retemplate_result = _migrate_and_fix(
+            source_path, file.filename, config, work_dir, rebuild_layouts=rebuild_layouts_flag,
+        )
     except HTTPException as exc:
         shutil.rmtree(work_dir, ignore_errors=True)
         return tpl.page_shell("deckguard", tpl.upload_form(str(exc.detail)))
@@ -250,7 +282,7 @@ async def fix_route(file: UploadFile, _auth: None = Depends(_require_auth)):
         shutil.rmtree(work_dir, ignore_errors=True)
         return tpl.page_shell("deckguard", tpl.upload_form(f"Fix failed: {exc}"))
 
-    body = _fix_result_body(file.filename, fix_report, migrate_result, config, token)
+    body = _fix_result_body(file.filename, fix_report, migrate_result, config, token, retemplate_result)
     return tpl.page_shell(f"Fixed — {file.filename}", body)
 
 
@@ -265,7 +297,9 @@ async def regenerate_route(token: str, request: Request, _auth: None = Depends(_
         return tpl.page_shell(
             "deckguard", tpl.upload_form("Those results have expired — please upload the deck again.")
         )
-    deck_name = json.loads(meta_path.read_text(encoding="utf-8"))["deck_name"]
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    deck_name = meta["deck_name"]
+    rebuild_layouts_flag = bool(meta.get("rebuild_layouts"))
 
     form = await request.form()
     color_overrides: dict[str, str] = {}
@@ -302,13 +336,15 @@ async def regenerate_route(token: str, request: Request, _auth: None = Depends(_
         font_remap[old_font] = new_font
 
     try:
-        fix_report, migrate_result = _migrate_and_fix(source_path, deck_name, config, work_dir)
+        fix_report, migrate_result, retemplate_result = _migrate_and_fix(
+            source_path, deck_name, config, work_dir, rebuild_layouts=rebuild_layouts_flag,
+        )
     except HTTPException as exc:
         return tpl.page_shell("deckguard", tpl.upload_form(str(exc.detail)))
     except Exception as exc:  # noqa: BLE001
         return tpl.page_shell("deckguard", tpl.upload_form(f"Regenerate failed: {exc}"))
 
-    body = _fix_result_body(deck_name, fix_report, migrate_result, config, token)
+    body = _fix_result_body(deck_name, fix_report, migrate_result, config, token, retemplate_result)
     return tpl.page_shell(f"Fixed — {deck_name}", body)
 
 

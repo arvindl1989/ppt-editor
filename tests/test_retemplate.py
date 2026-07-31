@@ -309,6 +309,44 @@ def test_apply_retemplate_honors_accepted_indexes_subset(tmp_path):
     assert prs.slides[1].shapes.title.text_frame.text == "Second Slide"  # untouched original, not rebuilt
 
 
+def test_rebuild_non_standard_layout_slides_only_rebuilds_flagged_slides(tmp_path):
+    """Fix's opt-in "also rebuild non-standard layouts" checkbox: finds
+    non_standard_layout via a real audit, rebuilds only those slides
+    (verbatim), leaves everything else -- including OTHER eligible
+    slides that just happen to already be fine -- completely alone."""
+    from deckguard.retemplate import rebuild_non_standard_layout_slides
+
+    path = _simple_deck(tmp_path)  # all 3 slides use the test fixture's own non-org-template layout
+    out_path = tmp_path / "out.pptx"
+
+    result = rebuild_non_standard_layout_slides(str(path), str(out_path), template_path=TEMPLATE_PATH)
+
+    # Every slide here is on a non-standard layout (the test fixture's
+    # own, unrelated to the org template) -- the table slide is still
+    # excluded since it's ineligible for verbatim carryover regardless.
+    assert result.transformed == [1, 2]
+    assert result.skipped == [3]
+
+    prs = Presentation(str(out_path))
+    approved_names = {layout.name for master in Presentation(str(TEMPLATE_PATH)).slide_masters for layout in master.slide_layouts}
+    assert prs.slides[0].slide_layout.name in approved_names
+    assert prs.slides[1].slide_layout.name in approved_names
+    assert prs.slides[0].shapes.title.text_frame.text == "First Slide"
+
+
+def test_rebuild_non_standard_layout_slides_is_a_no_op_when_everything_is_already_approved(tmp_path):
+    from deckguard.retemplate import apply_rebrand, rebuild_non_standard_layout_slides
+
+    path = _simple_deck(tmp_path)
+    rebranded_path = tmp_path / "rebranded.pptx"
+    apply_rebrand(str(path), str(rebranded_path), template_path=TEMPLATE_PATH)  # lands every eligible slide on an approved layout
+
+    out_path = tmp_path / "out.pptx"
+    result = rebuild_non_standard_layout_slides(str(rebranded_path), str(out_path), template_path=TEMPLATE_PATH)
+
+    assert result.transformed == []
+
+
 def test_apply_retemplate_is_a_no_op_when_nothing_is_eligible(tmp_path):
     prs = new_deck()
     slide = add_slide(prs, layout_idx=6)

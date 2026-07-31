@@ -46,6 +46,59 @@ def test_validate_rules_bad_file(tmp_path):
     assert result.exit_code == 1
 
 
+def test_fix_rebuild_layouts_flag_rebuilds_non_standard_layout(tmp_path):
+    """`deckguard fix --rebuild-layouts`: rebuilds a non_standard_layout
+    slide onto an approved layout, verbatim, before patching colors/
+    fonts -- opt-in, since default `fix` behavior must stay
+    patch-only (see test_fix_default_does_not_rebuild_layouts below)."""
+    from pptx import Presentation
+
+    from deckguard.slide_import import default_template_path
+
+    deck = tmp_path / "d.pptx"
+    prs = new_deck()
+    add_slide(prs)
+    middle = add_slide(prs)
+    title_run(middle).text = "Middle slide"
+    add_slide(prs)
+    prs.save(str(deck))
+
+    runner = CliRunner()
+    result = runner.invoke(main, ["fix", str(deck), "--rebuild-layouts", "--out", str(tmp_path)])
+
+    assert result.exit_code == 0, result.output
+    assert "rebuilt onto an approved layout" in result.output
+
+    out_prs = Presentation(str(tmp_path / "d_fixed.pptx"))
+    approved_names = {
+        layout.name for master in Presentation(str(default_template_path())).slide_masters for layout in master.slide_layouts
+    }
+    assert out_prs.slides[1].slide_layout.name in approved_names
+    assert out_prs.slides[1].shapes.title.text_frame.text == "Middle slide"
+
+
+def test_fix_default_does_not_rebuild_layouts(tmp_path):
+    deck = tmp_path / "d.pptx"
+    prs = new_deck()
+    add_slide(prs)
+    middle = add_slide(prs)
+    title_run(middle).text = "Middle slide"
+    original_layout_name = middle.slide_layout.name
+    add_slide(prs)
+    prs.save(str(deck))
+
+    runner = CliRunner()
+    result = runner.invoke(main, ["fix", str(deck), "--out", str(tmp_path)])
+
+    assert result.exit_code == 0, result.output
+    assert "rebuilt onto an approved layout" not in result.output
+
+    from pptx import Presentation
+
+    out_prs = Presentation(str(tmp_path / "d_fixed.pptx"))
+    assert out_prs.slides[1].slide_layout.name == original_layout_name
+
+
 def test_inspect_json_is_valid_json(tmp_path):
     deck = tmp_path / "d.pptx"
     _write_violating_deck(deck)

@@ -366,6 +366,11 @@ def unified_tool_card(ai_enabled: bool = True) -> str:
       <button type="submit" class="secondary" formaction="/audit">Audit only</button>
     </div>
   </div>
+  <label class="checkbox-row" style="margin-top:1rem;">
+    <input type="checkbox" name="rebuild_layouts" value="1">
+    <span>Also rebuild slides on a non-approved layout onto one that fits, verbatim (Fix deck only —
+      deterministic, no AI). Colors/fonts on that layout are still patched normally afterward.</span>
+  </label>
 </form>
 
 <form class="method-pane" data-method="learn" method="post" action="/learn" enctype="multipart/form-data">
@@ -456,6 +461,11 @@ def upload_form(error: str | None = None) -> str:
     <button type="submit" class="primary" formaction="/fix">Fix deck</button>
     <button type="submit" class="secondary" formaction="/audit">Audit only</button>
   </div>
+  <label class="checkbox-row" style="margin-top:1rem;text-align:left;">
+    <input type="checkbox" name="rebuild_layouts" value="1">
+    <span>Also rebuild slides on a non-approved layout onto one that fits, verbatim (Fix deck only —
+      deterministic, no AI).</span>
+  </label>
 </form>
 </div>"""
 

@@ -522,6 +522,38 @@ def apply_retemplate(
     return result
 
 
+def rebuild_non_standard_layout_slides(
+    deck_path, out_path, rules_config: Optional[dict] = None, template_path=None,
+) -> RetemplateResult:
+    """`deckguard fix`'s opt-in "also rebuild non-standard layouts"
+    checkbox: `fix_deck`'s own color/font patches can correct anything
+    on a slide's EXISTING layout, but never the layout itself -- a
+    slide built on a layout outside the approved template (rules_engine's
+    `non_standard_layout` violation) needs a structural rebuild, not a
+    patch. This finds exactly those slides via a real audit pass and
+    rebuilds ONLY them, verbatim, via `apply_retemplate`'s own
+    targeted-index rebuild -- every other slide (already on an approved
+    layout, or genuinely ineligible to reflow at all -- a table/chart/
+    too-dense-to-verbatim-carry slide) is left completely untouched.
+
+    Deterministic, no AI, no API key -- the same guarantee
+    `apply_rebrand`'s own base (non-`--review`) behavior already has.
+    If no slide needs this, `out_path` ends up a plain copy of
+    `deck_path` and `.transformed` is empty -- callers can check that
+    before reporting anything happened.
+    """
+    from deckguard.config import default_config_path, load_config
+    from deckguard.inventory import build_inventory
+    from deckguard.rules_engine import audit_deck
+
+    config = rules_config if rules_config is not None else load_config(default_config_path())
+    prs = Presentation(str(deck_path))
+    violations = audit_deck(build_inventory(prs), config)
+    non_standard_indices = {v.slide_index for v in violations if v.rule == "non_standard_layout"}
+
+    return apply_retemplate(deck_path, out_path, accepted_indexes=non_standard_indices, template_path=template_path)
+
+
 def _resolve_imported_layouts(prs, partname_by_name: dict) -> dict:
     """{layout_name: SlideLayout} for every entry in `partname_by_name`
     (as returned by `import_layouts`) resolved against `prs`'s CURRENT

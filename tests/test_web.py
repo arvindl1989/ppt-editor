@@ -148,6 +148,91 @@ def test_fix_flow_also_migrates_non_standard_cover_and_outro(tmp_path, monkeypat
     assert prs.slides[0].slide_layout.name in ("Cover B", "Outro")
 
 
+def _write_non_standard_layout_middle_slide_deck(path):
+    """Three slides so /fix's cover/outro migration (first + last slide
+    only) can't touch the middle one -- isolates the rebuild-layouts
+    checkbox's own effect from that separate, always-on migration step."""
+    prs = new_deck()
+    add_slide(prs)
+    middle = add_slide(prs)
+    title_run(middle).text = "Middle slide"
+    add_slide(prs)
+    prs.save(str(path))
+
+
+def test_fix_flow_default_does_not_rebuild_non_standard_layout(tmp_path, monkeypatch):
+    """The rebuild-layouts checkbox is opt-in -- Fix's default behavior
+    (unchecked) must not change even for a slide flagged
+    non_standard_layout, only patch what's already there."""
+    client, _ = _client(tmp_path, monkeypatch)
+    deck = tmp_path / "d.pptx"
+    original_layout_name = new_deck().slide_layouts[1].name
+    _write_non_standard_layout_middle_slide_deck(deck)
+
+    with deck.open("rb") as f:
+        resp = client.post("/fix", files={"file": ("d.pptx", f, "application/octet-stream")})
+    assert resp.status_code == 200
+    assert "rebuilt" not in resp.text.lower()
+
+    m = re.search(r'/download/([a-f0-9]+)/fixed\.pptx', resp.text)
+    dl = client.get(m.group(0))
+
+    import io
+
+    from pptx import Presentation
+
+    prs = Presentation(io.BytesIO(dl.content))
+    assert prs.slides[1].slide_layout.name == original_layout_name  # untouched
+
+
+def test_fix_flow_rebuild_layouts_checkbox_rebuilds_non_standard_layout(tmp_path, monkeypatch):
+    client, _ = _client(tmp_path, monkeypatch)
+    deck = tmp_path / "d.pptx"
+    _write_non_standard_layout_middle_slide_deck(deck)
+
+    with deck.open("rb") as f:
+        resp = client.post(
+            "/fix", files={"file": ("d.pptx", f, "application/octet-stream")}, data={"rebuild_layouts": "1"},
+        )
+    assert resp.status_code == 200
+    assert "rebuilt 1 slide" in resp.text.lower()
+
+    m = re.search(r'/download/([a-f0-9]+)/fixed\.pptx', resp.text)
+    dl = client.get(m.group(0))
+
+    import io
+
+    from pptx import Presentation
+    from deckguard.slide_import import default_template_path
+
+    prs = Presentation(io.BytesIO(dl.content))
+    approved_layout_names = {
+        layout.name for master in Presentation(str(default_template_path())).slide_masters for layout in master.slide_layouts
+    }
+    assert prs.slides[1].slide_layout.name in approved_layout_names
+    assert prs.slides[1].shapes.title.text_frame.text == "Middle slide"  # content carried over verbatim
+
+
+def test_regenerate_preserves_the_rebuild_layouts_choice(tmp_path, monkeypatch):
+    """Regenerate only lets a human tweak color/font overrides, not
+    re-toggle the rebuild-layouts checkbox -- it must keep whatever was
+    chosen on the original /fix request, not silently revert to
+    "colors/fonts only" the moment someone regenerates."""
+    client, _ = _client(tmp_path, monkeypatch)
+    deck = tmp_path / "d.pptx"
+    _write_non_standard_layout_middle_slide_deck(deck)
+
+    with deck.open("rb") as f:
+        resp = client.post(
+            "/fix", files={"file": ("d.pptx", f, "application/octet-stream")}, data={"rebuild_layouts": "1"},
+        )
+    token = re.search(r'/regenerate/([a-f0-9]+)', resp.text).group(1)
+
+    resp2 = client.post(f"/regenerate/{token}", data={})
+    assert resp2.status_code == 200
+    assert "rebuilt 1 slide" in resp2.text.lower()
+
+
 def _panel_fill_hex(prs):
     for shape in prs.slides[1].shapes:
         if shape.name == "Panel":
