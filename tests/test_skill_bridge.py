@@ -9,13 +9,16 @@ import json
 
 import pytest
 
+from deckguard.compose import Outline, SlideSpec
 from deckguard.redesign import RedesignError
 from deckguard.skill_bridge import (
     _load_archetypes,
     _skill_dir,
     _validate_kone_spec,
     build_deck_via_skill,
+    build_deck_with_archetypes,
     call_claude_for_kone_spec,
+    select_archetype_overrides,
 )
 from tests.test_redesign import _FakeClient, _FakeResponse, _kone_slide, _kone_spec_json
 
@@ -179,3 +182,181 @@ def test_build_deck_via_skill_raises_a_clean_error_for_an_invalid_spec(tmp_path)
 
     with pytest.raises(RedesignError, match="doesn't fit the kone-deck-generator skill's archetypes"):
         build_deck_via_skill("A brief.", str(tmp_path / "out.pptx"), client=client)
+
+
+# --------------------------------------------------------------------------
+# select_archetype_overrides -- additive, fail-closed pass over an
+# already-planned compose.py outline
+# --------------------------------------------------------------------------
+
+
+def _outline_item(kind="content", **overrides):
+    item = {
+        "source_slide_index": 1, "kind": kind, "title": "A title", "subtitle": None,
+        "bullets": ["Point one"], "columns": [], "quote_text": None, "quote_author": None,
+        "quote_label": None, "stats": [], "milestones": [], "variant": None,
+    }
+    item.update(overrides)
+    return item
+
+
+@needs_skill
+def test_select_archetype_overrides_returns_a_valid_override():
+    items = [_outline_item(kind="stat", title="Resolution", bullets=[])]
+    response = json.dumps({"overrides": [
+        {"outline_index": 0, "archetype": "hero_stat", "eyebrow": "Resolution", "value": "91%",
+         "caption": "resolved", "support": "91% resolved"},
+    ]})
+    client = _FakeClient(_FakeResponse(response))
+
+    overrides = select_archetype_overrides(items, client=client)
+
+    assert overrides == {0: {
+        "archetype": "hero_stat", "eyebrow": "Resolution", "value": "91%",
+        "caption": "resolved", "support": "91% resolved",
+    }}
+
+
+def test_select_archetype_overrides_skips_the_call_entirely_with_no_candidate_kinds():
+    items = [_outline_item(kind="cover"), _outline_item(kind="quote"), _outline_item(kind="end")]
+    client = _FakeClient(_FakeResponse("{}"))
+
+    overrides = select_archetype_overrides(items, client=client)
+
+    assert overrides == {}
+    assert client.messages.calls == []
+
+
+@needs_skill
+def test_select_archetype_overrides_rejects_an_unknown_archetype_name():
+    items = [_outline_item(kind="content")]
+    response = json.dumps({"overrides": [{"outline_index": 0, "archetype": "not_a_real_archetype", "title": "x"}]})
+    client = _FakeClient(_FakeResponse(response))
+
+    overrides = select_archetype_overrides(items, client=client)
+
+    assert overrides == {}
+
+
+@needs_skill
+def test_select_archetype_overrides_rejects_an_out_of_range_outline_index():
+    items = [_outline_item(kind="content")]
+    response = json.dumps({"overrides": [{"outline_index": 5, "archetype": "hero_stat", "value": "x"}]})
+    client = _FakeClient(_FakeResponse(response))
+
+    overrides = select_archetype_overrides(items, client=client)
+
+    assert overrides == {}
+
+
+def test_select_archetype_overrides_fails_closed_on_malformed_json():
+    items = [_outline_item(kind="content")]
+    client = _FakeClient(_FakeResponse("not json"))
+
+    overrides = select_archetype_overrides(items, client=client)
+
+    assert overrides == {}
+
+
+def test_select_archetype_overrides_fails_closed_on_refusal():
+    items = [_outline_item(kind="content")]
+    client = _FakeClient(_FakeResponse('{"overrides": []}', stop_reason="refusal"))
+
+    overrides = select_archetype_overrides(items, client=client)
+
+    assert overrides == {}
+
+
+# --------------------------------------------------------------------------
+# build_deck_with_archetypes
+# --------------------------------------------------------------------------
+
+
+def test_build_deck_with_archetypes_delegates_to_compose_build_deck_with_no_overrides(tmp_path):
+    outline = Outline(slides=[SlideSpec(kind="content", title="Highlights", bullets=["Grew nicely"])])
+
+    from deckguard.compose import build_deck as compose_build_deck
+
+    expected_out = tmp_path / "expected.pptx"
+    expected = compose_build_deck(outline, str(expected_out))
+
+    got_out = tmp_path / "got.pptx"
+    got = build_deck_with_archetypes(outline, str(got_out), overrides={})
+
+    assert got.slide_count == expected.slide_count
+    assert got.layouts_used == expected.layouts_used
+
+
+@needs_skill
+def test_build_deck_with_archetypes_renders_an_override_and_skips_fix_deck_for_it(tmp_path):
+    outline = Outline(slides=[
+        SlideSpec(kind="content", title="Highlights", bullets=["Grew nicely"]),
+        SlideSpec(kind="stat", title="Resolution"),  # content irrelevant -- overridden below
+    ])
+    overrides = {1: {
+        "archetype": "hero_stat", "eyebrow": "Resolution", "value": "91.2%",
+        "caption": "of all requests cleared within the focus period",
+        "support": "674 of 739 tickets resolved.",
+    }}
+
+    out_path = tmp_path / "out.pptx"
+    result = build_deck_with_archetypes(outline, str(out_path), overrides=overrides)
+
+    assert result.slide_count == 2
+    assert result.layouts_used[1] == "hero_stat"
+
+    from pptx import Presentation
+    from pptx.dml.color import RGBColor
+
+    prs = Presentation(str(out_path))
+    archetype_slide = prs.slides[1]
+    texts = [
+        s.text_frame.text for s in archetype_slide.shapes
+        if getattr(s, "has_text_frame", False) and s.text_frame.text.strip()
+    ]
+    assert any("91.2%" in t for t in texts)
+
+    # The muted-grey caption/support text (#727272, kone_engine.GREY) is
+    # NOT in brand_rules.yaml's approved-colors list -- if fix_deck had
+    # run over this slide it would have flagged or remapped it. Confirm
+    # it survives untouched.
+    grey_runs = [
+        run for s in archetype_slide.shapes if getattr(s, "has_text_frame", False)
+        for p in s.text_frame.paragraphs for run in p.runs
+        if run.font.color.type is not None and str(run.font.color.rgb) == "727272"
+    ]
+    assert grey_runs, "expected at least one run still using kone_engine's own grey #727272"
+
+
+@needs_skill
+def test_build_deck_with_archetypes_preserves_slide_order_for_a_middle_override(tmp_path):
+    """The trickier reorder case: archetype slides are physically added
+    to the presentation LAST (after fix_deck runs over everything
+    else), so a middle-position override specifically exercises the
+    _sldIdLst reassembly -- not just "append one archetype slide at
+    the end", which wouldn't catch a reordering bug."""
+    outline = Outline(slides=[
+        SlideSpec(kind="content", title="First", bullets=["A"]),
+        SlideSpec(kind="stat", title="Middle (overridden)"),
+        SlideSpec(kind="content", title="Third", bullets=["C"]),
+    ])
+    overrides = {1: {
+        "archetype": "hero_stat", "eyebrow": "Middle", "value": "42%",
+        "caption": "in the middle", "support": "middle slide check",
+    }}
+
+    out_path = tmp_path / "out.pptx"
+    result = build_deck_with_archetypes(outline, str(out_path), overrides=overrides)
+
+    assert result.layouts_used == ["Title and content A", "hero_stat", "Title and content A"]
+
+    from pptx import Presentation
+
+    prs = Presentation(str(out_path))
+    titles = [
+        next(s.text_frame.text for s in slide.shapes if getattr(s, "has_text_frame", False) and s.text_frame.text.strip())
+        for slide in prs.slides
+    ]
+    assert titles[0] == "First"
+    assert "42%" in titles[1] or titles[1] == "MIDDLE"
+    assert titles[2] == "Third"

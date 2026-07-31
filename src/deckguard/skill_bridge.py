@@ -39,12 +39,30 @@ parses it here instead -- the same approach the skill's own (now
 retired) `kone_planner.call_claude` used before deckguard had any
 tighter integration at all.
 
-Deliberately NOT used for the other two `redesign_deck` starting
-points (an existing deck, with or without a brief): the skill's
-`build_deck` always starts fresh from its OWN bundled master file and
-has no notion of appending onto an incoming deck, so real extracted
-slide content stays on `compose.py`'s path, which already has that
-(`existing_deck_path` / `import_layouts`).
+For the other two `redesign_deck` starting points (an existing deck's
+real content, with or without a brief to fill gaps), the skill's own
+whole-deck `build_deck` still doesn't apply directly -- it always
+starts fresh from its OWN bundled master and has no notion of
+appending onto compose.py's outline-driven build. But the underlying
+per-slide primitive, `archetypes.render(slide, name, content)`, is
+just a renderer for one already-added slide -- not tied to building a
+whole deck from nothing -- so `select_archetype_overrides` +
+`build_deck_with_archetypes` below let an archetype coexist
+SLIDE-BY-SLIDE with compose.py's own org-template layouts for THOSE
+two starting points too: `call_claude_for_outline`'s already-planned
+outline (verbatim content, unchanged) is offered a second, additive,
+fail-closed pass asking whether any "content"/"stat"/"timeline" slide
+would read meaningfully better as one of the 23 archetypes than its
+assigned generic layout, and if so that one slide renders through the
+archetype engine while every other slide keeps using compose.py's
+`_select_layout`/`_populate` exactly as it does today. Archetype slides
+are rendered AFTER `fix_deck`'s theme/inherited-color pass runs over
+everything else, then spliced back into the outline's own order -- see
+`build_deck_with_archetypes`'s own docstring for why (their hardcoded
+role colors, e.g. `kone_engine.py`'s muted caption grey `#727272`,
+aren't all in `brand_rules.yaml`'s approved-colors list, so running
+`fix_deck` over them would flag genuinely-fine archetype styling as
+non-compliant).
 
 Where the skill is loaded from (`_skill_dir`, in order):
 1. `KONE_DECK_GENERATOR_DIR`, if set -- an explicit override, e.g. for
@@ -72,6 +90,8 @@ import os
 import sys
 from pathlib import Path
 from typing import Optional
+
+from pptx import Presentation
 
 import anthropic
 
@@ -366,3 +386,208 @@ def build_deck_via_skill(
     # forcing a fake Outline into being just to satisfy the type.
     redesign_result = RedesignResult(outline=None, skipped=[], usage=usage)
     return compose_result, redesign_result
+
+
+# --------------------------------------------------------------------------
+# Archetype coexistence for redesign_deck's other two starting points (an
+# existing deck's real content, with or without a brief to fill gaps): a
+# second, additive pass over an outline `call_claude_for_outline` already
+# planned onto compose.py's org-template layouts, offering an archetype
+# for any slide where one's shape is a clearly better fit. Deliberately
+# fail-closed throughout -- this is a quality enhancement on an already-
+# working plan, never a required step, so nothing in here may turn a
+# working redesign into a failed one.
+# --------------------------------------------------------------------------
+
+# Only these compose.py kinds have flexible-enough shape for an archetype
+# to plausibly present the SAME content better -- cover/agenda/section/
+# quote/statement/end already have one dedicated, well-fitted org-template
+# layout each, so there's nothing for a second opinion to improve there.
+_ARCHETYPE_CANDIDATE_KINDS = {"content", "stat", "timeline"}
+
+_ARCHETYPE_OVERRIDE_RULES = """\
+You are reviewing a deck outline that has already been planned onto generic org-template
+layouts. Your ONLY job: for any slide whose CONTENT would read meaningfully better on one
+of KONE's own slide archetypes below (a 2x2 matrix, an org chart, a lifecycle, a comparison
+table, an icon row, etc.) than its current generic layout, say so -- and place that SAME
+content, verbatim, into the archetype's slots (never invent new wording; only reorganize
+what's already there). Most slides are already well served by a generic layout and should
+NOT be overridden -- flag only a genuine, clearly-better fit, never for variety's own sake.
+
+Output ONLY a JSON object, no prose, no markdown fences, of this shape:
+{"overrides": [{"outline_index": <int>, "archetype": "<name>", ...that archetype's own content fields...}, ...]}
+Omit any slide you are not overriding -- an empty "overrides" list is a completely valid,
+expected answer when nothing here is a strong fit.
+"""
+
+
+def _build_archetype_override_messages(outline_items: list[dict], candidate_indices: list[int]) -> list:
+    candidates = [
+        {"outline_index": i, "kind": outline_items[i].get("kind"), "content": outline_items[i]}
+        for i in candidate_indices
+    ]
+    content = (
+        "Already-planned slides to consider (their own outline_index, kind, and full "
+        f"already-decided content):\n\n{json.dumps(candidates, indent=2, ensure_ascii=False)}"
+    )
+    return [{"role": "user", "content": content}]
+
+
+def select_archetype_overrides(
+    outline_items: list[dict],
+    model: str = DEFAULT_MODEL,
+    effort: str = "high",
+    api_key: Optional[str] = None,
+    client=None,
+) -> dict:
+    """Returns `{outline_index: {"archetype": <name>, ...content...}}`
+    for just the slides worth overriding. ANY failure here -- the skill
+    not being installed, an API error, malformed JSON, an invalid
+    archetype name -- just means no overrides, never a raised error:
+    see this module's own docstring for why that's the right contract
+    for a pass that's purely additive on top of an already-good plan.
+    """
+    candidate_indices = [
+        i for i, item in enumerate(outline_items)
+        if item.get("kind") in _ARCHETYPE_CANDIDATE_KINDS
+    ]
+    if not candidate_indices:
+        return {}
+
+    try:
+        if client is None:
+            key = api_key or os.environ.get("ANTHROPIC_API_KEY")
+            if not key:
+                return {}
+            local_client = anthropic.Anthropic(api_key=key)
+        else:
+            local_client = client
+
+        system = _ARCHETYPE_OVERRIDE_RULES + "\n\nAvailable archetypes:\n\n" + _kone_archetype_guide()
+        messages = _build_archetype_override_messages(outline_items, candidate_indices)
+        response = _stream_final_message(
+            local_client, model=model, max_tokens=16000, thinking={"type": "adaptive"},
+            system=system, messages=messages,
+        )
+        if response.stop_reason == "refusal":
+            return {}
+        text = next((b.text for b in response.content if b.type == "text"), None)
+        if not text:
+            return {}
+        text = text.strip()
+        if text.startswith("```"):
+            text = text.strip("`")
+            text = text[text.find("\n") + 1:] if "\n" in text else text
+        raw_overrides = json.loads(text).get("overrides") or []
+    except Exception:
+        return {}
+
+    try:
+        known = set(_load_archetypes().ARCHETYPES.keys())
+    except RedesignError:
+        return {}
+
+    candidate_set = set(candidate_indices)
+    overrides: dict = {}
+    for item in raw_overrides:
+        if not isinstance(item, dict):
+            continue
+        idx = item.get("outline_index")
+        archetype = item.get("archetype")
+        if idx not in candidate_set or archetype not in known:
+            continue
+        content = {k: v for k, v in item.items() if k not in ("outline_index", "archetype")}
+        overrides[idx] = {"archetype": archetype, **content}
+    return overrides
+
+
+def build_deck_with_archetypes(
+    outline, out_path, template_path=None, rules_config: Optional[dict] = None,
+    overrides: Optional[dict] = None,
+) -> ComposeResult:
+    """Same contract and (when `overrides` is empty) same behavior as
+    `compose.build_deck`'s fresh-start path -- `redesign_deck` never
+    passes `existing_deck_path`, so that's the only branch this needs
+    to cover. When `overrides` names slides (from
+    `select_archetype_overrides`), those render through the archetype
+    engine instead of an org-template layout; every other slide still
+    goes through compose.py's own `_select_layout`/`_populate`,
+    unchanged.
+
+    Ordering matters here: `fix_deck` runs FIRST, over only the
+    org-template slides, exactly as `compose.build_deck` already does --
+    archetype slides don't exist in the file yet at that point, so
+    there's nothing for it to (wrongly) "fix" on them. They're rendered
+    and spliced into the deck's slide order AFTER, via a raw
+    `_sldIdLst` reorder (the same technique the skill's own
+    `kone_deck_creator.build_deck`/`archetypes.build_gallery` already
+    use to reassemble intro/body/outro). This is deliberate: the
+    archetype engine's hardcoded role colors (e.g. `kone_engine.py`'s
+    muted caption grey `#727272`) aren't all in `brand_rules.yaml`'s
+    approved-colors list -- they're genuinely on-brand (KONE's own
+    `--ink-muted` token), just not ones this project's rules currently
+    list, so a `fix_deck` pass over them would flag correct styling as
+    a violation instead of leaving it alone.
+    """
+    overrides = overrides or {}
+    if not overrides:
+        from deckguard.compose import build_deck as compose_build_deck
+
+        return compose_build_deck(outline, out_path, template_path=template_path, rules_config=rules_config)
+
+    from deckguard.compose import _populate, _select_layout
+    from deckguard.config import default_config_path, load_config
+    from deckguard.fixer import fix_deck
+    from deckguard.slide_import import _delete_slide
+    from deckguard.slide_import import default_template_path as _default_template_path
+
+    creator = _load_creator()
+    archetypes = _load_archetypes()
+
+    template_path = Path(template_path) if template_path else _default_template_path()
+    template_prs = Presentation(str(template_path))
+    layouts_by_name = {layout.name: layout for master in template_prs.slide_masters for layout in master.slide_layouts}
+    layout_profile_cache: dict = {}
+    config = rules_config if rules_config is not None else load_config(default_config_path())
+
+    prs = Presentation(str(template_path))
+    for i in range(len(prs.slides) - 1, -1, -1):
+        _delete_slide(prs, i)
+    own_layouts_by_name = {layout.name: layout for master in prs.slide_masters for layout in master.slide_layouts}
+    lst = prs.slides._sldIdLst
+
+    layout_by_index: dict[int, str] = {}
+    sldid_by_index: dict[int, object] = {}
+
+    non_archetype = [(i, spec) for i, spec in enumerate(outline.slides) if i not in overrides]
+    for i, spec in non_archetype:
+        layout_name = _select_layout(spec, layouts_by_name, layout_profile_cache)
+        new_slide = prs.slides.add_slide(own_layouts_by_name[layout_name])
+        _populate(new_slide, own_layouts_by_name[layout_name], spec)
+        layout_by_index[i] = layout_name
+        sldid_by_index[i] = list(lst)[-1]
+
+    # Applies every inherited-color/theme fix in memory but doesn't save --
+    # archetype slides are added below, after this, then the whole deck is
+    # saved once at the end.
+    fix_report = fix_deck(prs, config, source_path=str(out_path), output_path=None, dry_run=True)
+    manual_review = fix_report.manual_review
+
+    blank_layout = next(l for l in prs.slide_layouts if l.name.strip().lower() == "blank")
+    for i, override in overrides.items():
+        archetype_name = override["archetype"]
+        content = {k: v for k, v in override.items() if k != "archetype"}
+        new_slide = prs.slides.add_slide(blank_layout)
+        archetypes.render(new_slide, archetype_name, content)
+        layout_by_index[i] = archetype_name
+        sldid_by_index[i] = list(lst)[-1]
+
+    for el in list(lst):
+        lst.remove(el)
+    for i in range(len(outline.slides)):
+        lst.append(sldid_by_index[i])
+
+    prs.save(out_path)
+
+    layouts_used = [layout_by_index[i] for i in range(len(outline.slides))]
+    return ComposeResult(slide_count=len(outline.slides), layouts_used=layouts_used, manual_review=manual_review)

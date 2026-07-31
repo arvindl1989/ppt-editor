@@ -937,9 +937,24 @@ def redesign_deck(
         api_key=api_key,
         client=client,
     )
+    # A second, additive, fail-closed pass: offers an archetype for any
+    # "content"/"stat"/"timeline" slide whose shape it fits meaningfully
+    # better than its assigned org-template layout -- see
+    # skill_bridge.py's own docstring for the coexistence design and why
+    # this can never turn a working redesign into a failed one. Run
+    # BEFORE _attach_source_images, on slide dicts with no "images" key
+    # yet, both because the archetype engine has no adapter for a
+    # source deck's own image bytes yet (a known, documented gap) and
+    # because raw image bytes aren't JSON-serializable for this call.
+    from deckguard.skill_bridge import build_deck_with_archetypes, select_archetype_overrides
+
+    overrides = select_archetype_overrides(raw_slides, model=model, effort=effort, api_key=api_key, client=client)
+
     raw_slides = _attach_source_images(raw_slides, eligible)
     outline = outline_from_list(_strip_ai_only_fields(raw_slides))
 
-    compose_result = build_deck(outline, out_path, template_path=template_path, rules_config=rules_config)
+    compose_result = build_deck_with_archetypes(
+        outline, out_path, template_path=template_path, rules_config=rules_config, overrides=overrides,
+    )
     redesign_result = RedesignResult(outline=outline, skipped=skipped, usage=usage)
     return compose_result, redesign_result

@@ -96,6 +96,27 @@ class _FakeClient:
         self.messages = _FakeMessages(response)
 
 
+class _SequencedFakeMessages:
+    """Returns a different canned response per call, in order -- for
+    tests exercising redesign_deck's two model calls (the outline plan,
+    then the archetype-override pass), which a single-response
+    _FakeClient can't distinguish between. Repeats the last response if
+    called more times than provided."""
+    def __init__(self, responses: list):
+        self._responses = responses
+        self.calls = []
+
+    def stream(self, **kwargs):
+        self.calls.append(kwargs)
+        response = self._responses[min(len(self.calls) - 1, len(self._responses) - 1)]
+        return _FakeStreamCM(response)
+
+
+class _SequencedFakeClient:
+    def __init__(self, responses: list):
+        self.messages = _SequencedFakeMessages(responses)
+
+
 def _fake_api_status_error(status_code: int, message: str) -> anthropic.APIStatusError:
     body = {"type": "error", "error": {"type": "overloaded_error", "message": message}}
     resp = httpx.Response(
@@ -385,6 +406,90 @@ def test_redesign_deck_builds_a_valid_composed_deck(tmp_path):
 
     out_prs = Presentation(str(out_path))
     assert len(out_prs.slides) == 2
+
+
+@pytest.mark.skipif(not _kone_skill_available(), reason="kone-deck-generator skill not installed")
+def test_redesign_deck_applies_an_archetype_override_for_a_strong_fit_slide(tmp_path):
+    """The archetype coexistence pass: a second model call gets a shot
+    at any content/stat/timeline slide, and when it names a real
+    archetype that slide renders through kone_engine instead of an
+    org-template layout -- verified here both via the reported
+    layouts_used and by checking the archetype's own content actually
+    landed in the output file."""
+    prs = new_deck()
+    cover = add_slide(prs, layout_idx=0)
+    title_run(cover).text = "Annual Review"
+    content = add_slide(prs)
+    title_run(content).text = "Resolution rate"
+    body_run(content).text = "91.2% of requests resolved"
+    src_path = tmp_path / "source.pptx"
+    prs.save(str(src_path))
+
+    outline_response = _outline_json(
+        _slide_item(1, kind="cover", title="Annual Review", subtitle="A great year", bullets=[]),
+        _slide_item(2, kind="content", title="Resolution rate", bullets=["91.2% of requests resolved"]),
+    )
+    override_response = json.dumps({"overrides": [
+        {"outline_index": 1, "archetype": "hero_stat", "eyebrow": "Resolution rate", "value": "91.2%",
+         "caption": "of all requests cleared within the focus period", "support": "91.2% of requests resolved"},
+    ]})
+    client = _SequencedFakeClient([_FakeResponse(outline_response), _FakeResponse(override_response)])
+
+    out_path = tmp_path / "redesigned.pptx"
+    compose_result, _redesign_result = redesign_deck(str(src_path), str(out_path), client=client)
+
+    assert compose_result.slide_count == 2
+    assert compose_result.layouts_used == ["Cover B", "hero_stat"]
+    assert len(client.messages.calls) == 2
+
+    out_prs = Presentation(str(out_path))
+    assert len(out_prs.slides) == 2
+    body_texts = [
+        shape.text_frame.text for shape in out_prs.slides[1].shapes
+        if getattr(shape, "has_text_frame", False) and shape.text_frame.text.strip()
+    ]
+    assert any("91.2%" in t for t in body_texts)
+
+
+@pytest.mark.skipif(not _kone_skill_available(), reason="kone-deck-generator skill not installed")
+def test_redesign_deck_ignores_an_archetype_override_call_that_errors(tmp_path):
+    """Fail-closed: if the second (archetype-override) call blows up,
+    the redesign must still succeed on the outline plan alone -- this
+    pass is a pure quality enhancement, never a hard requirement."""
+    prs = new_deck()
+    content = add_slide(prs)
+    title_run(content).text = "Highlights"
+    body_run(content).text = "Grew nicely"
+    src_path = tmp_path / "source.pptx"
+    prs.save(str(src_path))
+
+    outline_response = _outline_json(
+        _slide_item(1, kind="content", title="Highlights", bullets=["Grew nicely"]),
+    )
+
+    class _FailOnSecondCallMessages:
+        def __init__(self, first_response):
+            self._first_response = first_response
+            self.calls = []
+
+        def stream(self, **kwargs):
+            self.calls.append(kwargs)
+            if len(self.calls) == 1:
+                return _FakeStreamCM(self._first_response)
+            raise RuntimeError("simulated transient failure")
+
+    class _FailOnSecondCallClient:
+        def __init__(self, first_response):
+            self.messages = _FailOnSecondCallMessages(first_response)
+
+    client = _FailOnSecondCallClient(_FakeResponse(outline_response))
+
+    out_path = tmp_path / "redesigned.pptx"
+    compose_result, _redesign_result = redesign_deck(str(src_path), str(out_path), client=client)
+
+    assert compose_result.slide_count == 1
+    assert compose_result.layouts_used == ["Title and content A"]
+    assert len(client.messages.calls) == 2  # the override call was attempted, and its failure was swallowed
 
 
 def test_redesign_deck_allows_one_source_slide_to_split_across_multiple_output_slides(tmp_path):
