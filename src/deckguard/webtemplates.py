@@ -265,6 +265,15 @@ you use AI rewrite or review, which need an API key set by the operator.</footer
   radios.forEach(function (r) {{
     r.addEventListener('change', function () {{ if (this.checked) show(this.value); }});
   }});
+  // A link like "/#redesign" (e.g. from a result page's cross-sell
+  // callout) jumps straight to that method's tab instead of always
+  // landing on the default -- falls back to whatever's already
+  // checked (or "fix") when the hash doesn't match a known method.
+  var wanted = (location.hash || '').replace('#', '');
+  var target = document.getElementById('method-' + wanted);
+  if (target) {{
+    target.checked = true;
+  }}
   var checked = document.querySelector('#unified-tool input[name="method"]:checked');
   show(checked ? checked.value : 'fix');
 }})();
@@ -697,6 +706,28 @@ def _status_pill(critical: int, major: int, minor: int) -> str:
     return '<span class="pill pill-ok">All clear</span>'
 
 
+def _layout_rebuild_callout(violations: list[dict]) -> str:
+    """Fix corrects colors/fonts/effects on a slide's EXISTING layout --
+    it can never rebuild the layout itself, so a deck with slides on a
+    non-approved layout will still look structurally off no matter how
+    many times Fix runs. `non_standard_layout` (never auto-fixable) is
+    the precise signal for exactly that case -- surfaced here as a
+    pointer to Brand rebuild (deterministic, no AI) instead of leaving
+    someone to conclude Fix just doesn't work well."""
+    count = sum(1 for v in violations if v.get("rule") == "non_standard_layout")
+    if not count:
+        return ""
+    noun = "slide" if count == 1 else "slides"
+    verb = "uses" if count == 1 else "use"
+    return (
+        f'<div class="note">{count} {noun} {verb} a layout outside the approved template -- '
+        "Fix corrects colors/fonts on a slide, but can't rebuild its layout. "
+        '<a href="/#redesign">Try Brand rebuild</a> instead for a cleaner result: it rebuilds every eligible '
+        "slide onto an approved layout, carrying your content over verbatim -- still deterministic, no AI, "
+        "no API key needed.</div>"
+    )
+
+
 def _violation_rows(violations: list[dict]) -> str:
     if not violations:
         return '<tr><td colspan="6" class="empty">No violations found.</td></tr>'
@@ -730,8 +761,10 @@ def audit_result_page(deck_name: str, summary: dict, violations: list[dict], dow
         f'<a class="dl secondary" href="/">Audit another deck</a>'
     )
     pill = _status_pill(summary["critical"], summary["major"], summary["minor"])
+    callout = _layout_rebuild_callout(violations)
     body = f"""<div class="card"><div class="result-head"><h2 style="font-size:1.05rem;">Audit — {_esc(deck_name)}</h2>{pill}</div>
 {stats}
+{callout}
 <div class="table-wrap"><table>
 <thead><tr><th>Slide</th><th>Severity</th><th>Rule</th><th>Shape</th><th>Message</th><th>Fix?</th></tr></thead>
 <tbody>{_violation_rows(violations)}</tbody>
@@ -874,11 +907,13 @@ def fix_result_page(
         )
     by_sev = fix_summary["manual_review_by_severity"]
     pill = _status_pill(by_sev["critical"], by_sev["major"], by_sev["minor"])
+    callout = _layout_rebuild_callout(manual_review)
     body = f"""<div class="card"><div class="result-head"><h2 style="font-size:1.05rem;">Fixed — {_esc(deck_name)}</h2>{pill}</div>
 {stats}
 {dl}
 {note_html}
 </div>
+{callout}
 {override_section}
 <div class="card"><h3 style="margin-top:0;font-size:0.95rem;">Changes applied</h3>
 <div class="table-wrap"><table>
