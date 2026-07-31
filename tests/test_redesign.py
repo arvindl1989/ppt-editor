@@ -883,6 +883,94 @@ def test_redesign_deck_brand_review_rebuilds_a_divider_slide_with_ai_suggested_t
     assert out_prs.slides[0].shapes.title.text_frame.text == "Appendix"
 
 
+@pytest.mark.skipif(not _kone_skill_available(), reason="kone-deck-generator skill not installed")
+def test_redesign_deck_brand_review_applies_an_archetype_override_to_an_accepted_slide(tmp_path):
+    """mode='brand', review=True: an already-accepted, ordinary-content
+    slide can get swapped for a KONE archetype -- the same coexistence
+    idea as redesign_deck's AI-rewrite path, reused here behind the
+    same opt-in --review flag brand mode already has, so brand mode's
+    own "fully deterministic by default" identity stays intact."""
+    prs = new_deck()
+    cover = add_slide(prs)
+    title_run(cover).text = "Annual Review"
+    content = add_slide(prs)
+    title_run(content).text = "Resolution rate"
+    body_run(content).text = "91.2% of requests resolved"
+    end = add_slide(prs)
+    title_run(end).text = "Thank you"
+    src_path = tmp_path / "source.pptx"
+    prs.save(str(src_path))
+
+    # No slide here is ineligible, so call_claude_for_brand_review is
+    # never invoked -- this is the ONLY model call in this run.
+    override_response = json.dumps({"overrides": [
+        {"outline_index": 2, "archetype": "hero_stat", "eyebrow": "Resolution rate", "value": "91.2%",
+         "caption": "of all requests cleared within the focus period", "support": "91.2% of requests resolved"},
+    ]})
+    client = _FakeClient(_FakeResponse(override_response))
+
+    out_path = tmp_path / "reviewed.pptx"
+    compose_result, _redesign_result = redesign_deck(
+        str(src_path), str(out_path), mode="brand", review=True, client=client
+    )
+
+    assert "hero_stat" in compose_result.layouts_used
+    assert len(client.messages.calls) == 1
+
+    out_prs = Presentation(str(out_path))
+    assert len(out_prs.slides) == 3
+    body_texts = [
+        shape.text_frame.text for shape in out_prs.slides[1].shapes
+        if getattr(shape, "has_text_frame", False) and shape.text_frame.text.strip()
+    ]
+    assert any("91.2%" in t for t in body_texts)
+    # The cover/end positions are never offered up for an archetype
+    # override (see compose.py's own "don't second-guess" rule for
+    # cover/end/agenda/etc.) -- confirm they kept their swapped layouts.
+    assert compose_result.layouts_used[0] == "Cover B"
+    assert compose_result.layouts_used[2] == "Outro"
+
+
+def test_redesign_deck_brand_review_ignores_an_archetype_override_call_that_errors(tmp_path):
+    """Fail-closed here too: a broken archetype-override call must never
+    break a brand-mode --review run that otherwise has nothing else to
+    do (no ineligible slides, so this really is the only call made)."""
+    prs = new_deck()
+    cover = add_slide(prs)
+    title_run(cover).text = "Annual Review"
+    content = add_slide(prs)
+    title_run(content).text = "Highlights"
+    body_run(content).text = "Grew nicely"
+    end = add_slide(prs)
+    title_run(end).text = "Thank you"
+    src_path = tmp_path / "source.pptx"
+    prs.save(str(src_path))
+
+    class _RaisingMessagesForThisTest:
+        def __init__(self):
+            self.calls = []
+
+        def stream(self, **kwargs):
+            self.calls.append(kwargs)
+            raise RuntimeError("simulated transient failure")
+
+    class _RaisingClientForThisTest:
+        def __init__(self):
+            self.messages = _RaisingMessagesForThisTest()
+
+    client = _RaisingClientForThisTest()
+
+    out_path = tmp_path / "reviewed.pptx"
+    compose_result, _redesign_result = redesign_deck(
+        str(src_path), str(out_path), mode="brand", review=True, client=client
+    )
+
+    assert compose_result.slide_count == 3
+    assert len(client.messages.calls) == 1  # the call was attempted, and its failure was swallowed
+    out_prs = Presentation(str(out_path))
+    assert len(out_prs.slides) == 3
+
+
 def test_redesign_deck_brand_review_leaves_a_non_divider_slide_skipped(tmp_path):
     """A slide with real substantial content, still ineligible for
     verbatim carryover -- the model correctly says it's not a divider,

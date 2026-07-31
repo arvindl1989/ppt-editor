@@ -15,10 +15,12 @@ from deckguard.skill_bridge import (
     _load_archetypes,
     _skill_dir,
     _validate_kone_spec,
+    apply_archetype_overrides_to_deck,
     build_deck_via_skill,
     build_deck_with_archetypes,
     call_claude_for_kone_spec,
     select_archetype_overrides,
+    select_archetype_overrides_for_rebrand,
 )
 from tests.test_redesign import _FakeClient, _FakeResponse, _kone_slide, _kone_spec_json
 
@@ -360,3 +362,77 @@ def test_build_deck_with_archetypes_preserves_slide_order_for_a_middle_override(
     assert titles[0] == "First"
     assert "42%" in titles[1] or titles[1] == "MIDDLE"
     assert titles[2] == "Third"
+
+
+# --------------------------------------------------------------------------
+# apply_rebrand's (mode='brand', review=True only) archetype coexistence:
+# select_archetype_overrides_for_rebrand + apply_archetype_overrides_to_deck
+# --------------------------------------------------------------------------
+
+
+def _build_simple_deck(out_path, n=3):
+    from deckguard.compose import build_deck as compose_build_deck
+
+    outline = Outline(slides=[SlideSpec(kind="content", title=f"Slide {i}", bullets=[f"Point {i}"]) for i in range(1, n + 1)])
+    compose_build_deck(outline, str(out_path))
+
+
+@needs_skill
+def test_select_archetype_overrides_for_rebrand_returns_a_valid_override():
+    from deckguard.retemplate import SlideProfile
+
+    profiles = {2: SlideProfile(title="Resolution", text_blocks=[[(0, "91% resolved")]], images=[], eligible=True)}
+    response = json.dumps({"overrides": [
+        {"outline_index": 2, "archetype": "hero_stat", "eyebrow": "Resolution", "value": "91%",
+         "caption": "c", "support": "s"},
+    ]})
+    client = _FakeClient(_FakeResponse(response))
+
+    overrides = select_archetype_overrides_for_rebrand(profiles, client=client)
+
+    assert overrides == {2: {
+        "archetype": "hero_stat", "eyebrow": "Resolution", "value": "91%", "caption": "c", "support": "s",
+    }}
+
+
+def test_select_archetype_overrides_for_rebrand_skips_the_call_with_no_candidates():
+    client = _FakeClient(_FakeResponse("{}"))
+
+    overrides = select_archetype_overrides_for_rebrand({}, client=client)
+
+    assert overrides == {}
+    assert client.messages.calls == []
+
+
+@needs_skill
+def test_apply_archetype_overrides_to_deck_swaps_a_slide_in_place(tmp_path):
+    deck_path = tmp_path / "deck.pptx"
+    _build_simple_deck(deck_path, n=3)
+
+    overrides = {2: {
+        "archetype": "hero_stat", "eyebrow": "Middle", "value": "42%", "caption": "c", "support": "s",
+    }}
+    layout_by_index = apply_archetype_overrides_to_deck(str(deck_path), overrides)
+
+    assert layout_by_index == {2: "hero_stat"}
+
+    from pptx import Presentation
+
+    prs = Presentation(str(deck_path))
+    assert len(prs.slides) == 3
+    assert prs.slides[0].shapes.title.text_frame.text == "Slide 1"
+    assert prs.slides[2].shapes.title.text_frame.text == "Slide 3"
+    texts = [
+        s.text_frame.text for s in prs.slides[1].shapes
+        if getattr(s, "has_text_frame", False) and s.text_frame.text.strip()
+    ]
+    assert any("42%" in t for t in texts)
+
+
+def test_apply_archetype_overrides_to_deck_is_a_noop_with_no_overrides(tmp_path):
+    deck_path = tmp_path / "deck.pptx"
+    _build_simple_deck(deck_path, n=1)
+
+    result = apply_archetype_overrides_to_deck(str(deck_path), {})
+
+    assert result == {}

@@ -421,16 +421,76 @@ expected answer when nothing here is a strong fit.
 """
 
 
-def _build_archetype_override_messages(outline_items: list[dict], candidate_indices: list[int]) -> list:
-    candidates = [
-        {"outline_index": i, "kind": outline_items[i].get("kind"), "content": outline_items[i]}
-        for i in candidate_indices
-    ]
-    content = (
-        "Already-planned slides to consider (their own outline_index, kind, and full "
-        f"already-decided content):\n\n{json.dumps(candidates, indent=2, ensure_ascii=False)}"
-    )
-    return [{"role": "user", "content": content}]
+def _run_archetype_override_call(
+    candidates: list[dict], model: str, effort: str, api_key: Optional[str], client,
+) -> list:
+    """Shared plumbing for both override-selection entry points below:
+    given already-prepared candidate dicts (each carrying its own
+    caller-defined `outline_index` plus whatever verbatim content
+    fields), calls the model and returns the raw, unvalidated
+    "overrides" list from its response -- or `[]` on ANY failure (the
+    skill not installed, an API error, a refusal, malformed JSON).
+    del `effort`: accepted for interface parity, unused -- see
+    `call_claude_for_kone_spec`'s own docstring for why (no
+    `output_config` on this call).
+    """
+    del effort
+    if not candidates:
+        return []
+    try:
+        if client is None:
+            key = api_key or os.environ.get("ANTHROPIC_API_KEY")
+            if not key:
+                return []
+            local_client = anthropic.Anthropic(api_key=key)
+        else:
+            local_client = client
+
+        system = _ARCHETYPE_OVERRIDE_RULES + "\n\nAvailable archetypes:\n\n" + _kone_archetype_guide()
+        content = (
+            "Already-planned slides to consider (their own outline_index and full "
+            f"already-decided content):\n\n{json.dumps(candidates, indent=2, ensure_ascii=False)}"
+        )
+        messages = [{"role": "user", "content": content}]
+        response = _stream_final_message(
+            local_client, model=model, max_tokens=16000, thinking={"type": "adaptive"},
+            system=system, messages=messages,
+        )
+        if response.stop_reason == "refusal":
+            return []
+        text = next((b.text for b in response.content if b.type == "text"), None)
+        if not text:
+            return []
+        text = text.strip()
+        if text.startswith("```"):
+            text = text.strip("`")
+            text = text[text.find("\n") + 1:] if "\n" in text else text
+        return json.loads(text).get("overrides") or []
+    except Exception:
+        return []
+
+
+def _validate_overrides(raw_overrides: list, candidate_indices: set) -> dict:
+    """Keeps only entries naming a real archetype and an index the
+    caller actually offered up -- anything else (a hallucinated
+    archetype name, an index outside the candidate set) is silently
+    dropped, not raised; see this module's fail-closed contract."""
+    try:
+        known = set(_load_archetypes().ARCHETYPES.keys())
+    except RedesignError:
+        return {}
+
+    overrides: dict = {}
+    for item in raw_overrides:
+        if not isinstance(item, dict):
+            continue
+        idx = item.get("outline_index")
+        archetype = item.get("archetype")
+        if idx not in candidate_indices or archetype not in known:
+            continue
+        content = {k: v for k, v in item.items() if k not in ("outline_index", "archetype")}
+        overrides[idx] = {"archetype": archetype, **content}
+    return overrides
 
 
 def select_archetype_overrides(
@@ -440,65 +500,111 @@ def select_archetype_overrides(
     api_key: Optional[str] = None,
     client=None,
 ) -> dict:
-    """Returns `{outline_index: {"archetype": <name>, ...content...}}`
-    for just the slides worth overriding. ANY failure here -- the skill
-    not being installed, an API error, malformed JSON, an invalid
-    archetype name -- just means no overrides, never a raised error:
-    see this module's own docstring for why that's the right contract
-    for a pass that's purely additive on top of an already-good plan.
+    """For `redesign_deck`'s real-content path: `outline_items` is
+    `call_claude_for_outline`'s own already-planned compose.py outline
+    (list of dicts with a `kind` key). Returns
+    `{outline_index: {"archetype": <name>, ...content...}}` for just
+    the slides worth overriding. ANY failure here -- the skill not
+    installed, an API error, malformed JSON, an invalid archetype name
+    -- just means no overrides, never a raised error: see this module's
+    own docstring for why that's the right contract for a pass that's
+    purely additive on top of an already-good plan.
     """
     candidate_indices = [
         i for i, item in enumerate(outline_items)
         if item.get("kind") in _ARCHETYPE_CANDIDATE_KINDS
     ]
-    if not candidate_indices:
+    candidates = [
+        {"outline_index": i, "kind": outline_items[i].get("kind"), "content": outline_items[i]}
+        for i in candidate_indices
+    ]
+    raw_overrides = _run_archetype_override_call(candidates, model, effort, api_key, client)
+    return _validate_overrides(raw_overrides, set(candidate_indices))
+
+
+def select_archetype_overrides_for_rebrand(
+    slide_profiles_by_index: dict,
+    model: str = DEFAULT_MODEL,
+    effort: str = "high",
+    api_key: Optional[str] = None,
+    client=None,
+) -> dict:
+    """For `apply_rebrand`'s (mode='brand', --review only) path:
+    `slide_profiles_by_index` is `{1-based slide index: SlideProfile}`
+    for slides `apply_rebrand` already accepted and rebuilt onto an
+    ordinary org-template layout (cover/end swap positions and
+    reference-layout carryovers excluded by the caller -- see
+    `_rebrand_deck`). Their title/text_blocks/images should be
+    re-extracted from the FINISHED, already-brand-fixed output deck, so
+    this sees exactly the verbatim content a human reviewing the result
+    would see. Same `{outline_index: {"archetype": ..., ...}}` return
+    shape and fail-closed contract as `select_archetype_overrides`.
+    """
+    candidates = []
+    for idx, profile in slide_profiles_by_index.items():
+        candidates.append({
+            "outline_index": idx,
+            "title": profile.title,
+            "text_blocks": [[text for _level, text in block] for block in profile.text_blocks],
+            "image_count": len(profile.images),
+        })
+    raw_overrides = _run_archetype_override_call(candidates, model, effort, api_key, client)
+    return _validate_overrides(raw_overrides, set(slide_profiles_by_index.keys()))
+
+
+def apply_archetype_overrides_to_deck(deck_path, overrides: dict) -> dict:
+    """For `apply_rebrand`'s (mode='brand', --review only) path: swaps
+    each slide named in `overrides` (`{1-based slide index:
+    {"archetype": <name>, ...content...}}`) for an archetype-rendered
+    one, IN PLACE at that same position, in the already-saved deck at
+    `deck_path` (overwritten with the result). Every other slide is
+    untouched.
+
+    Mirrors `retemplate._rebuild_accepted_slides`'s own two-phase
+    add-then-move-then-delete technique (by OPC partname, not raw list
+    index, so multiple simultaneous swaps can't collide as earlier ones
+    shift slide positions underneath later ones) rather than modifying
+    that function directly -- this operates on an ALREADY-COMPLETE,
+    already-brand-fixed deck as an isolated final step, so there's no
+    need to thread a second rendering engine through
+    `_rebuild_accepted_slides`'s own delicate bookkeeping.
+
+    Returns `{slide index: archetype name}` for what was actually
+    swapped, so the caller can fold it into its own layout-used
+    reporting.
+    """
+    if not overrides:
         return {}
 
-    try:
-        if client is None:
-            key = api_key or os.environ.get("ANTHROPIC_API_KEY")
-            if not key:
-                return {}
-            local_client = anthropic.Anthropic(api_key=key)
-        else:
-            local_client = client
+    from deckguard.slide_import import _delete_slide, _move_slide
 
-        system = _ARCHETYPE_OVERRIDE_RULES + "\n\nAvailable archetypes:\n\n" + _kone_archetype_guide()
-        messages = _build_archetype_override_messages(outline_items, candidate_indices)
-        response = _stream_final_message(
-            local_client, model=model, max_tokens=16000, thinking={"type": "adaptive"},
-            system=system, messages=messages,
-        )
-        if response.stop_reason == "refusal":
-            return {}
-        text = next((b.text for b in response.content if b.type == "text"), None)
-        if not text:
-            return {}
-        text = text.strip()
-        if text.startswith("```"):
-            text = text.strip("`")
-            text = text[text.find("\n") + 1:] if "\n" in text else text
-        raw_overrides = json.loads(text).get("overrides") or []
-    except Exception:
-        return {}
+    archetypes = _load_archetypes()
 
-    try:
-        known = set(_load_archetypes().ARCHETYPES.keys())
-    except RedesignError:
-        return {}
+    prs = Presentation(str(deck_path))
+    blank_layout = next(l for l in prs.slide_layouts if l.name.strip().lower() == "blank")
+    original_partnames = [str(s.part.partname).lstrip("/") for s in prs.slides]
 
-    candidate_set = set(candidate_indices)
-    overrides: dict = {}
-    for item in raw_overrides:
-        if not isinstance(item, dict):
-            continue
-        idx = item.get("outline_index")
-        archetype = item.get("archetype")
-        if idx not in candidate_set or archetype not in known:
-            continue
-        content = {k: v for k, v in item.items() if k not in ("outline_index", "archetype")}
-        overrides[idx] = {"archetype": archetype, **content}
-    return overrides
+    new_partname_by_old: dict[str, str] = {}
+    layout_by_index: dict = {}
+    for idx, override in overrides.items():
+        old_partname = original_partnames[idx - 1]
+        archetype_name = override["archetype"]
+        content = {k: v for k, v in override.items() if k != "archetype"}
+        new_slide = prs.slides.add_slide(blank_layout)
+        archetypes.render(new_slide, archetype_name, content)
+        new_partname_by_old[old_partname] = str(new_slide.part.partname).lstrip("/")
+        layout_by_index[idx] = archetype_name
+
+    for idx in overrides:
+        old_partname = original_partnames[idx - 1]
+        new_partname = new_partname_by_old[old_partname]
+        old_pos = next(i for i, s in enumerate(prs.slides) if str(s.part.partname).lstrip("/") == old_partname)
+        new_pos = next(i for i, s in enumerate(prs.slides) if str(s.part.partname).lstrip("/") == new_partname)
+        _move_slide(prs, new_pos, old_pos)
+        _delete_slide(prs, old_pos + 1)
+
+    prs.save(deck_path)
+    return layout_by_index
 
 
 def build_deck_with_archetypes(

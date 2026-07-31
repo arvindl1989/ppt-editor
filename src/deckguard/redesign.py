@@ -717,7 +717,11 @@ def _rebrand_deck(
         reference_path=reference_path,
     )
 
-    layouts_used = [p.layout_name for p in rebrand_result.proposals if p.eligible and p.layout_name]
+    # Keyed by slide index (not just a flat list) so a later archetype
+    # override (see below) can correctly REPLACE an entry instead of
+    # just appending -- a swapped slide no longer uses the org-template
+    # layout it originally landed on.
+    layout_by_index = {p.slide_index: p.layout_name for p in rebrand_result.proposals if p.eligible and p.layout_name}
     ineligible = [p for p in rebrand_result.proposals if not p.eligible]
     skipped_indices = {p.slide_index for p in ineligible}
     manual_review = rebrand_result.manual_review
@@ -747,7 +751,8 @@ def _rebrand_deck(
                 rebuilt = rebuild_slides_as_dividers(out_path, out_path, effective_template, title_by_index)
                 rebuilt_divider_count = len(rebuilt)
                 variants = ["Section divider A", "Section divider B"]
-                layouts_used += [variants[i % len(variants)] for i in range(rebuilt_divider_count)]
+                for i, idx in enumerate(sorted(rebuilt)):
+                    layout_by_index[idx] = variants[i % len(variants)]
                 skipped_indices -= set(rebuilt)
 
                 # The new divider slides' freshly-written title text has no
@@ -759,6 +764,49 @@ def _rebrand_deck(
                 reopened = Presentation(str(out_path))
                 fix_report = fix_deck(reopened, config, source_path=str(out_path), output_path=str(out_path), dry_run=False)
                 manual_review = fix_report.manual_review
+
+        # A second, additive, fail-closed pass over slides apply_rebrand
+        # already rebuilt onto an ordinary org-template layout (never the
+        # cover/end swap positions, never a reference-layout carryover --
+        # those have no "content" to re-evaluate): offers a KONE archetype
+        # for any slide whose verbatim content is a clearly better fit,
+        # same design as redesign_deck's own coexistence pass -- see
+        # skill_bridge.py. Runs whenever review=True, independent of
+        # whether there was also anything to review for divider-ness --
+        # gated behind the SAME opt-in AI flag brand mode already asks
+        # for, never on by default, so apply_rebrand's own "fully
+        # deterministic, zero API calls" identity is untouched unless a
+        # human already asked for --review.
+        from deckguard.retemplate import SlideProfile, _extract_slide_content
+        from deckguard.skill_bridge import apply_archetype_overrides_to_deck, select_archetype_overrides_for_rebrand
+
+        reopened = Presentation(str(out_path))
+        n_slides_total = len(reopened.slides)
+        slide_height_in = reopened.slide_height / 914400 if reopened.slide_height else None
+        archetype_candidate_indices = sorted(
+            (set(rebrand_result.transformed) - set(rebrand_result.reference_layout_indices))
+            - {1, n_slides_total}  # cover/end positions -- never second-guessed, see compose.py's own rule
+        )
+        profile_by_index: dict = {}
+        for idx in archetype_candidate_indices:
+            title, text_blocks, images, reason = _extract_slide_content(reopened.slides[idx - 1], slide_height_in)
+            if reason:
+                continue  # shouldn't happen for an already-accepted slide, but never trust a stale assumption
+            profile_by_index[idx] = SlideProfile(title=title, text_blocks=text_blocks, images=images, eligible=True)
+
+        archetype_overrides = select_archetype_overrides_for_rebrand(
+            profile_by_index, model=review_model, api_key=api_key, client=client,
+        )
+        if archetype_overrides:
+            # No fix_deck re-run here, deliberately -- unlike the
+            # divider-rebuild step above, an archetype slide's colors are
+            # already compliant by construction and must NEVER go through
+            # fix_deck (see skill_bridge.py's own notes on kone_engine.py's
+            # #727272 caption grey not being in brand_rules.yaml's approved
+            # list). manual_review keeps whatever it already was from the
+            # last fix_deck run above.
+            archetype_layout_by_index = apply_archetype_overrides_to_deck(out_path, archetype_overrides)
+            layout_by_index.update(archetype_layout_by_index)
 
     reference_match_notes: list = []
     if rebrand_result.reference_layout_indices:
@@ -798,7 +846,7 @@ def _rebrand_deck(
 
     compose_result = ComposeResult(
         slide_count=len(rebrand_result.transformed) + rebuilt_divider_count,
-        layouts_used=layouts_used, manual_review=manual_review,
+        layouts_used=list(layout_by_index.values()), manual_review=manual_review,
     )
     skipped = [
         SkippedSlide(slide_index=p.slide_index, reason=p.reason or "not eligible")
