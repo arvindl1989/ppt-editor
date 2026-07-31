@@ -280,3 +280,64 @@ def test_learn_review_requires_api_key(tmp_path, monkeypatch):
 
     assert result.exit_code == 1
     assert "ANTHROPIC_API_KEY is not set" in result.output
+
+
+# --------------------------------------------------------------------------
+# create-archetype -- no AI, builds from a hand-written archetype spec
+# --------------------------------------------------------------------------
+
+
+def _kone_skill_available() -> bool:
+    from deckguard.skill_bridge import _skill_dir
+
+    return (_skill_dir() / "kone_deck_creator.py").is_file()
+
+
+needs_kone_skill = pytest.mark.skipif(not _kone_skill_available(), reason="kone-deck-generator skill not installed")
+
+
+@needs_kone_skill
+def test_create_archetype_builds_a_deck_from_a_hand_written_spec(tmp_path):
+    spec_path = tmp_path / "spec.json"
+    spec_path.write_text(json.dumps({
+        "title": "Hand-authored deck",
+        "slides": [
+            {"archetype": "agenda_contents", "title": "Agenda",
+             "items": [{"number": "01", "item": "Point one"}]},
+        ],
+    }), encoding="utf-8")
+    out_path = tmp_path / "out.pptx"
+
+    runner = CliRunner()
+    result = runner.invoke(main, ["create-archetype", str(spec_path), "--out", str(out_path)])
+
+    assert result.exit_code == 0, result.output
+    assert out_path.exists()
+    assert "agenda_contents" in result.output
+    from pptx import Presentation
+    assert len(Presentation(str(out_path)).slides) == 3  # Cover F + 1 body + Outro
+
+
+@needs_kone_skill
+def test_create_archetype_rejects_an_unknown_archetype(tmp_path):
+    spec_path = tmp_path / "spec.json"
+    spec_path.write_text(json.dumps({
+        "title": "T", "slides": [{"archetype": "not_a_real_archetype", "title": "x"}],
+    }), encoding="utf-8")
+
+    runner = CliRunner()
+    result = runner.invoke(main, ["create-archetype", str(spec_path), "--out", str(tmp_path / "out.pptx")])
+
+    assert result.exit_code == 1
+    assert "unknown archetype" in result.output
+
+
+def test_create_archetype_rejects_invalid_json(tmp_path):
+    spec_path = tmp_path / "spec.json"
+    spec_path.write_text("not json", encoding="utf-8")
+
+    runner = CliRunner()
+    result = runner.invoke(main, ["create-archetype", str(spec_path), "--out", str(tmp_path / "out.pptx")])
+
+    assert result.exit_code == 1
+    assert "not valid JSON" in result.output

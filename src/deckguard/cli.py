@@ -547,6 +547,50 @@ def create(outline_path: str, out_path: str, append_path: Optional[str], templat
         console.print(f"[yellow]{len(result.manual_review)} finding(s) need manual review[/] (e.g. all-caps content is flagged, never auto-rewritten)")
 
 
+@main.command("create-archetype")
+@click.argument("spec_path", type=click.Path(exists=True, dir_okay=False))
+@click.option("--out", "out_path", type=click.Path(dir_okay=False), required=True, help="Where to write the composed .pptx.")
+def create_archetype(spec_path: str, out_path: str):
+    """Generate an on-brand deck from SPEC_PATH -- a JSON spec
+    ({"title": ..., "slides": [{"archetype": <name>, ...content...}]})
+    -- built from the kone-deck-generator skill's 23-archetype library
+    (real icons, charts, backgrounds; already brand-compliant, no
+    separate fix pass needed). No AI call, no API key needed -- for
+    that, plan from a brief instead with `deckguard redesign --brief`,
+    which uses this exact same renderer.
+
+    See the skill's own catalog.json for the archetype list (purpose,
+    routing keywords, and slots per archetype) and archetypes_batch1/2/3.py's
+    SAMPLES for a worked content example of each.
+    """
+    import json
+
+    from deckguard.redesign import RedesignError
+    from deckguard.skill_bridge import _load_archetypes, _load_creator, _validate_kone_spec
+
+    try:
+        spec = json.loads(Path(spec_path).read_text())
+    except json.JSONDecodeError as exc:
+        console.print(f"[bold red]error:[/] {spec_path} is not valid JSON: {exc}")
+        sys.exit(1)
+
+    try:
+        creator = _load_creator()
+        archetypes = _load_archetypes()
+        _validate_kone_spec(spec, set(archetypes.ARCHETYPES.keys()))
+    except RedesignError as exc:
+        console.print(f"[bold red]error:[/] {exc}")
+        sys.exit(1)
+
+    out = Path(out_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    creator.build_deck(spec, str(out))
+
+    used = sorted({s["archetype"] for s in spec["slides"]})
+    console.print(f"[green]wrote:[/] {out}")
+    console.print(f"[cyan]{len(spec['slides']) + 2} slide(s)[/] using archetypes: {', '.join(used)}")
+
+
 @main.command()
 @click.argument("deck", type=click.Path(exists=True, dir_okay=False), required=False, default=None)
 @click.option("--out", "out_path", type=click.Path(dir_okay=False), required=True, help="Where to write the redesigned .pptx.")
