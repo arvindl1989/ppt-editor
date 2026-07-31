@@ -24,7 +24,7 @@ BASE_CSS = """
     --ink: #141414; --ink-muted: #727272; --ink-faint: #A1A1A1;
     --border: #E6E6E6; --border-strong: #D0D0D0;
     --accent: #1450F5; --accent-hover: #4373F7; --accent-soft: #D0DCFD; --accent-softer: #EEF2FE;
-    --ok: #1ED273; --ok-soft: #E4FAEE; --danger: #FF5F28; --danger-soft: #FFEEE7; --warn: #FFA023;
+    --ok: #1ED273; --ok-soft: #E4FAEE; --danger: #FF5F28; --danger-soft: #FFEEE7; --warn: #FFA023; --warn-soft: #FFF3E2;
     --shadow-1: 0 1px 2px rgba(20,20,20,.06);
     --shadow-2: 0 6px 20px rgba(20,20,20,.08), 0 1px 3px rgba(20,20,20,.05);
     --shadow-focus: 0 0 0 3px rgba(20,80,245,.28);
@@ -35,7 +35,7 @@ BASE_CSS = """
       --ink: #F3EEE6; --ink-muted: #B8B2A6; --ink-faint: #8A8478;
       --border: #322E27; --border-strong: #43403A;
       --accent: #7296F9; --accent-hover: #A1B9FB; --accent-soft: #23335C; --accent-softer: #1B2440;
-      --ok: #4BE39A; --ok-soft: #12301F; --danger: #FF8259; --danger-soft: #3A1D12; --warn: #FFB84D;
+      --ok: #4BE39A; --ok-soft: #12301F; --danger: #FF8259; --danger-soft: #3A1D12; --warn: #FFB84D; --warn-soft: #3A2A0F;
       --shadow-1: 0 1px 2px rgba(0,0,0,.3); --shadow-2: 0 6px 20px rgba(0,0,0,.4); --shadow-focus: 0 0 0 3px rgba(114,150,249,.35);
     }
   }
@@ -77,7 +77,17 @@ BASE_CSS = """
     background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
     padding: 1.5rem; margin-bottom: 1.25rem; box-shadow: var(--shadow-1);
   }
-  .card h2, .card h3 { font-weight: 600; }
+  .card h2, .card h3 { font-weight: 600; margin-top: 0; }
+  .result-head { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; margin-bottom: 0.9rem; }
+  .result-head h2 { margin-bottom: 0; }
+  .pill {
+    display: inline-flex; align-items: center; font-family: 'KONE Information', 'Inter', sans-serif;
+    font-size: 0.68rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
+    padding: 0.2rem 0.6rem; border-radius: 999px;
+  }
+  .pill-danger { background: var(--danger-soft); color: var(--danger); }
+  .pill-warn { background: var(--warn-soft); color: var(--warn); }
+  .pill-ok { background: var(--ok-soft); color: var(--ok); }
   .drop {
     border: 1.5px dashed var(--border-strong); border-radius: 10px; padding: 2.25rem 1.5rem;
     text-align: center; background: var(--surface-sunken);
@@ -148,7 +158,12 @@ BASE_CSS = """
   .stat span { font-size: 0.68rem; color: var(--ink-faint); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
   table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
   th, td { text-align: left; padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--border); vertical-align: top; }
-  th { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; color: var(--ink-faint); }
+  th {
+    font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; color: var(--ink-faint);
+    position: sticky; top: 0; background: var(--surface); box-shadow: 0 1px 0 var(--border);
+  }
+  tbody tr:nth-child(even) { background: var(--surface-sunken); }
+  tbody tr:hover { background: var(--accent-softer); }
   .sev { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 0.4rem; }
   .table-wrap { overflow-x: auto; }
   code { font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 0.85em; background: var(--surface-sunken); padding: 0.1em 0.35em; border-radius: 4px; }
@@ -643,7 +658,12 @@ def redesign_result_page(deck_name: str, redesign_dict: dict, compose_dict: dict
 <p class="muted" style="margin:0 0 0.5rem;">Flagged for a human to look at — nothing here was auto-fixed beyond divider/transition slides.</p>
 <ul style="margin:0;padding-left:1.2rem;font-size:0.88rem;">{items}</ul>
 </div>"""
-    body = f"""<div class="card"><h2 style="margin-top:0;font-size:1.05rem;">Redesigned — {_esc(deck_name)}</h2>
+    sev_counts = {"critical": 0, "major": 0, "minor": 0}
+    for v in compose_dict["manual_review"]:
+        if v["severity"] in sev_counts:
+            sev_counts[v["severity"]] += 1
+    pill = _status_pill(sev_counts["critical"], sev_counts["major"], sev_counts["minor"])
+    body = f"""<div class="card"><div class="result-head"><h2 style="font-size:1.05rem;">Redesigned — {_esc(deck_name)}</h2>{pill}</div>
 {stats}
 <p class="muted" style="margin:0.5rem 0 1rem;">Layouts used: {_esc(layouts_used)} &middot; {usage_line}</p>
 {dl}
@@ -661,6 +681,20 @@ def redesign_result_page(deck_name: str, redesign_dict: dict, compose_dict: dict
 <tbody>{_violation_rows(compose_dict['manual_review'])}</tbody>
 </table></div></div>"""
     return body
+
+
+def _status_pill(critical: int, major: int, minor: int) -> str:
+    """An at-a-glance verdict next to a result page's title -- the stat
+    row below already has the exact numbers, but reading five stat
+    boxes to tell "is this deck okay" is more work than one glance
+    should need."""
+    if critical:
+        return f'<span class="pill pill-danger">{critical} critical</span>'
+    if major:
+        return f'<span class="pill pill-warn">{major} major</span>'
+    if minor:
+        return f'<span class="pill pill-warn">{minor} minor</span>'
+    return '<span class="pill pill-ok">All clear</span>'
 
 
 def _violation_rows(violations: list[dict]) -> str:
@@ -695,7 +729,8 @@ def audit_result_page(deck_name: str, summary: dict, violations: list[dict], dow
         f'<a class="dl" href="{download_links["json"]}">Download JSON report</a>'
         f'<a class="dl secondary" href="/">Audit another deck</a>'
     )
-    body = f"""<div class="card"><h2 style="margin-top:0;font-size:1.05rem;">Audit — {_esc(deck_name)}</h2>
+    pill = _status_pill(summary["critical"], summary["major"], summary["minor"])
+    body = f"""<div class="card"><div class="result-head"><h2 style="font-size:1.05rem;">Audit — {_esc(deck_name)}</h2>{pill}</div>
 {stats}
 <div class="table-wrap"><table>
 <thead><tr><th>Slide</th><th>Severity</th><th>Rule</th><th>Shape</th><th>Message</th><th>Fix?</th></tr></thead>
@@ -837,7 +872,9 @@ def fix_result_page(
         override_section = remap_override_section(
             remap_summary, approved_colors or [], approved_fonts or [], token
         )
-    body = f"""<div class="card"><h2 style="margin-top:0;font-size:1.05rem;">Fixed — {_esc(deck_name)}</h2>
+    by_sev = fix_summary["manual_review_by_severity"]
+    pill = _status_pill(by_sev["critical"], by_sev["major"], by_sev["minor"])
+    body = f"""<div class="card"><div class="result-head"><h2 style="font-size:1.05rem;">Fixed — {_esc(deck_name)}</h2>{pill}</div>
 {stats}
 {dl}
 {note_html}
