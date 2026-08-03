@@ -97,17 +97,30 @@ def plan_transform(
     plan = propose_rebrand(deck_path, template_path=template_path, reference_path=reference_path)
     reference_indices = set(plan.reference_layout_by_index)
 
-    # Verbatim content for every eligible slide -- feeds both the
-    # proposed-slide previews and (below) the AI suggestion call.
+    # Verbatim content for every slide whose shapes can be read at all --
+    # NOT just the ones an org-template layout can hold. That distinction
+    # matters enormously on real decks: `classify_slide` refuses any
+    # slide with more than MAX_TEXT_BLOCKS (3) text boxes, because that's
+    # the most placeholders any org layout has, and on a real 168-slide
+    # catalog deck that single cap refused 129 slides -- 77% of the deck,
+    # every one of them shown to a human as "can't happen" with nothing
+    # offered. But those slides have perfectly good extractable content;
+    # they're only too big for the ORG TEMPLATE. Archetypes are exactly
+    # the thing that holds them (a comparison table, a 6-item numbered
+    # row, a 4-column quarterly plan), so they're offered here as the
+    # alternative rather than the slide being written off.
     prs = Presentation(str(deck_path))
     slide_height_in = prs.slide_height / 914400 if prs.slide_height else None
     content_by_index: dict = {}
     for p in plan.proposals:
-        if not p.eligible or p.slide_index in reference_indices:
+        if p.slide_index in reference_indices:
             continue
         title, text_blocks, images, reason = _extract_slide_content(
             prs.slides[p.slide_index - 1], slide_height_in
         )
+        # A `reason` here is a genuinely unreadable slide (table, chart,
+        # embedded object, media, group) -- nothing can reflow that, so
+        # it stays keep-only and says so.
         if not reason:
             content_by_index[p.slide_index] = (title, text_blocks, images)
 
@@ -136,6 +149,12 @@ def plan_transform(
             default_action = "reference_layout"
         elif p.eligible:
             default_action = "rebuild"
+        elif p.slide_index in content_by_index:
+            # Readable, just too big for any org layout -- keep by
+            # default (nothing here changes its structure), but the
+            # review page can still offer an archetype for it if one was
+            # suggested, and says WHY the org route is unavailable.
+            default_action = "keep"
         else:
             default_action = "keep"
         slides.append(
@@ -202,6 +221,33 @@ class TransformOutcome:
     archetype_swapped: list = field(default_factory=list)
     kept: list = field(default_factory=list)
     layouts_used: dict = field(default_factory=dict)  # {index: layout-or-archetype name}
+    learned_colors: int = 0  # color remappings learned FROM the uploaded reference deck
+    learned_fonts: int = 0
+    transplanted_shapes: int = 0  # per-shape styles copied verbatim from the reference
+
+
+def _config_learned_from_reference(deck_path, reference_path, base_config: dict) -> tuple[dict, int, int]:
+    """Diff the uploaded deck against the uploaded REFERENCE deck and
+    fold what that pair actually demonstrates (this old color became
+    that new one; this old font became that new one) into a per-run copy
+    of the brand config.
+
+    This is what makes a transform driven by YOUR decks rather than only
+    by the bundled brand_rules.yaml: without it the reference contributes
+    nothing but layout names, and every color/font decision comes from
+    the backend's own canned tables. Never writes to brand_rules.yaml --
+    the learned config is scoped to this one run.
+    """
+    from deckguard import learn as learn_mod
+
+    try:
+        result = learn_mod.learn(Presentation(str(deck_path)), Presentation(str(reference_path)), base_config)
+        learned = learn_mod.apply_learned(base_config, result, min_confidence="high")
+        n_colors = sum(1 for p in result.color_proposals if p.confidence == "high")
+        n_fonts = sum(1 for p in result.font_proposals if p.confidence == "high")
+        return learned, n_colors, n_fonts
+    except Exception:  # noqa: BLE001 -- learning is additive; fall back to the base config
+        return base_config, 0, 0
 
 
 def execute_transform(
@@ -227,19 +273,34 @@ def execute_transform(
     chosen: dict = {}
     for s in plan.slides:
         choice = actions.get(s.index, s.default_action)
+        # An archetype choice needs a suggestion to render; without one
+        # it degrades rather than failing or inventing content.
         if choice == "archetype" and s.archetype is None:
             choice = "rebuild"
         if choice in ("rebuild", "reference_layout"):
-            choice = "rebuild" if s.default_action != "keep" else "keep"  # can't rebuild an ineligible slide
+            # An org-layout rebuild is only possible where the planner
+            # found a layout that fits -- "keep" defaults never can.
+            choice = "rebuild" if s.default_action != "keep" else "keep"
         elif choice not in ("keep", "archetype"):
             choice = "keep"
+        # NOTE: an "archetype" choice is honored even on a keep-default
+        # slide. Those are slides no ORG layout can hold (too many text
+        # blocks) but an archetype can -- offering the archetype there is
+        # the whole point; only the org-rebuild route is unavailable.
         chosen[s.index] = choice
 
     rebuild_indices = {i for i, c in chosen.items() if c == "rebuild"}
     archetype_indices = {i for i, c in chosen.items() if c == "archetype"}
 
+    base_config = rules_config if rules_config is not None else load_config(default_config_path())
+    effective_config, learned_colors, learned_fonts = base_config, 0, 0
+    if reference_path:
+        effective_config, learned_colors, learned_fonts = _config_learned_from_reference(
+            deck_path, reference_path, base_config
+        )
+
     rebrand_result = apply_rebrand(
-        str(deck_path), str(out_path), template_path=template_path, rules_config=rules_config,
+        str(deck_path), str(out_path), template_path=template_path, rules_config=effective_config,
         reference_path=reference_path, accepted_indexes=rebuild_indices,
     )
 
@@ -252,9 +313,8 @@ def execute_transform(
     if not rebuild_indices and not rebrand_result.reference_layout_indices:
         from deckguard.fixer import fix_deck
 
-        config = rules_config if rules_config is not None else load_config(default_config_path())
         prs_out = Presentation(str(out_path))
-        fix_deck(prs_out, config, source_path=str(out_path), output_path=str(out_path), dry_run=False)
+        fix_deck(prs_out, effective_config, source_path=str(out_path), output_path=str(out_path), dry_run=False)
 
     layouts_used = {
         p.slide_index: p.layout_name
@@ -276,6 +336,32 @@ def execute_transform(
         swapped = apply_archetype_overrides_to_deck(str(out_path), overrides, images_by_index=images_by_index)
         layouts_used.update(swapped)
 
+    # Per-shape styling copied straight off the reference deck, wherever
+    # a shape's identity survives between the two (same slide index +
+    # name, or same position). This is the other half of "match the
+    # reference": `learn` above generalizes the pair into deck-wide
+    # color/font rules, while this copies the reference's own answer for
+    # a specific shape -- provably better where one source color has to
+    # become two different target colors depending on the shape (see
+    # exact_transplant's own docstring). Skips archetype slides: their
+    # shapes come from the archetype engine, not the old deck, so there
+    # is no surviving identity to match and their styling is already
+    # correct by construction.
+    transplanted = 0
+    if reference_path:
+        from deckguard.exact_transplant import transplant_exact_treatment
+
+        try:
+            out_prs = Presentation(str(out_path))
+            ref_prs = Presentation(str(reference_path))
+            result = transplant_exact_treatment(out_prs, ref_prs, rules_config=effective_config)
+            changes = [c for c in result.changes if (c.slide_index + 1) not in archetype_indices]
+            if changes:
+                out_prs.save(str(out_path))
+                transplanted = len(changes)
+        except Exception:  # noqa: BLE001 -- additive polish, never load-bearing
+            transplanted = 0
+
     return TransformOutcome(
         out_path=str(out_path),
         rebuilt=sorted(rebuild_indices - set(rebrand_result.reference_layout_indices)),
@@ -283,6 +369,9 @@ def execute_transform(
         archetype_swapped=sorted(archetype_indices),
         kept=sorted(i for i, c in chosen.items() if c == "keep"),
         layouts_used=layouts_used,
+        learned_colors=learned_colors,
+        learned_fonts=learned_fonts,
+        transplanted_shapes=transplanted,
     )
 
 

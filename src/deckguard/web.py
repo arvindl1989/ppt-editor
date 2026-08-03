@@ -371,6 +371,9 @@ async def transform_route(token: str, request: Request, _auth: None = Depends(_r
         "reference_carryover": outcome.reference_carryover,
         "kept": outcome.kept,
         "layouts_used": outcome.layouts_used,
+        "learned_colors": outcome.learned_colors,
+        "learned_fonts": outcome.learned_fonts,
+        "transplanted_shapes": outcome.transplanted_shapes,
     }
     report = {
         "deck": deck_name,

@@ -392,10 +392,28 @@ def _review_card(entry: dict) -> str:
     default = entry["default_action"]
 
     options = []
-    if default == "keep":
+    if default == "keep" and not entry.get("archetype_name"):
         reason = entry.get("reason") or "not eligible for a rebuild"
         options.append(f'<p class="field-hint" style="margin:0;">Kept as-is: {_esc(reason)}.</p>')
         options.append(f'<input type="hidden" name="action_{idx}" value="keep">')
+    elif default == "keep":
+        # Too big for any org-template layout, but an archetype CAN hold
+        # it -- offer that rather than writing the slide off.
+        reason = entry.get("reason") or "no org-template layout fits this slide"
+        options.append(
+            f'<p class="field-hint" style="margin:0 0 0.5rem;">No org-template layout fits this slide '
+            f"({_esc(reason)}) — but an archetype does:</p>"
+        )
+        options.append(
+            f'<label class="checkbox-row" style="margin-bottom:0.35rem;">'
+            f'<input type="radio" name="action_{idx}" value="archetype">'
+            f"<span>{_ACTION_LABELS['archetype']} <b>{_esc(entry['archetype_name'])}</b></span></label>"
+        )
+        options.append(
+            f'<label class="checkbox-row" style="margin-bottom:0.35rem;">'
+            f'<input type="radio" name="action_{idx}" value="keep" checked>'
+            f"<span>{_ACTION_LABELS['keep']}</span></label>"
+        )
     else:
         def radio(value: str, label: str) -> str:
             checked = " checked" if value == default else ""
@@ -487,6 +505,20 @@ def transform_result_page(
         f'<a class="dl secondary" href="{download_links["json"]}">JSON report</a>'
         f'<a class="dl secondary" href="/">Transform another deck</a>'
     )
+    learned = outcome.get("learned_colors", 0) + outcome.get("learned_fonts", 0)
+    transplanted = outcome.get("transplanted_shapes", 0)
+    reference_note = ""
+    if learned or transplanted:
+        bits = []
+        if learned:
+            bits.append(f"{learned} color/font rule(s) learned from your reference deck")
+        if transplanted:
+            bits.append(f"{transplanted} shape style(s) copied straight off it")
+        reference_note = (
+            f'<p class="field-hint" style="margin:0.5rem 0 0;">Driven by your uploaded reference: '
+            f'{" and ".join(bits)}.</p>'
+        )
+
     suppressed = audit.get("suppressed_archetype_findings", 0)
     suppressed_note = (
         f'<p class="field-hint" style="margin:0.5rem 0 0;">{suppressed} finding(s) on archetype-rendered slides '
@@ -522,6 +554,7 @@ def transform_result_page(
     ]
     return f"""<div class="card"><div class="result-head"><h2 style="font-size:1.05rem;">Transformed — {_esc(deck_name)}</h2>{pill}</div>
 {stats}
+{reference_note}
 {dl}
 </div>
 {similarity_card}

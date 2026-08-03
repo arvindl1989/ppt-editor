@@ -188,3 +188,111 @@ def test_execute_transform_all_keep_still_applies_brand_patches(tmp_path):
     assert outcome.kept == [1]
     run = Presentation(str(out)).slides[0].shapes.title.text_frame.paragraphs[0].runs[0]
     assert str(run.font.color.rgb) == "141414"  # heading forced to brand black despite "keep" (heading_always_dark)
+
+
+def _overloaded_deck(tmp_path, n_boxes=8):
+    """A slide with more text boxes than ANY org-template layout can
+    hold (MAX_TEXT_BLOCKS is 3) -- the single most common shape in a
+    real deck, and the case that used to be written off as "can't
+    happen" with no alternative offered."""
+    from pptx.util import Inches
+
+    prs = new_deck()
+    s = add_slide(prs)
+    title_run(s).text = "Dense slide"
+    for i in range(n_boxes):
+        box = s.shapes.add_textbox(Inches(1), Inches(0.4 * i + 1), Inches(4), Inches(0.35))
+        box.text_frame.text = f"Point {i}: real content"
+    path = tmp_path / "dense.pptx"
+    prs.save(str(path))
+    return path
+
+
+@needs_skill
+def test_slide_too_big_for_any_org_layout_is_still_offered_an_archetype(tmp_path):
+    """Regression for the real complaint: on a production deck, 129 of
+    168 slides were refused with "more body text blocks than any
+    template layout can hold" and shown with NO options. Those slides
+    are perfectly readable -- only the ORG TEMPLATE can't hold them --
+    so an archetype must still be offered."""
+    src = _overloaded_deck(tmp_path)
+
+    plan = plan_transform(str(src), client=_FakeClient(_FakeResponse(_hero_stat_override(1))))
+
+    slide = plan.slides[0]
+    assert slide.archetype is not None, "an archetype must still be offered for it"
+    assert slide.archetype["archetype"] == "hero_stat"
+    # And it becomes the DEFAULT -- the archetype is the only route that
+    # can hold this slide, so it shouldn't need hunting for.
+    assert slide.default_action == "archetype"
+
+    # Without a suggestion it stays keep-only and says why -- honest, but
+    # that was the ONLY outcome before this fix.
+    plain = plan_transform(str(src), suggest_archetypes=False)
+    assert plain.slides[0].default_action == "keep"
+    assert "text blocks" in (plain.slides[0].reason or "")
+
+
+@needs_skill
+def test_archetype_is_honored_on_a_slide_no_org_layout_can_hold(tmp_path):
+    """The other half: choosing that offered archetype must actually
+    execute, not silently degrade back to keep."""
+    from pptx import Presentation
+
+    src = _overloaded_deck(tmp_path)
+    plan = plan_transform(str(src), client=_FakeClient(_FakeResponse(_hero_stat_override(1))))
+    out = tmp_path / "out.pptx"
+
+    outcome = execute_transform(str(src), str(out), plan, actions={1: "archetype"})
+
+    assert outcome.archetype_swapped == [1]
+    assert outcome.kept == []
+    assert any(
+        "91.2%" in s.text_frame.text
+        for s in Presentation(str(out)).slides[0].shapes
+        if getattr(s, "has_text_frame", False)
+    )
+
+
+def test_reference_deck_actually_drives_styling(tmp_path):
+    """Regression for "it's still editing decks based on the back end
+    yaml": with a reference uploaded, the reference's OWN answer for a
+    shape must win over what brand_rules.yaml would do on its own.
+
+    Decisive setup -- the old panel is legacy KONE blue #005EB8, which
+    the bundled yaml remaps to #1450F5. The reference deck says that
+    same panel should be sand #F3EEE6. If the output is sand, the
+    uploaded reference drove the result; if it's #1450F5, only the
+    backend yaml did (the bug being fixed)."""
+    from pptx import Presentation
+
+    from tests.helpers import add_rectangle
+
+    def _deck(panel_hex):
+        prs = new_deck()
+        c = add_slide(prs)
+        title_run(c).text = "Cover"
+        mid = add_slide(prs)
+        title_run(mid).text = "Panel slide"
+        add_rectangle(mid, name="Panel", fill_hex=panel_hex, left_in=1, top_in=2, width_in=3, height_in=2)
+        e = add_slide(prs)
+        title_run(e).text = "Thank you"
+        return prs
+
+    src = tmp_path / "src.pptx"
+    _deck("005EB8").save(str(src))  # legacy blue -> yaml alone would make this #1450F5
+    reference = tmp_path / "ref.pptx"
+    _deck("F3EEE6").save(str(reference))  # the reference's own answer: sand
+
+    plan = plan_transform(str(src), reference_path=str(reference), suggest_archetypes=False)
+    out = tmp_path / "out.pptx"
+    outcome = execute_transform(
+        str(src), str(out), plan, actions={2: "keep"}, reference_path=str(reference),
+    )
+
+    # The reference measurably influenced the run (either mechanism:
+    # learned deck-wide rules, or per-shape transplant).
+    assert outcome.learned_colors + outcome.transplanted_shapes > 0
+
+    panel = next(sh for sh in Presentation(str(out)).slides[1].shapes if sh.name == "Panel")
+    assert str(panel.fill.fore_color.rgb) == "F3EEE6", "the reference's answer must beat the yaml default"
