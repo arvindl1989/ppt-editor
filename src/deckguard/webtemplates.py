@@ -88,6 +88,12 @@ BASE_CSS = """
   .pill-danger { background: var(--danger-soft); color: var(--danger); }
   .pill-warn { background: var(--warn-soft); color: var(--warn); }
   .pill-ok { background: var(--ok-soft); color: var(--ok); }
+  .notice {
+    border-left: 3px solid var(--warn); background: var(--warn-soft); border-radius: 6px;
+    padding: 0.8rem 1rem; margin: 0 0 1.25rem; font-size: 0.85rem; color: var(--ink);
+  }
+  .notice b { display: block; margin-bottom: 0.25rem; }
+  .notice p { margin: 0.35rem 0 0; color: var(--ink-muted); }
   .drop {
     border: 1.5px dashed var(--border-strong); border-radius: 10px; padding: 2.25rem 1.5rem;
     text-align: center; background: var(--surface-sunken);
@@ -507,16 +513,35 @@ def transform_result_page(
     )
     learned = outcome.get("learned_colors", 0) + outcome.get("learned_fonts", 0)
     transplanted = outcome.get("transplanted_shapes", 0)
+    deduped = outcome.get("duplicate_logos_removed", 0)
     reference_note = ""
-    if learned or transplanted:
+    if learned or transplanted or deduped:
         bits = []
         if learned:
             bits.append(f"{learned} color/font rule(s) learned from your reference deck")
         if transplanted:
             bits.append(f"{transplanted} shape style(s) copied straight off it")
+        if deduped:
+            bits.append(f"{deduped} duplicate logo(s) removed in favour of the reference's own mark")
         reference_note = (
             f'<p class="field-hint" style="margin:0.5rem 0 0;">Driven by your uploaded reference: '
-            f'{" and ".join(bits)}.</p>'
+            f'{"; ".join(bits)}.</p>'
+        )
+
+    # Slides the reference deck redrew from scratch. Restyling can't
+    # reach them, so say so plainly rather than shipping a worse slide
+    # and letting the user discover the gap in the meeting.
+    redraw = outcome.get("needs_manual_redraw") or []
+    redraw_note = ""
+    if redraw:
+        nums = ", ".join(str(i) for i in redraw)
+        redraw_note = (
+            f'<div class="notice"><b>Slide{"s" if len(redraw) > 1 else ""} {nums} need a manual redraw</b>'
+            "Branding was applied, but the reference deck builds these slides out of different shapes "
+            "(grouped diagrams, different connectors) rather than restyled versions of yours — too little "
+            "lines up for deckguard to copy its treatment across. "
+            "<p>Rebuild them by hand against the reference, or pick an archetype for them on the review "
+            "screen and let the generator draw them fresh.</p></div>"
         )
 
     suppressed = audit.get("suppressed_archetype_findings", 0)
@@ -557,6 +582,7 @@ def transform_result_page(
 {reference_note}
 {dl}
 </div>
+{redraw_note}
 {similarity_card}
 <div class="card"><h3 style="font-size:0.95rem;">Remaining findings ({len(violations)})</h3>
 {suppressed_note}

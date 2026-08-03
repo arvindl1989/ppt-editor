@@ -236,3 +236,26 @@ def test_password_gate(tmp_path, monkeypatch):
     assert client.get("/").status_code == 401
     assert client.get("/", auth=("anyone", "s3cret")).status_code == 200
     assert client.get("/", auth=("anyone", "wrong")).status_code == 401
+
+
+def test_result_page_names_slides_that_need_a_manual_redraw(tmp_path, monkeypatch):
+    """The tool already detects slides the reference deck redrew from
+    scratch; the result page has to actually say so, or the user finds
+    out in the meeting."""
+    from deckguard import webtemplates as tpl
+
+    audit = {"summary": {"critical": 0, "major": 0, "minor": 0}, "violations": [],
+             "suppressed_archetype_findings": 0}
+    outcome = {"rebuilt": [1], "archetype_swapped": [], "reference_carryover": [2, 3],
+               "kept": [], "layouts_used": {}, "needs_manual_redraw": [3, 4, 5],
+               "duplicate_logos_removed": 1}
+    html = tpl.transform_result_page("d.pptx", outcome, audit, None, {"pptx": "/a", "json": "/b"})
+
+    assert "Slides 3, 4, 5 need a manual redraw" in html
+    assert "duplicate logo(s) removed" in html
+
+    quiet = tpl.transform_result_page(
+        "d.pptx", {**outcome, "needs_manual_redraw": [], "duplicate_logos_removed": 0},
+        audit, None, {"pptx": "/a", "json": "/b"},
+    )
+    assert "manual redraw" not in quiet

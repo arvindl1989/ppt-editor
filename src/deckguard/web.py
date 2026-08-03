@@ -374,6 +374,8 @@ async def transform_route(token: str, request: Request, _auth: None = Depends(_r
         "learned_colors": outcome.learned_colors,
         "learned_fonts": outcome.learned_fonts,
         "transplanted_shapes": outcome.transplanted_shapes,
+        "duplicate_logos_removed": outcome.duplicate_logos_removed,
+        "needs_manual_redraw": outcome.needs_manual_redraw,
     }
     report = {
         "deck": deck_name,

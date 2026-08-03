@@ -224,6 +224,79 @@ class TransformOutcome:
     learned_colors: int = 0  # color remappings learned FROM the uploaded reference deck
     learned_fonts: int = 0
     transplanted_shapes: int = 0  # per-shape styles copied verbatim from the reference
+    duplicate_logos_removed: int = 0  # see _dedupe_reference_master_logos
+    needs_manual_redraw: list = field(default_factory=list)  # 1-based indices; see below
+
+
+def _dedupe_reference_master_logos(out_path, reference_path) -> int:
+    """Remove the duplicate KONE logo that appears on every
+    reference-carried slide.
+
+    When a slide is re-parented onto a layout imported FROM the
+    reference deck, that reference's master comes with it -- including
+    its own logo, which is exactly what we want: the reference IS the
+    brand authority for this run. But `fix_deck`'s logo pass then also
+    stamps deckguard's OWN bundled logo onto that same master, because
+    the reference's mark sits just outside `logo.old_logo_region_in`
+    (measured on a real pair: reference logo at 11.76in, region starts
+    at 11.9in), so the region scan doesn't recognize it as the existing
+    logo and adds a second one beside it. Both render, overlapping, on
+    every carried-over slide.
+
+    Fix: on any master carrying a picture byte-identical to one on the
+    REFERENCE deck's own master, drop any OTHER picture whose box
+    overlaps it. The reference's mark always wins -- deckguard's bundled
+    default has no business overriding the deck the user supplied as the
+    target look. Masters with no reference-sourced logo (the org
+    template's own) are untouched, so a no-reference run is unaffected.
+
+    Returns how many duplicates were removed.
+    """
+    import hashlib
+
+    def _pics(master):
+        out = []
+        for shape in master.shapes:
+            try:
+                if shape.shape_type is None or shape.shape_type.name != "PICTURE":
+                    continue
+                if None in (shape.left, shape.top, shape.width, shape.height):
+                    continue
+                out.append((shape, hashlib.sha1(shape.image.blob).hexdigest()))
+            except Exception:  # noqa: BLE001 -- unreadable picture part
+                continue
+        return out
+
+    def _overlaps(a, b):
+        return not (
+            a.left + a.width <= b.left or b.left + b.width <= a.left
+            or a.top + a.height <= b.top or b.top + b.height <= a.top
+        )
+
+    try:
+        ref_prs = Presentation(str(reference_path))
+        ref_hashes = {h for m in ref_prs.slide_masters for _s, h in _pics(m)}
+        if not ref_hashes:
+            return 0
+
+        prs = Presentation(str(out_path))
+        removed = 0
+        for master in prs.slide_masters:
+            pics = _pics(master)
+            authoritative = [s for s, h in pics if h in ref_hashes]
+            if not authoritative:
+                continue  # not a reference-sourced master -- leave it alone
+            for shape, h in pics:
+                if h in ref_hashes:
+                    continue
+                if any(_overlaps(shape, keeper) for keeper in authoritative):
+                    shape._element.getparent().remove(shape._element)
+                    removed += 1
+        if removed:
+            prs.save(str(out_path))
+        return removed
+    except Exception:  # noqa: BLE001 -- cosmetic cleanup, never load-bearing
+        return 0
 
 
 def _config_learned_from_reference(deck_path, reference_path, base_config: dict) -> tuple[dict, int, int]:
@@ -347,7 +420,29 @@ def execute_transform(
     # shapes come from the archetype engine, not the old deck, so there
     # is no surviving identity to match and their styling is already
     # correct by construction.
+    #
+    # The transplant also reports which slides it could NOT match --
+    # slides where too few shapes line up with the reference for any
+    # per-shape copy to be meaningful. In practice that means the human
+    # who made the reference deck REDREW the slide (a flow diagram
+    # rebuilt as grouped shapes and straight connectors where the old
+    # deck used elbow connectors and loose text boxes, say). No amount
+    # of restyling turns one into the other, so the honest thing is to
+    # name those slides instead of shipping a quietly worse version of
+    # them. Reported as `needs_manual_redraw`.
+    #
+    # Only slides whose ORIGINAL structure survived can be reported this
+    # way. An archetype swap or an org-layout rebuild replaces the
+    # slide's shapes by design, so of course they don't line up with the
+    # reference's -- flagging those would be crying wolf on exactly the
+    # slides the tool just handled well. That leaves "keep" and
+    # reference-carryover slides, which still carry the old deck's own
+    # shapes and therefore genuinely should have matched.
     transplanted = 0
+    needs_manual_redraw: list = []
+    structure_preserved = {i for i, c in chosen.items() if c == "keep"} | set(
+        rebrand_result.reference_layout_indices
+    )
     if reference_path:
         from deckguard.exact_transplant import transplant_exact_treatment
 
@@ -359,8 +454,16 @@ def execute_transform(
             if changes:
                 out_prs.save(str(out_path))
                 transplanted = len(changes)
+            # exact_transplant indexes slides from 0.
+            needs_manual_redraw = [
+                i + 1 for i in result.flagged_slides if (i + 1) in structure_preserved
+            ]
         except Exception:  # noqa: BLE001 -- additive polish, never load-bearing
             transplanted = 0
+
+    duplicate_logos_removed = 0
+    if reference_path:
+        duplicate_logos_removed = _dedupe_reference_master_logos(out_path, reference_path)
 
     return TransformOutcome(
         out_path=str(out_path),
@@ -372,6 +475,8 @@ def execute_transform(
         learned_colors=learned_colors,
         learned_fonts=learned_fonts,
         transplanted_shapes=transplanted,
+        duplicate_logos_removed=duplicate_logos_removed,
+        needs_manual_redraw=needs_manual_redraw,
     )
 
 

@@ -17,7 +17,7 @@ from deckguard.transform import (
     plan_transform_from_brief,
     reference_similarity,
 )
-from tests.helpers import add_slide, body_run, new_deck, title_run
+from tests.helpers import add_slide, body_run, make_solid_png, new_deck, title_run
 from tests.test_redesign import _FakeClient, _FakeResponse, _kone_slide, _kone_spec_json
 
 TEMPLATE_PATH = default_template_path()
@@ -296,3 +296,139 @@ def test_reference_deck_actually_drives_styling(tmp_path):
 
     panel = next(sh for sh in Presentation(str(out)).slides[1].shapes if sh.name == "Panel")
     assert str(panel.fill.fore_color.rgb) == "F3EEE6", "the reference's answer must beat the yaml default"
+
+
+def _put_picture_on_master(prs, image_path, left, top, width, height, name):
+    """python-pptx can't add a picture to a slide master directly, so
+    add it to a slide and move the <p:pic> into the master's spTree --
+    which is structurally what layout import does when it drags the
+    reference's master across."""
+    from pptx.opc.constants import RELATIONSHIP_TYPE as RT
+    from pptx.util import Emu
+
+    holder = prs.slides[0]
+    pic = holder.shapes.add_picture(str(image_path), Emu(left), Emu(top), Emu(width), Emu(height))
+    pic.name = name
+    image_part = holder.part.related_part(pic._element.blip_rId)
+    el = pic._element
+    el.getparent().remove(el)
+    master = prs.slide_masters[0]
+    # re-point the blip at a relationship the MASTER part owns, or the
+    # picture's bytes become unreadable from its new home
+    el.blipFill.blip.rEmbed = master.part.relate_to(image_part, RT.IMAGE)
+    master.shapes._spTree.append(el)
+
+
+def test_reference_sourced_master_keeps_one_logo_not_two(tmp_path):
+    """Regression for a real report: "THE KONE LOGO IS APPEARING TWICE".
+
+    On a transform with a reference deck, the reference's master comes
+    across carrying its own logo at 11.76in -- just outside the 11.9in
+    scan region -- so the logo fixer doesn't see it and stamps
+    deckguard's bundled mark beside it. Both render, overlapping, on
+    every carried-over slide. The reference's own mark must win."""
+    from pptx import Presentation
+
+    from deckguard.transform import _dedupe_reference_master_logos
+
+    ref_logo = tmp_path / "ref_logo.png"
+    bundled = tmp_path / "bundled_logo.png"
+    make_solid_png(ref_logo, (20, 60, 245))
+    make_solid_png(bundled, (255, 255, 255))
+
+    reference = tmp_path / "ref.pptx"
+    ref_prs = new_deck()
+    add_slide(ref_prs)
+    _put_picture_on_master(ref_prs, ref_logo, 10753104, 182880, 914400, 274320, "Picture 6")
+    ref_prs.save(str(reference))
+
+    out = tmp_path / "out.pptx"
+    out_prs = new_deck()
+    add_slide(out_prs)
+    _put_picture_on_master(out_prs, ref_logo, 10753104, 182880, 914400, 274320, "Picture 6")
+    _put_picture_on_master(out_prs, bundled, 10984613, 182880, 914400, 274320, "Picture 8")
+    out_prs.save(str(out))
+
+    assert _dedupe_reference_master_logos(str(out), str(reference)) == 1
+
+    names = [s.name for s in Presentation(str(out)).slide_masters[0].shapes if s.shape_type.name == "PICTURE"]
+    assert names == ["Picture 6"], "the reference's own mark survives, the stamped duplicate goes"
+
+
+def test_non_overlapping_master_pictures_are_left_alone(tmp_path):
+    """The dedupe is targeted at the overlapping-logo case only -- a
+    master legitimately carrying two separate images (logo + a corner
+    device) must survive untouched."""
+    from pptx import Presentation
+
+    from deckguard.transform import _dedupe_reference_master_logos
+
+    ref_logo = tmp_path / "ref_logo.png"
+    other = tmp_path / "other.png"
+    make_solid_png(ref_logo, (20, 60, 245))
+    make_solid_png(other, (255, 225, 65))
+
+    reference = tmp_path / "ref.pptx"
+    ref_prs = new_deck()
+    add_slide(ref_prs)
+    _put_picture_on_master(ref_prs, ref_logo, 10753104, 182880, 914400, 274320, "Logo")
+    ref_prs.save(str(reference))
+
+    out = tmp_path / "out.pptx"
+    out_prs = new_deck()
+    add_slide(out_prs)
+    _put_picture_on_master(out_prs, ref_logo, 10753104, 182880, 914400, 274320, "Logo")
+    _put_picture_on_master(out_prs, other, 182880, 6000000, 914400, 274320, "Corner device")
+    out_prs.save(str(out))
+
+    assert _dedupe_reference_master_logos(str(out), str(reference)) == 0
+    assert len([s for s in Presentation(str(out)).slide_masters[0].shapes if s.shape_type.name == "PICTURE"]) == 2
+
+
+def test_slides_the_reference_redrew_are_reported_not_shipped_silently(tmp_path):
+    """A reference deck whose diagram slides were REDRAWN by hand can't
+    be matched by restyling -- exact_transplant already detects that and
+    flags those slides, but transform.py used to throw the list away, so
+    the tool knew the slide didn't match and never said so. It must
+    surface as `needs_manual_redraw`."""
+    from pptx.util import Inches
+
+    from tests.helpers import add_rectangle
+
+    def _deck(shape_names):
+        prs = new_deck()
+        c = add_slide(prs)
+        title_run(c).text = "Cover"
+        mid = add_slide(prs)
+        title_run(mid).text = "Process"
+        for i, n in enumerate(shape_names):
+            add_rectangle(mid, name=n, fill_hex="005EB8", left_in=1 + i, top_in=2, width_in=0.8, height_in=1)
+        e = add_slide(prs)
+        title_run(e).text = "Thank you"
+        return prs
+
+    src = tmp_path / "src.pptx"
+    _deck([f"Step {i}" for i in range(6)]).save(str(src))
+    reference = tmp_path / "ref.pptx"
+    # Same slide, redrawn: different shape identities in different places.
+    ref_prs = _deck([f"Node {i}" for i in range(6)])
+    for i, sh in enumerate(s for s in ref_prs.slides[1].shapes if s.name.startswith("Node")):
+        sh.left, sh.top = Inches(0.5 + i * 1.7), Inches(4)
+    ref_prs.save(str(reference))
+
+    plan = plan_transform(str(src), reference_path=str(reference), suggest_archetypes=False)
+    outcome = execute_transform(
+        str(src), str(tmp_path / "out.pptx"), plan, actions={2: "keep"}, reference_path=str(reference),
+    )
+
+    assert 2 in outcome.needs_manual_redraw, "the redrawn slide must be reported to the user"
+
+    # ...and a reference that DOES line up must not cry wolf.
+    matching = tmp_path / "matching.pptx"
+    _deck([f"Step {i}" for i in range(6)]).save(str(matching))
+    quiet = execute_transform(
+        str(src), str(tmp_path / "out2.pptx"),
+        plan_transform(str(src), reference_path=str(matching), suggest_archetypes=False),
+        actions={2: "keep"}, reference_path=str(matching),
+    )
+    assert quiet.needs_manual_redraw == []
