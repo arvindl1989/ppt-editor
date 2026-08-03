@@ -6,6 +6,7 @@ test suite uses.
 """
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -436,3 +437,115 @@ def test_apply_archetype_overrides_to_deck_is_a_noop_with_no_overrides(tmp_path)
     result = apply_archetype_overrides_to_deck(str(deck_path), {})
 
     assert result == {}
+
+
+# --------------------------------------------------------------------------
+# Source-image carryover into an archetype's picture slots
+# --------------------------------------------------------------------------
+
+
+def _blobs(tmp_path, n):
+    """n visually distinct image blobs, as raw bytes -- the same shape
+    SlideProfile.images / _attach_source_images carry."""
+    from tests.helpers import make_pattern_png
+
+    return [Path(make_pattern_png(tmp_path / f"p{i}.png", seed=i)).read_bytes() for i in range(n)]
+
+
+def _pictures(slide):
+    return [s for s in slide.shapes if s.shape_type is not None and s.shape_type.name == "PICTURE"]
+
+
+@needs_skill
+def test_archetype_override_carries_a_source_image_into_a_single_picture_slot(tmp_path):
+    """The gap this closes: an image-bearing slide used to render its
+    archetype's picture slot as an empty sand placeholder, because
+    kone_engine._image() wants a path while everything upstream carries
+    raw bytes."""
+    from pptx import Presentation
+
+    outline = Outline(slides=[SlideSpec(kind="content", title="Recap", bullets=["a"], images=_blobs(tmp_path, 1))])
+    overrides = {0: {
+        "archetype": "numbered_summary_picture", "title": "Recap",
+        "items": [{"number": "01", "text": "First point"}],
+    }}
+
+    out_path = tmp_path / "out.pptx"
+    build_deck_with_archetypes(outline, str(out_path), overrides=overrides)
+
+    pics = _pictures(Presentation(str(out_path)).slides[0])
+    assert len(pics) == 1
+    assert len(pics[0].image.blob) > 0
+
+
+@needs_skill
+def test_archetype_override_carries_one_image_per_group_item(tmp_path):
+    from pptx import Presentation
+
+    outline = Outline(slides=[SlideSpec(kind="content", title="Options", bullets=["a"], images=_blobs(tmp_path, 3))])
+    overrides = {0: {
+        "archetype": "three_picture_cards", "title": "Options",
+        "cards": [{"heading": f"Card {i}", "bullets": ["x"]} for i in range(3)],
+    }}
+
+    out_path = tmp_path / "out.pptx"
+    build_deck_with_archetypes(outline, str(out_path), overrides=overrides)
+
+    pics = _pictures(Presentation(str(out_path)).slides[0])
+    assert len(pics) == 3
+    assert len({p.image.blob for p in pics}) == 3  # each card got its OWN image, not the same one repeated
+
+
+@needs_skill
+def test_archetype_override_still_renders_with_no_source_images(tmp_path):
+    """A picture archetype chosen for a slide that has no images must
+    still render (kone_engine falls back to its sand placeholder), never
+    raise -- image injection is strictly additive."""
+    outline = Outline(slides=[SlideSpec(kind="content", title="Options", bullets=["a"], images=[])])
+    overrides = {0: {
+        "archetype": "three_picture_cards", "title": "Options",
+        "cards": [{"heading": "Card", "bullets": ["x"]}],
+    }}
+
+    result = build_deck_with_archetypes(outline, str(tmp_path / "out.pptx"), overrides=overrides)
+
+    assert result.layouts_used == ["three_picture_cards"]
+
+
+@needs_skill
+def test_apply_archetype_overrides_to_deck_carries_images(tmp_path):
+    """The brand-mode (--review) path takes its images via an explicit
+    images_by_index arg, since it works from a finished deck rather than
+    a compose.py outline."""
+    from pptx import Presentation
+
+    deck_path = tmp_path / "deck.pptx"
+    _build_simple_deck(deck_path, n=2)
+
+    overrides = {2: {"archetype": "numbered_summary_picture", "title": "Recap",
+                     "items": [{"number": "01", "text": "Point"}]}}
+    apply_archetype_overrides_to_deck(str(deck_path), overrides, images_by_index={2: _blobs(tmp_path, 1)})
+
+    pics = _pictures(Presentation(str(deck_path)).slides[1])
+    assert len(pics) == 1 and len(pics[0].image.blob) > 0
+
+
+@needs_skill
+def test_planning_prompt_reports_image_count_and_never_leaks_a_photo_path():
+    """The skill's own SAMPLES carry absolute local photo paths (they
+    render a standalone gallery); echoing those into the prompt would
+    invite the model to emit or invent a path, when picture slots are
+    filled automatically."""
+    from deckguard.skill_bridge import _kone_archetype_guide
+
+    guide = _kone_archetype_guide()
+    assert "/assets/photos/" not in guide
+    assert "filled automatically" in guide
+
+    items = [_outline_item(kind="content", images=[b"\x89PNG-fake"])]
+    client = _FakeClient(_FakeResponse(json.dumps({"overrides": []})))
+    select_archetype_overrides(items, client=client)
+
+    sent = client.messages.calls[0]["messages"][0]["content"]
+    assert '"image_count": 1' in sent
+    assert "PNG-fake" not in sent  # raw bytes never serialized

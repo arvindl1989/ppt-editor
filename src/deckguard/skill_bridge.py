@@ -88,6 +88,7 @@ import importlib
 import json
 import os
 import sys
+import tempfile
 from pathlib import Path
 from typing import Optional
 
@@ -240,11 +241,41 @@ def _kone_archetype_guide() -> str:
             lines.append(f"Use when: {', '.join(info['keywords'])}")
         if info.get("slots"):
             lines.append(f"Slots: {info['slots']}")
+        slot = _ARCHETYPE_IMAGE_SLOTS.get(name)
+        if slot is not None:
+            lines.append(
+                "Pictures: this archetype has picture slot(s), filled automatically from the slide's own "
+                "images -- do NOT emit an image path or filename yourself."
+            )
         sample = archetypes.SAMPLES.get(name)
         if sample is not None:
-            lines.append(f"Example content: {json.dumps(sample, ensure_ascii=False)}")
+            lines.append(f"Example content: {json.dumps(_sample_without_image_paths(name, sample), ensure_ascii=False)}")
         parts.append("\n".join(lines))
     return "\n\n".join(parts)
+
+
+def _sample_without_image_paths(name: str, sample: dict) -> dict:
+    """The skill's own SAMPLES carry real absolute image paths for
+    picture archetypes (they're built to render a standalone gallery).
+    Showing those in the planning prompt invites the model to echo or
+    invent a path, when picture slots are filled automatically from the
+    slide's own images afterward -- so strip them from the worked
+    example, leaving every other field exactly as the skill wrote it."""
+    slot = _ARCHETYPE_IMAGE_SLOTS.get(name)
+    if slot is None or not isinstance(sample, dict):
+        return sample
+    out = dict(sample)
+    if slot[0] == "single":
+        out.pop(slot[1], None)
+        return out
+    _, group_key, item_key = slot
+    items = out.get(group_key)
+    if isinstance(items, list):
+        out[group_key] = [
+            {k: v for k, v in item.items() if k != item_key} if isinstance(item, dict) else item
+            for item in items
+        ]
+    return out
 
 
 def _kone_system_prompt() -> str:
@@ -414,11 +445,110 @@ content, verbatim, into the archetype's slots (never invent new wording; only re
 what's already there). Most slides are already well served by a generic layout and should
 NOT be overridden -- flag only a genuine, clearly-better fit, never for variety's own sake.
 
+Each candidate reports an `image_count`: how many pictures that slide already carries. Those
+images are attached automatically afterward -- never put an image path or filename in your
+output, and never invent one. Just bear the count in mind when choosing: a slide WITH images
+is a good fit for a picture-carrying archetype (its images fill those slots in order), and a
+slide with image_count 0 should NOT be put on an archetype whose whole point is its pictures.
+
 Output ONLY a JSON object, no prose, no markdown fences, of this shape:
 {"overrides": [{"outline_index": <int>, "archetype": "<name>", ...that archetype's own content fields...}, ...]}
 Omit any slide you are not overriding -- an empty "overrides" list is a completely valid,
 expected answer when nothing here is a strong fit.
 """
+
+# Which content key(s) each archetype's picture slots read, so a source
+# deck's own images can be carried into an archetype-rendered slide (see
+# `_inject_source_images`). Derived by reading each archetype's own
+# `picture`/`image_band` regions in archetypes_batch*.py -- kept as an
+# explicit map rather than re-derived at runtime so an archetype gaining
+# a picture slot is a deliberate, reviewable addition here, not a silent
+# behavior change.
+#
+# ("single", key)            -> one image, at content[key]
+# ("group", group_key, item) -> N images, one per content[group_key][i][item]
+#
+# Deliberately EXCLUDES the three `figure`-role archetypes
+# (chart_commentary, org_functions, segment_breakdown): `archetypes.render`
+# overwrites their chart/diagram key with the skill's own bundled art
+# every time, so anything injected there would be silently discarded --
+# a source photo is not a substitute for a real chart anyway.
+_ARCHETYPE_IMAGE_SLOTS: dict = {
+    "how_it_works_3step": ("single", "image"),
+    "image_section_divider": ("single", "image"),
+    "lifecycle_4stage": ("single", "image"),
+    "numbered_summary_picture": ("single", "image"),
+    "offer_cta": ("single", "image"),
+    "text_stats_picture_right": ("single", "image"),
+    "four_point_value": ("group", "pictures", "image"),
+    "three_picture_cards": ("group", "cards", "image"),
+    "two_picture_compare": ("group", "items", "image"),
+}
+
+
+def archetype_image_capacity(archetype_name: str) -> int:
+    """How many source images `archetype_name` can actually place. 0 for
+    an archetype with no picture slots (most of them). Used to tell the
+    planning call what each archetype can hold, and to cap how many
+    images are written out for one."""
+    slot = _ARCHETYPE_IMAGE_SLOTS.get(archetype_name)
+    if slot is None:
+        return 0
+    if slot[0] == "single":
+        return 1
+    return 99  # group-based: bounded by however many group items the content actually has
+
+
+def _inject_source_images(archetype_name: str, content: dict, image_blobs: list, tmpdir: str) -> dict:
+    """Return a copy of `content` with the source deck's own images
+    written to `tmpdir` and their PATHS placed in the archetype's picture
+    slots -- `kone_engine._image()` takes a path, while everything
+    upstream of here (`SlideProfile.images`, `_attach_source_images`)
+    carries raw bytes, so this is the adapter between the two.
+
+    A no-op (returns `content` unchanged) when the archetype has no
+    picture slots or there are no images -- so it's always safe to call.
+    The caller owns `tmpdir`'s lifetime; python-pptx reads each file into
+    the package during `render`, so it only needs to outlive that call.
+    """
+    slot = _ARCHETYPE_IMAGE_SLOTS.get(archetype_name)
+    if slot is None or not image_blobs:
+        return content
+
+    def _write(index: int, blob) -> Optional[str]:
+        # Already a path (compose.py's own image entries can be either) --
+        # pass it straight through rather than round-tripping through bytes.
+        if not isinstance(blob, (bytes, bytearray)):
+            return str(blob)
+        path = os.path.join(tmpdir, f"img_{index}.img")
+        try:
+            with open(path, "wb") as fh:
+                fh.write(blob)
+        except Exception:
+            return None
+        return path
+
+    out = dict(content)
+    if slot[0] == "single":
+        path = _write(0, image_blobs[0])
+        if path:
+            out[slot[1]] = path
+        return out
+
+    _, group_key, item_key = slot
+    items = out.get(group_key)
+    if not isinstance(items, list) or not items:
+        return out  # the model gave this archetype no group items to hang pictures on
+    new_items = []
+    for i, item in enumerate(items):
+        item = dict(item) if isinstance(item, dict) else {}
+        if i < len(image_blobs):
+            path = _write(i, image_blobs[i])
+            if path:
+                item[item_key] = path
+        new_items.append(item)
+    out[group_key] = new_items
+    return out
 
 
 def _run_archetype_override_call(
@@ -514,10 +644,21 @@ def select_archetype_overrides(
         i for i, item in enumerate(outline_items)
         if item.get("kind") in _ARCHETYPE_CANDIDATE_KINDS
     ]
-    candidates = [
-        {"outline_index": i, "kind": outline_items[i].get("kind"), "content": outline_items[i]}
-        for i in candidate_indices
-    ]
+    candidates = []
+    for i in candidate_indices:
+        item = outline_items[i]
+        # `images` carries raw bytes by this point (`_attach_source_images`
+        # runs before this call so the count is accurate) -- not
+        # JSON-serializable, and not something the model should see or
+        # echo anyway. Report only how many there are; the blobs
+        # themselves are placed later by `_inject_source_images`.
+        content = {k: v for k, v in item.items() if k != "images"}
+        candidates.append({
+            "outline_index": i,
+            "kind": item.get("kind"),
+            "image_count": len(item.get("images") or []),
+            "content": content,
+        })
     raw_overrides = _run_archetype_override_call(candidates, model, effort, api_key, client)
     return _validate_overrides(raw_overrides, set(candidate_indices))
 
@@ -552,13 +693,19 @@ def select_archetype_overrides_for_rebrand(
     return _validate_overrides(raw_overrides, set(slide_profiles_by_index.keys()))
 
 
-def apply_archetype_overrides_to_deck(deck_path, overrides: dict) -> dict:
+def apply_archetype_overrides_to_deck(deck_path, overrides: dict, images_by_index: Optional[dict] = None) -> dict:
     """For `apply_rebrand`'s (mode='brand', --review only) path: swaps
     each slide named in `overrides` (`{1-based slide index:
     {"archetype": <name>, ...content...}}`) for an archetype-rendered
     one, IN PLACE at that same position, in the already-saved deck at
     `deck_path` (overwritten with the result). Every other slide is
     untouched.
+
+    `images_by_index` (`{1-based slide index: list[bytes]}`, optional):
+    that slide's OWN pictures, carried into the archetype's picture
+    slots (see `_inject_source_images`). Without it a picture-carrying
+    archetype still renders -- its picture slots just fall back to
+    `kone_engine`'s sand placeholder -- so this stays optional.
 
     Mirrors `retemplate._rebuild_accepted_slides`'s own two-phase
     add-then-move-then-delete technique (by OPC partname, not raw list
@@ -584,16 +731,21 @@ def apply_archetype_overrides_to_deck(deck_path, overrides: dict) -> dict:
     blank_layout = next(l for l in prs.slide_layouts if l.name.strip().lower() == "blank")
     original_partnames = [str(s.part.partname).lstrip("/") for s in prs.slides]
 
+    images_by_index = images_by_index or {}
     new_partname_by_old: dict[str, str] = {}
     layout_by_index: dict = {}
-    for idx, override in overrides.items():
-        old_partname = original_partnames[idx - 1]
-        archetype_name = override["archetype"]
-        content = {k: v for k, v in override.items() if k != "archetype"}
-        new_slide = prs.slides.add_slide(blank_layout)
-        archetypes.render(new_slide, archetype_name, content)
-        new_partname_by_old[old_partname] = str(new_slide.part.partname).lstrip("/")
-        layout_by_index[idx] = archetype_name
+    with tempfile.TemporaryDirectory() as tmpdir:
+        for idx, override in overrides.items():
+            old_partname = original_partnames[idx - 1]
+            archetype_name = override["archetype"]
+            content = {k: v for k, v in override.items() if k != "archetype"}
+            content = _inject_source_images(
+                archetype_name, content, list(images_by_index.get(idx) or []), tmpdir,
+            )
+            new_slide = prs.slides.add_slide(blank_layout)
+            archetypes.render(new_slide, archetype_name, content)
+            new_partname_by_old[old_partname] = str(new_slide.part.partname).lstrip("/")
+            layout_by_index[idx] = archetype_name
 
     for idx in overrides:
         old_partname = original_partnames[idx - 1]
@@ -680,13 +832,20 @@ def build_deck_with_archetypes(
     manual_review = fix_report.manual_review
 
     blank_layout = next(l for l in prs.slide_layouts if l.name.strip().lower() == "blank")
-    for i, override in overrides.items():
-        archetype_name = override["archetype"]
-        content = {k: v for k, v in override.items() if k != "archetype"}
-        new_slide = prs.slides.add_slide(blank_layout)
-        archetypes.render(new_slide, archetype_name, content)
-        layout_by_index[i] = archetype_name
-        sldid_by_index[i] = list(lst)[-1]
+    # Temp dir outlives every render() below -- kone_engine._image() reads
+    # each path with PIL and python-pptx copies the bytes into the package
+    # during the call, so nothing needs these files afterward.
+    with tempfile.TemporaryDirectory() as tmpdir:
+        for i, override in overrides.items():
+            archetype_name = override["archetype"]
+            content = {k: v for k, v in override.items() if k != "archetype"}
+            content = _inject_source_images(
+                archetype_name, content, list(outline.slides[i].images or []), tmpdir,
+            )
+            new_slide = prs.slides.add_slide(blank_layout)
+            archetypes.render(new_slide, archetype_name, content)
+            layout_by_index[i] = archetype_name
+            sldid_by_index[i] = list(lst)[-1]
 
     for el in list(lst):
         lst.remove(el)

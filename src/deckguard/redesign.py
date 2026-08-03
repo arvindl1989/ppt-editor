@@ -805,7 +805,10 @@ def _rebrand_deck(
             # #727272 caption grey not being in brand_rules.yaml's approved
             # list). manual_review keeps whatever it already was from the
             # last fix_deck run above.
-            archetype_layout_by_index = apply_archetype_overrides_to_deck(out_path, archetype_overrides)
+            archetype_layout_by_index = apply_archetype_overrides_to_deck(
+                out_path, archetype_overrides,
+                images_by_index={idx: p.images for idx, p in profile_by_index.items()},
+            )
             layout_by_index.update(archetype_layout_by_index)
 
     reference_match_notes: list = []
@@ -985,20 +988,21 @@ def redesign_deck(
         api_key=api_key,
         client=client,
     )
+    raw_slides = _attach_source_images(raw_slides, eligible)
+
     # A second, additive, fail-closed pass: offers an archetype for any
     # "content"/"stat"/"timeline" slide whose shape it fits meaningfully
     # better than its assigned org-template layout -- see
     # skill_bridge.py's own docstring for the coexistence design and why
-    # this can never turn a working redesign into a failed one. Run
-    # BEFORE _attach_source_images, on slide dicts with no "images" key
-    # yet, both because the archetype engine has no adapter for a
-    # source deck's own image bytes yet (a known, documented gap) and
-    # because raw image bytes aren't JSON-serializable for this call.
+    # this can never turn a working redesign into a failed one. Runs
+    # AFTER _attach_source_images so it can report each slide's real
+    # image_count and pick a picture-carrying archetype when one fits;
+    # the blobs themselves are stripped before serializing and placed
+    # into the archetype's picture slots later, at render time.
     from deckguard.skill_bridge import build_deck_with_archetypes, select_archetype_overrides
 
     overrides = select_archetype_overrides(raw_slides, model=model, effort=effort, api_key=api_key, client=client)
 
-    raw_slides = _attach_source_images(raw_slides, eligible)
     outline = outline_from_list(_strip_ai_only_fields(raw_slides))
 
     compose_result = build_deck_with_archetypes(
