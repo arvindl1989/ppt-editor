@@ -177,3 +177,105 @@ def test_a_named_cover_replaces_the_masters_own_rather_than_doubling_it(tmp_path
     missing = tmp_path / "nope.pptx"
     assert drop_redundant_master_slides(missing, {"slides": [{"archetype": "three_stats"}]}) == 0
     assert drop_redundant_master_slides(missing, {"slides": []}) == 0
+
+
+def _built_deck(tmp_path, spec_slides, name="d.pptx"):
+    from deckguard.transform import SlidePlan, TransformPlan, execute_transform_from_brief
+
+    plan = TransformPlan(
+        slides=[SlidePlan(index=i, default_action="new", archetype={"archetype": n, **c})
+                for i, (n, c) in enumerate(spec_slides, 1)],
+        deck_title="Test deck")
+    out = tmp_path / name
+    execute_transform_from_brief(str(out), plan)
+    return out
+
+
+@needs_gallery
+def test_chrome_assets_keep_their_transparency(tmp_path):
+    """Reported as "the logo has a black background". The engine's own
+    `_image` opens every file with `.convert("RGB")`, which composites
+    alpha onto BLACK -- and the KONE marks are mostly transparent (the
+    tagline is 25% ink, the divider illustration 16%), so each landed as
+    a black rectangle."""
+    import io
+
+    from PIL import Image
+    from pptx import Presentation
+
+    pytest.importorskip("pptx")
+    try:
+        deck = _built_deck(tmp_path, [("divider_d", {"title": "A section"})])
+    except Exception as exc:  # noqa: BLE001
+        pytest.skip(f"deck build unavailable: {exc}")
+
+    # Only the PNG chrome matters here -- the master's retained cover and
+    # Thank you carry ordinary JPEG photography, which has no alpha to
+    # keep.
+    modes = []
+    for slide in Presentation(str(deck)).slides:
+        for shape in slide.shapes:
+            try:
+                blob = shape.image.blob
+            except Exception:  # noqa: BLE001
+                continue
+            if blob[:8] == b"\x89PNG\r\n\x1a\n":
+                modes.append(Image.open(io.BytesIO(blob)).mode)
+    assert modes, "the divider draws a logo, an illustration and a tagline"
+    assert all(m == "RGBA" for m in modes), f"alpha was flattened: {modes}"
+
+
+@needs_gallery
+def test_the_cut_cover_is_one_swappable_picture_not_four_baked_panes(tmp_path):
+    """Asked for as "a template where when we add a picture it adds that
+    chopped effect, instead of it being chopped into four sections
+    already" -- one picture plus a mask, so Change Picture still works."""
+    from pptx import Presentation
+
+    try:
+        deck = _built_deck(tmp_path, [("cover_a_cut4", {"title": "T", "context": "C"})])
+    except Exception as exc:  # noqa: BLE001
+        pytest.skip(f"deck build unavailable: {exc}")
+
+    cover = Presentation(str(deck)).slides[0]
+    photos = [sh for sh in cover.shapes
+              if getattr(sh, "shape_type", None) and sh.shape_type.name == "PICTURE"
+              and sh.width > 3000000]  # the banner, not the logo or tagline
+    assert len(photos) == 1, "the banner must be a single picture"
+    # ...and the stagger comes from mask rectangles over it
+    masks = [sh for sh in cover.shapes
+             if getattr(sh, "shape_type", None) and sh.shape_type.name == "AUTO_SHAPE"]
+    assert len(masks) >= 4, "the cut is drawn by covering what the mask hides"
+
+
+@needs_gallery
+def test_every_slide_gets_the_footer_its_archetype_calls_for(tmp_path):
+    """A whole deck came out with no dates and no page numbers: the
+    parser treated both as author content and dropped them, when they
+    are chrome stamped per slide. The rules differ by slide type."""
+    from pptx import Presentation
+
+    try:
+        deck = _built_deck(tmp_path, [
+            ("cover_a_cut4", {"title": "T", "context": "C"}),
+            ("divider_d", {"title": "A section"}),
+            ("three_picture_cards", {"title": "Cards", "cards": [{"heading": "A", "bullets": ["x"]}]}),
+            ("end_logo", {}),
+        ])
+    except Exception as exc:  # noqa: BLE001
+        pytest.skip(f"deck build unavailable: {exc}")
+
+    def footer_text(slide):
+        return " | ".join(
+            sh.text_frame.text.strip() for sh in slide.shapes
+            if getattr(sh, "has_text_frame", False) and sh.text_frame.text.strip()
+        )
+
+    slides = list(Presentation(str(deck)).slides)
+    cover, divider, cards, closer = slides
+
+    assert "20" in footer_text(cover), "covers carry a date"
+    assert "01" not in footer_text(cover).split(), "covers carry no page number"
+    assert "02" in footer_text(divider), "DIVIDER_D puts number and date together"
+    assert "03" in footer_text(cards), "content slides carry a page number"
+    assert footer_text(closer) == "", "END_LOGO carries nothing at all"

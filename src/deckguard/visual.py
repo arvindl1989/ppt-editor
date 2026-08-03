@@ -50,7 +50,8 @@ PT_TO_PX = RENDER_WIDTH_PX / (13.333 * 72.0)
 
 OVERFLOW_TOL_PX = 2.0  # sub-pixel rounding and 1px borders
 EDGE_TOL_PX = 1.0
-MIN_LEGIBLE_PT = 9.0  # KONE decks bottom out around 10pt; 9 is the floor
+MIN_LEGIBLE_PT = 8.0  # the brand's own footer is 11px == 8.25pt, so 9 flagged
+                      # every correctly-built slide; 8 is the real floor
 MIN_CONTRAST = 3.0  # WCAG AA for large text; slide type is large
 
 

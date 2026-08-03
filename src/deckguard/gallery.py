@@ -292,7 +292,8 @@ def parse_section(name: str, section_html: str) -> Optional[dict]:
         if "path(" in clip and box:
             rects = _clip_rects(clip)
             if rects:
-                chrome.append({"kind": "cut", "box": box, "rects": rects, "content": "photo"})
+                chrome.append({"kind": "cut", "box": box, "rects": rects,
+                               "content": "photo", "background": background})
                 sample.setdefault("photo", "")
                 continue
 
@@ -444,40 +445,73 @@ def draw_chrome(slide, arch: dict, content: dict) -> None:
         elif kind == "asset":
             path = _asset_path(item["asset"])
             if path:
-                engine._image(slide, box, path, mode="contain")
+                _add_transparent_picture(slide, engine, box, path)
         elif kind == "cut":
-            _draw_cut(slide, engine, box, item.get("rects") or [], _photo_for(content))
+            _draw_cut(slide, engine, box, item.get("rects") or [],
+                      _photo_for(content), item.get("background") or "FFFFFF")
 
 
-def _draw_cut(slide, engine, box, rects, photo) -> None:
-    """The staggered banner is ONE photo seen through several rectangular
-    windows, not several photos. Cover-fitting the image once and then
-    cropping each window out of that fit is what keeps the panes
-    continuous -- cropping each window independently would jump."""
-    if not photo or not rects:
-        return
-    import tempfile
+def _add_transparent_picture(slide, engine, box, path) -> None:
+    """Place a PNG without going through the engine's `_image`.
 
+    That helper opens every image with `.convert("RGB")`, which drops the
+    alpha channel and composites transparency onto BLACK. The KONE marks
+    are mostly transparent -- the tagline is 25% ink, the divider
+    illustration 16% -- so each one landed as a black rectangle. Reported
+    as "the logo has a black background". PowerPoint renders PNG alpha
+    natively; the only thing needed is to stop destroying it.
+
+    Fits inside `box` preserving aspect, like `mode="contain"` did.
+    """
     from PIL import Image
 
-    bx, by, bw, bh = box
+    x, y, w, h = box
     try:
-        image = Image.open(photo).convert("RGB")
-    except Exception:  # noqa: BLE001 -- decorative; never fail a build
+        with Image.open(path) as im:
+            iw, ih = im.size
+    except Exception:  # noqa: BLE001 -- decorative
         return
-    scale = max(bw / image.width, bh / image.height)
-    fitted = image.resize((max(1, int(image.width * scale)), max(1, int(image.height * scale))),
-                          Image.LANCZOS)
-    off_x = (fitted.width - bw) / 2
-    off_y = (fitted.height - bh) / 2
-    tmpdir = tempfile.mkdtemp(prefix="dg-cut-")
-    for i, (rx, ry, rw, rh) in enumerate(rects):
-        left, top = int(off_x + rx), int(off_y + ry)
-        pane = fitted.crop((left, top, left + int(rw), top + int(rh)))
-        out = Path(tmpdir) / f"pane{i}.jpg"
-        pane.save(out, quality=90)
-        slide.shapes.add_picture(str(out), engine.X(bx + rx), engine.X(by + ry),
-                                 engine.X(rw), engine.X(rh))
+    scale = min(w / iw, h / ih) if iw and ih else 1.0
+    nw, nh = max(1.0, iw * scale), max(1.0, ih * scale)
+    slide.shapes.add_picture(str(path), engine.X(x + (w - nw) / 2), engine.X(y + (h - nh) / 2),
+                             engine.X(nw), engine.X(nh))
+
+
+def _draw_cut(slide, engine, box, rects, photo, background="FFFFFF") -> None:
+    """The staggered banner is ONE photo with a mask over it, and that is
+    how it is built here: a single full-width picture, then
+    background-coloured rectangles covering everything the mask cuts
+    away.
+
+    Baking four pre-cropped panes instead produced the same picture but
+    left the author four separate images to manage -- swapping the cover
+    photo meant replacing all four. Reported as wanting "a template
+    where when we add a picture it adds that chopped effect, instead of
+    it being chopped into four sections already". One picture, one
+    Change Picture, the effect intact.
+    """
+    if not photo or not rects:
+        return
+    bx, by, bw, bh = box
+    slide.shapes.add_picture(str(photo), engine.X(bx), engine.X(by), engine.X(bw), engine.X(bh))
+
+    # Everything the mask does NOT reveal, covered in the slide colour:
+    # the gutters between panes, and the area below each pane's own
+    # height (which is what staggers them).
+    mask = engine._hex(background if len(str(background)) == 6 else "FFFFFF")
+    edges = sorted(rects, key=lambda r: r[0])
+    cursor = 0.0
+    for rx, ry, rw, rh in edges:
+        if rx > cursor:
+            engine._rect(slide, [bx + cursor, by, rx - cursor, bh], mask)
+        if ry > 0:
+            engine._rect(slide, [bx + rx, by, rw, ry], mask)
+        bottom = ry + rh
+        if bottom < bh:
+            engine._rect(slide, [bx + rx, by + bottom, rw, bh - bottom], mask)
+        cursor = rx + rw
+    if cursor < bw:
+        engine._rect(slide, [bx + cursor, by, bw - cursor, bh], mask)
 
 
 _installed = False
@@ -598,3 +632,70 @@ def drop_redundant_master_slides(out_path, spec: dict) -> int:
     if removed:
         prs.save(str(out_path))
     return removed
+
+
+# --------------------------------------------------------------------------
+# Footer chrome: date, page number, tagline
+# --------------------------------------------------------------------------
+
+# The gallery's chrome table, which differs by slide type -- covers carry
+# no page number, DIVIDER_D puts the number and date together at bottom
+# left, END_LOGO carries nothing at all. Extraction dropped all of it,
+# because a date and a page number look like author content and are not:
+# they are stamped per slide, and a deck came out with no dates or page
+# numbers anywhere.
+FOOTER_NONE = frozenset({"end_logo"})
+FOOTER_NO_PAGE = frozenset({  # date only; covers and the outro
+    "cover_a_cut4", "cover_b_cut3", "cover_c_cut4_wide", "cover_d_cut3_wide",
+    "cover_e_side", "cover_f_fullbleed",
+})
+FOOTER_MERGED_LEFT = frozenset({"divider_d"})  # page number then date, both bottom-left
+LIGHT_FOOTER = frozenset({"cover_f_fullbleed"})  # white, because it sits on a photo
+
+FOOTER_Y = 677.0  # 43px up from a 720px slide, per the spec
+FOOTER_PX = 11.0
+
+
+def stamp_footers(out_path, spec: dict, date_text: Optional[str] = None) -> int:
+    """Stamp the date and page number onto gallery-archetype slides.
+
+    Done as a post-pass rather than inside the renderer because the page
+    number is a property of the slide's position in the finished deck,
+    which the per-slide renderer has no way to know.
+    """
+    import datetime
+    import importlib
+
+    slides = spec.get("slides") or []
+    if not slides:
+        return 0
+    engine = importlib.import_module("kone_engine")
+    from pptx import Presentation as _Presentation
+
+    if date_text is None:
+        today = datetime.date.today()
+        date_text = f"{today.day} {today.strftime('%B %Y')}"
+
+    prs = _Presentation(str(out_path))
+    stamped = 0
+    for slide, planned in zip(prs.slides, slides):
+        name = str(planned.get("archetype") or "").lower()
+        if name in FOOTER_NONE:
+            continue
+        page = str(prs.slides.index(slide) + 1).zfill(2)
+        colour = engine.WHITE if name in LIGHT_FOOTER else engine.BLACK
+
+        def _stamp(box, text):
+            frame = engine._tf(slide, box)
+            engine._run(frame.paragraphs[0], text, engine.KINFO, FOOTER_PX, colour, caps=True)
+
+        if name in FOOTER_MERGED_LEFT:
+            _stamp([45, FOOTER_Y, 300, 20], f"{page}   {date_text}")
+        else:
+            _stamp([45, FOOTER_Y, 300, 20], date_text)
+            if name not in FOOTER_NO_PAGE:
+                _stamp([1167, FOOTER_Y, 68, 20], page)
+        stamped += 1
+    if stamped:
+        prs.save(str(out_path))
+    return stamped

@@ -75,7 +75,7 @@ def test_a_shape_flush_to_the_edge_is_not_reported():
 
 
 def test_text_below_the_legible_floor_is_reported():
-    findings = check_measurements([_frame([_shape(runs=[_run(pt=6.0)])])])
+    findings = check_measurements([_frame([_shape(runs=[_run(pt=5.0)])])])
     assert [f.rule for f in findings] == ["tiny_text"]
     assert f"{MIN_LEGIBLE_PT:.0f}pt" in findings[0].message
 
