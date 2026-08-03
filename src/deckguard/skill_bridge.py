@@ -241,7 +241,7 @@ def _kone_archetype_guide() -> str:
             lines.append(f"Use when: {', '.join(info['keywords'])}")
         if info.get("slots"):
             lines.append(f"Slots: {info['slots']}")
-        slot = _ARCHETYPE_IMAGE_SLOTS.get(name)
+        slot = _archetype_image_slots().get(name)
         if slot is not None:
             lines.append(
                 "Pictures: this archetype has picture slot(s), filled automatically from the slide's own "
@@ -261,7 +261,7 @@ def _sample_without_image_paths(name: str, sample: dict) -> dict:
     invent a path, when picture slots are filled automatically from the
     slide's own images afterward -- so strip them from the worked
     example, leaving every other field exactly as the skill wrote it."""
-    slot = _ARCHETYPE_IMAGE_SLOTS.get(name)
+    slot = _archetype_image_slots().get(name)
     if slot is None or not isinstance(sample, dict):
         return sample
     out = dict(sample)
@@ -459,31 +459,56 @@ expected answer when nothing here is a strong fit.
 
 # Which content key(s) each archetype's picture slots read, so a source
 # deck's own images can be carried into an archetype-rendered slide (see
-# `_inject_source_images`). Derived by reading each archetype's own
-# `picture`/`image_band` regions in archetypes_batch*.py -- kept as an
-# explicit map rather than re-derived at runtime so an archetype gaining
-# a picture slot is a deliberate, reviewable addition here, not a silent
-# behavior change.
+# `_inject_source_images`). DERIVED AT RUNTIME from each archetype's own
+# `picture`/`image_band` regions in the skill's ARCHETYPES data -- so a
+# skill update that adds/renames/removes archetypes (or their picture
+# slots) flows through with no code change here, per the "update the
+# skill and the tool just works" requirement. (An earlier version kept
+# this as a hand-maintained map; it drifted the moment the skill grew.)
 #
 # ("single", key)            -> one image, at content[key]
 # ("group", group_key, item) -> N images, one per content[group_key][i][item]
 #
-# Deliberately EXCLUDES the three `figure`-role archetypes
-# (chart_commentary, org_functions, segment_breakdown): `archetypes.render`
-# overwrites their chart/diagram key with the skill's own bundled art
-# every time, so anything injected there would be silently discarded --
-# a source photo is not a substitute for a real chart anyway.
-_ARCHETYPE_IMAGE_SLOTS: dict = {
-    "how_it_works_3step": ("single", "image"),
-    "image_section_divider": ("single", "image"),
-    "lifecycle_4stage": ("single", "image"),
-    "numbered_summary_picture": ("single", "image"),
-    "offer_cta": ("single", "image"),
-    "text_stats_picture_right": ("single", "image"),
-    "four_point_value": ("group", "pictures", "image"),
-    "three_picture_cards": ("group", "cards", "image"),
-    "two_picture_compare": ("group", "items", "image"),
-}
+# `figure`-role regions are deliberately NOT picture slots (the role
+# filter below excludes them): `archetypes.render` overwrites a figure
+# key (chart/diagram) with the skill's own bundled art every time, so
+# anything injected there would be silently discarded -- and a source
+# photo is not a substitute for a real chart anyway. The FIGURES-key
+# exclusion is belt-and-braces on top of the role filter.
+_image_slots_cache: Optional[dict] = None
+
+
+def _archetype_image_slots() -> dict:
+    global _image_slots_cache
+    if _image_slots_cache is not None:
+        return _image_slots_cache
+    try:
+        mod = _load_archetypes()
+    except RedesignError:
+        return {}
+    figures = getattr(mod, "FIGURES", {}) or {}
+    slots: dict = {}
+    for name, arch in mod.ARCHETYPES.items():
+        fig_keys = set(figures.get(name, {}))
+        single = None
+        group = None
+        for reg in arch.get("regions", []):
+            if reg.get("role") in ("picture", "image_band") and reg.get("content") and reg["content"] not in fig_keys:
+                single = ("single", reg["content"])
+                break
+        for grp in arch.get("groups", []):
+            for reg in grp.get("regions", []):
+                if reg.get("role") in ("picture", "image_band") and reg.get("content"):
+                    group = ("group", grp["content"], reg["content"])
+                    break
+            if group:
+                break
+        if group:
+            slots[name] = group  # group slots win: per-item pictures are the archetype's visual point
+        elif single:
+            slots[name] = single
+    _image_slots_cache = slots
+    return slots
 
 
 def archetype_image_capacity(archetype_name: str) -> int:
@@ -491,7 +516,7 @@ def archetype_image_capacity(archetype_name: str) -> int:
     an archetype with no picture slots (most of them). Used to tell the
     planning call what each archetype can hold, and to cap how many
     images are written out for one."""
-    slot = _ARCHETYPE_IMAGE_SLOTS.get(archetype_name)
+    slot = _archetype_image_slots().get(archetype_name)
     if slot is None:
         return 0
     if slot[0] == "single":
@@ -511,7 +536,7 @@ def _inject_source_images(archetype_name: str, content: dict, image_blobs: list,
     The caller owns `tmpdir`'s lifetime; python-pptx reads each file into
     the package during `render`, so it only needs to outlive that call.
     """
-    slot = _ARCHETYPE_IMAGE_SLOTS.get(archetype_name)
+    slot = _archetype_image_slots().get(archetype_name)
     if slot is None or not image_blobs:
         return content
 

@@ -549,3 +549,21 @@ def test_planning_prompt_reports_image_count_and_never_leaks_a_photo_path():
     sent = client.messages.calls[0]["messages"][0]["content"]
     assert '"image_count": 1' in sent
     assert "PNG-fake" not in sent  # raw bytes never serialized
+
+
+@needs_skill
+def test_image_slots_are_derived_from_the_skills_own_archetype_data():
+    """The picture-slot map is no longer hand-maintained -- it's derived
+    from the skill's ARCHETYPES regions at runtime, so a skill update
+    that adds/renames a picture archetype flows through with no code
+    change here. Spot-check the three slot shapes plus the figure
+    exclusion (a chart slot must never be treated as a photo slot)."""
+    from deckguard.skill_bridge import _archetype_image_slots, archetype_image_capacity
+
+    slots = _archetype_image_slots()
+    assert slots["numbered_summary_picture"] == ("single", "image")
+    assert slots["three_picture_cards"] == ("group", "cards", "image")
+    assert "chart_commentary" not in slots  # figure-role: render() overwrites it with bundled art
+    assert "segment_breakdown" not in slots
+    assert archetype_image_capacity("chart_commentary") == 0
+    assert archetype_image_capacity("numbered_summary_picture") == 1

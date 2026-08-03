@@ -618,6 +618,76 @@ def create_archetype(spec_path: str, out_path: str):
     console.print(f"[cyan]{len(spec['slides']) + 2} slide(s)[/] using archetypes: {', '.join(used)}")
 
 
+@main.command("sync-skill")
+@click.option(
+    "--source", "source_dir", type=click.Path(exists=True, file_okay=False), default=None,
+    help="Skill directory to sync from (default: ~/.claude/skills/kone-deck-generator, "
+    "or KONE_DECK_GENERATOR_DIR if set).",
+)
+def sync_skill(source_dir: Optional[str]):
+    """Re-vendor the kone-deck-generator skill into deckguard's own assets.
+
+    Everything that consumes the skill (archetype list, planning prompt,
+    picture-slot map) is already derived from the skill's own files at
+    runtime, so after a skill update this copy step -- plus a commit --
+    is ALL that's needed for the deployed tool to pick it up: no code
+    changes. Copies the engine/archetype .py files, catalog.json,
+    fonts/, and assets/icons/ byte-for-byte; reports what changed.
+    """
+    import filecmp
+    import shutil as _shutil
+
+    from deckguard.skill_bridge import _VENDORED_SKILL_DIR, _skill_dir
+
+    src = Path(source_dir) if source_dir else _skill_dir()
+    if src.resolve() == _VENDORED_SKILL_DIR.resolve():
+        console.print(
+            "[bold red]error:[/] the resolved skill directory IS the vendored copy -- nothing newer to sync from. "
+            "Install the updated skill at ~/.claude/skills/kone-deck-generator or pass --source."
+        )
+        sys.exit(1)
+    if not (src / "kone_deck_creator.py").is_file():
+        console.print(f"[bold red]error:[/] {src} doesn't look like the kone-deck-generator skill (no kone_deck_creator.py)")
+        sys.exit(1)
+
+    patterns = ["*.py", "catalog.json", "fonts/*.ttf", "assets/icons/*"]
+    changed, added, same = [], [], 0
+    for pattern in patterns:
+        for src_file in sorted(src.glob(pattern)):
+            if not src_file.is_file():
+                continue
+            rel = src_file.relative_to(src)
+            dest_file = _VENDORED_SKILL_DIR / rel
+            if dest_file.is_file() and filecmp.cmp(src_file, dest_file, shallow=False):
+                same += 1
+                continue
+            dest_file.parent.mkdir(parents=True, exist_ok=True)
+            (changed if dest_file.exists() else added).append(str(rel))
+            _shutil.copy2(src_file, dest_file)
+
+    # Files vendored earlier but gone from the skill (a retired module,
+    # e.g. kone_planner.py in a past update) -- removed so the vendored
+    # copy never diverges into a stale superset of the real skill.
+    removed = []
+    for pattern in patterns:
+        for dest_file in sorted(_VENDORED_SKILL_DIR.glob(pattern)):
+            rel = dest_file.relative_to(_VENDORED_SKILL_DIR)
+            if dest_file.is_file() and not (src / rel).is_file():
+                dest_file.unlink()
+                removed.append(str(rel))
+
+    for label, names in (("updated", changed), ("added", added), ("removed", removed)):
+        for name in names:
+            console.print(f"  [cyan]{label}[/] {name}")
+    if not (changed or added or removed):
+        console.print("[green]vendored copy already up to date[/]")
+    else:
+        console.print(
+            f"[green]synced from {src}[/] -- {len(changed)} updated, {len(added)} added, {len(removed)} removed. "
+            "Review, run the test suite, then commit."
+        )
+
+
 @main.command()
 @click.argument("deck", type=click.Path(exists=True, dir_okay=False), required=False, default=None)
 @click.option("--out", "out_path", type=click.Path(dir_okay=False), required=True, help="Where to write the redesigned .pptx.")

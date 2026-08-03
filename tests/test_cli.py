@@ -394,3 +394,48 @@ def test_create_archetype_rejects_invalid_json(tmp_path):
 
     assert result.exit_code == 1
     assert "not valid JSON" in result.output
+
+
+def test_sync_skill_copies_changed_files_and_removes_retired_ones(tmp_path, monkeypatch):
+    """`deckguard sync-skill`: after a skill update, one copy step (plus a
+    commit) is all a deploy needs -- verify changed files copy, retired
+    files are removed from the vendored copy, and unchanged files are
+    left alone."""
+    import deckguard.skill_bridge as skill_bridge
+    from deckguard.cli import main as cli_main
+
+    # A fake "updated skill" source and a fake vendored destination.
+    src = tmp_path / "skill"
+    (src / "fonts").mkdir(parents=True)
+    (src / "kone_deck_creator.py").write_text("print('v2')", encoding="utf-8")
+    (src / "catalog.json").write_text("{}", encoding="utf-8")
+    dest = tmp_path / "vendored"
+    dest.mkdir()
+    (dest / "kone_deck_creator.py").write_text("print('v1')", encoding="utf-8")
+    (dest / "retired_module.py").write_text("gone in v2", encoding="utf-8")
+    monkeypatch.setattr(skill_bridge, "_VENDORED_SKILL_DIR", dest)
+
+    runner = CliRunner()
+    result = runner.invoke(cli_main, ["sync-skill", "--source", str(src)])
+
+    assert result.exit_code == 0, result.output
+    assert (dest / "kone_deck_creator.py").read_text(encoding="utf-8") == "print('v2')"
+    assert (dest / "catalog.json").is_file()
+    assert not (dest / "retired_module.py").exists()
+    assert "1 updated, 1 added, 1 removed" in result.output
+
+
+def test_sync_skill_refuses_to_sync_the_vendored_copy_onto_itself(tmp_path, monkeypatch):
+    import deckguard.skill_bridge as skill_bridge
+    from deckguard.cli import main as cli_main
+
+    dest = tmp_path / "vendored"
+    dest.mkdir()
+    (dest / "kone_deck_creator.py").write_text("x", encoding="utf-8")
+    monkeypatch.setattr(skill_bridge, "_VENDORED_SKILL_DIR", dest)
+
+    runner = CliRunner()
+    result = runner.invoke(cli_main, ["sync-skill", "--source", str(dest)])
+
+    assert result.exit_code == 1
+    assert "IS the vendored copy" in result.output
