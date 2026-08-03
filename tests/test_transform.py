@@ -95,7 +95,7 @@ def test_execute_transform_honors_per_slide_choices(tmp_path):
     assert any(
         "91.2%" in s.text_frame.text for s in prs.slides[1].shapes if getattr(s, "has_text_frame", False)
     )
-    assert prs.slides[2].shapes.title.text_frame.text == "Thank you"  # kept byte-for-byte
+    assert prs.slides[2].shapes.title.text_frame.text == "Thank you"  # structure kept (brand patches still apply deck-wide)
 
 
 @needs_skill
@@ -164,3 +164,27 @@ def test_plan_and_execute_from_brief_builds_only_approved_slides(tmp_path):
     assert any(
         "91%" in s.text_frame.text for s in prs.slides[1].shapes if getattr(s, "has_text_frame", False)
     )
+
+
+def test_execute_transform_all_keep_still_applies_brand_patches(tmp_path):
+    """"keep" spares a slide's structure, not the brand rules -- an
+    all-keep transform must still run the deck-wide fix pass (the
+    apply_rebrand fast path it sits on returns a plain copy with no fix
+    at all, which would make Transform's baseline a silent no-op)."""
+    from pptx import Presentation
+
+    from tests.helpers import set_run
+
+    prs = new_deck()
+    s = add_slide(prs)
+    set_run(title_run(s), text="Title", font="Calibri", color_hex="005EB8")  # legacy blue + off-brand font
+    src = tmp_path / "src.pptx"
+    prs.save(str(src))
+
+    plan = plan_transform(str(src), suggest_archetypes=False)
+    out = tmp_path / "out.pptx"
+    outcome = execute_transform(str(src), str(out), plan, actions={1: "keep"})
+
+    assert outcome.kept == [1]
+    run = Presentation(str(out)).slides[0].shapes.title.text_frame.paragraphs[0].runs[0]
+    assert str(run.font.color.rgb) == "141414"  # heading forced to brand black despite "keep" (heading_always_dark)

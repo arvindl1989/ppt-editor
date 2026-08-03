@@ -63,6 +63,12 @@ class SlidePlan:
     title_preview: Optional[str] = None
     body_preview: Optional[str] = None
     image_count: int = 0
+    # Verbatim content, for rendering a faithful proposed-slide preview
+    # (org-layout previews place these into the layout's real
+    # placeholder boxes). None for slides that were never extracted
+    # (ineligible/keep-only ones).
+    title: Optional[str] = None
+    text_blocks: list = field(default_factory=list)  # list[list[str]]
 
 
 @dataclass
@@ -91,26 +97,31 @@ def plan_transform(
     plan = propose_rebrand(deck_path, template_path=template_path, reference_path=reference_path)
     reference_indices = set(plan.reference_layout_by_index)
 
+    # Verbatim content for every eligible slide -- feeds both the
+    # proposed-slide previews and (below) the AI suggestion call.
+    prs = Presentation(str(deck_path))
+    slide_height_in = prs.slide_height / 914400 if prs.slide_height else None
+    content_by_index: dict = {}
+    for p in plan.proposals:
+        if not p.eligible or p.slide_index in reference_indices:
+            continue
+        title, text_blocks, images, reason = _extract_slide_content(
+            prs.slides[p.slide_index - 1], slide_height_in
+        )
+        if not reason:
+            content_by_index[p.slide_index] = (title, text_blocks, images)
+
     suggestions: dict = {}
     ai_ran = False
     if suggest_archetypes:
         from deckguard.skill_bridge import select_archetype_overrides_for_rebrand
 
-        prs = Presentation(str(deck_path))
-        slide_height_in = prs.slide_height / 914400 if prs.slide_height else None
         cover_end = {plan.cover_index, plan.end_index}
-        profile_by_index: dict = {}
-        for p in plan.proposals:
-            if not p.eligible or p.slide_index in reference_indices or p.slide_index in cover_end:
-                continue
-            title, text_blocks, images, reason = _extract_slide_content(
-                prs.slides[p.slide_index - 1], slide_height_in
-            )
-            if reason:
-                continue
-            profile_by_index[p.slide_index] = SlideProfile(
-                title=title, text_blocks=text_blocks, images=images, eligible=True
-            )
+        profile_by_index = {
+            idx: SlideProfile(title=t, text_blocks=blocks, images=images, eligible=True)
+            for idx, (t, blocks, images) in content_by_index.items()
+            if idx not in cover_end
+        }
         if profile_by_index:
             suggestions = select_archetype_overrides_for_rebrand(
                 profile_by_index, model=model, api_key=api_key, client=client,
@@ -137,6 +148,11 @@ def plan_transform(
                 title_preview=p.title_preview,
                 body_preview=p.body_preview,
                 image_count=p.image_count,
+                title=content_by_index.get(p.slide_index, (None, [], []))[0],
+                text_blocks=[
+                    [text for _level, text in block]
+                    for block in content_by_index.get(p.slide_index, (None, [], []))[1]
+                ],
             )
         )
     return TransformPlan(slides=slides, ai_suggestions_ran=ai_ran)
@@ -226,6 +242,19 @@ def execute_transform(
         str(deck_path), str(out_path), template_path=template_path, rules_config=rules_config,
         reference_path=reference_path, accepted_indexes=rebuild_indices,
     )
+
+    # "keep" means the slide's STRUCTURE is untouched -- deck-wide brand
+    # patches (colors/fonts/effects) still apply everywhere, Transform's
+    # baseline promise. apply_rebrand runs fix_deck itself whenever it
+    # rebuilds anything, but its nothing-to-rebuild early path returns a
+    # plain copy with no fix pass at all -- cover that case here so an
+    # all-keep transform is still a brand fix, not a no-op.
+    if not rebuild_indices and not rebrand_result.reference_layout_indices:
+        from deckguard.fixer import fix_deck
+
+        config = rules_config if rules_config is not None else load_config(default_config_path())
+        prs_out = Presentation(str(out_path))
+        fix_deck(prs_out, config, source_path=str(out_path), output_path=str(out_path), dry_run=False)
 
     layouts_used = {
         p.slide_index: p.layout_name
