@@ -730,12 +730,15 @@ def test_gallery_only_archetype_names_are_reported_not_silently_substituted():
     )
     result = check_brief_archetypes(brief)
 
-    assert {r["requested"] for r in result["exact"]} == {"HOW_IT_WORKS_3STEP", "THREE_PICTURE_CARDS"}
-    assert [(r["requested"], r["archetype"]) for r in result["alias"]] == [
-        ("DIVIDER_D", "image_section_divider"),
-    ]
-    assert {r["requested"] for r in result["master_slide"]} == {"COVER_A_CUT4", "END_LOGO"}
-    assert {r["requested"] for r in result["unknown"]} == {"TITLE_TEXT_SPLIT"}
+    # All six now resolve: gallery 1 plus TITLE_TEXT_SPLIT are parsed out
+    # of the gallery's own markup and merged into the engine registry, so
+    # the names people write briefs against are the names it can build.
+    assert {r["requested"] for r in result["exact"]} == {
+        "HOW_IT_WORKS_3STEP", "THREE_PICTURE_CARDS",
+        "COVER_A_CUT4", "DIVIDER_D", "END_LOGO", "TITLE_TEXT_SPLIT",
+    }
+    assert result["unknown"] == []
+    assert result["master_slide"] == []
 
 
 def test_ordinary_prose_is_not_mistaken_for_an_archetype_request():
@@ -752,6 +755,8 @@ def test_archetype_names_resolve_case_insensitively():
 
     assert resolve_archetype_name("HERO_STAT") == ("hero_stat", "exact")
     assert resolve_archetype_name("hero_stat") == ("hero_stat", "exact")
-    assert resolve_archetype_name("Divider_D") == ("image_section_divider", "alias")
-    assert resolve_archetype_name("END_LOGO")[1] == "master_slide"
+    assert resolve_archetype_name("Divider_D") == ("divider_d", "exact")
+    assert resolve_archetype_name("END_LOGO") == ("end_logo", "exact")
+    # a gallery-2 name with no engine equivalent still reports honestly
+    assert resolve_archetype_name("REPORT_8CELL")[1] == "unknown"
     assert resolve_archetype_name("NOT_A_REAL_ONE") == (None, "unknown")

@@ -632,6 +632,11 @@ def execute_transform_from_brief(out_path, plan: TransformPlan, approved_indices
     # built deck came back with blank sand blocks where they were.
     photos_added = fill_empty_photo_slots(spec)
     creator.build_deck(spec, str(out_path))
+    # An author who asked for a cover/closer archetype gets theirs, not
+    # theirs plus the master's.
+    from deckguard.gallery import drop_redundant_master_slides
+
+    drop_redundant_master_slides(out_path, spec)
     return TransformOutcome(
         out_path=str(out_path),
         archetype_swapped=sorted(s.index for s in plan.slides if s.index in approved),

@@ -170,6 +170,20 @@ def _load_archetypes():
         _archetypes_module = importlib.import_module("archetypes")
     except Exception as exc:
         raise RedesignError(f"failed to load the kone-deck-generator skill from {skill_dir}: {exc}") from exc
+
+    # kone-design's HTML gallery names 39 archetypes this engine has never
+    # implemented, and people write briefs against THAT list. The finished
+    # gallery (covers, dividers, agendas, closers) is parsed straight out
+    # of its own markup and merged into the registry here, so every
+    # runtime-derived thing -- signatures, previews, picture slots, the
+    # planning prompt -- gains them without knowing they came from
+    # elsewhere. Never load-bearing: a missing gallery adds nothing.
+    try:
+        from deckguard import gallery as gallery_mod
+
+        gallery_mod.install(_archetypes_module)
+    except Exception:  # noqa: BLE001 -- additive; the engine's own 23 still work
+        pass
     return _archetypes_module
 
 

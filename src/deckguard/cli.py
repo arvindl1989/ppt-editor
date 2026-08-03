@@ -858,5 +858,45 @@ def visual_check(deck: str, fmt: str):
         )
     console.print(table)
 
+
+@main.command("sync-gallery")
+@click.option("--json", "as_json", is_flag=True, help="Print the parsed archetypes as JSON.")
+def sync_gallery(as_json: bool):
+    """Re-read kone-design's HTML archetype gallery and report what it yields.
+
+    The gallery names 57 archetypes; the engine that renders .pptx
+    implements its own set, and briefs are written against the gallery.
+    deckguard parses the gallery's markup at load time, so a gallery
+    update needs no code change -- this command shows what the current
+    one produces, and is how you check a refreshed gallery landed.
+    """
+    from deckguard import gallery as gallery_mod
+
+    directory = gallery_mod.gallery_dir()
+    if directory is None:
+        console.print(
+            "[bold red]not found:[/] no archetype gallery. Set KONE_DESIGN_DIR, install the "
+            "kone-design skill, or use deckguard's vendored copy."
+        )
+        sys.exit(1)
+
+    built = gallery_mod.build_archetypes(directory)
+    if as_json:
+        click.echo(report_mod.to_json(built["archetypes"]))
+        return
+
+    console.print(f"[bold]{directory}[/]")
+    console.print(
+        f"{len(built['archetypes'])} archetype(s), {len(built['role_styles'])} derived text style(s)\n"
+    )
+    table = Table(show_header=True, header_style="bold")
+    for col in ("Archetype", "Background", "Content slots", "Drawn extras"):
+        table.add_column(col)
+    for name, arch in built["archetypes"].items():
+        slots = ", ".join(r["content"] for r in arch["regions"] if r.get("content")) or "—"
+        extras = ", ".join(sorted({c["kind"] for c in arch.get("chrome") or []})) or "—"
+        table.add_row(name, f"#{arch['background']}", slots, extras)
+    console.print(table)
+
 if __name__ == "__main__":
     main()
