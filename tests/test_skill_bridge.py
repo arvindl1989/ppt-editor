@@ -713,3 +713,45 @@ def test_matched_content_uses_the_slides_own_words():
     flat = json.dumps(best["content"])
     assert "Quarter in review" in flat
     assert "Requests in" in flat
+
+
+def test_gallery_only_archetype_names_are_reported_not_silently_substituted():
+    """Reported from a real build: a brief asking for COVER_A_CUT4 /
+    DIVIDER_D / END_LOGO / TITLE_TEXT_SPLIT got a deck built from
+    entirely different archetypes with nothing said about it. Those four
+    are in kone-design's 56-name gallery, not in the 23 the engine
+    renders -- only 17 names exist in both vocabularies."""
+    from deckguard.skill_bridge import check_brief_archetypes
+
+    brief = (
+        "Create a marketing hub review deck, use COVER_A_CUT4 for the title slide, "
+        "DIVIDER_D for dividers, END_LOGO for the outro, TITLE_TEXT_SPLIT for slide 2, "
+        "HOW_IT_WORKS_3STEP for slide 3 and 2 slides of THREE_PICTURE_CARDS."
+    )
+    result = check_brief_archetypes(brief)
+
+    assert {r["requested"] for r in result["exact"]} == {"HOW_IT_WORKS_3STEP", "THREE_PICTURE_CARDS"}
+    assert [(r["requested"], r["archetype"]) for r in result["alias"]] == [
+        ("DIVIDER_D", "image_section_divider"),
+    ]
+    assert {r["requested"] for r in result["master_slide"]} == {"COVER_A_CUT4", "END_LOGO"}
+    assert {r["requested"] for r in result["unknown"]} == {"TITLE_TEXT_SPLIT"}
+
+
+def test_ordinary_prose_is_not_mistaken_for_an_archetype_request():
+    from deckguard.skill_bridge import check_brief_archetypes
+
+    result = check_brief_archetypes(
+        "A deck about our year_end results and the go_to_market plan for next year."
+    )
+    assert not any(result[k] for k in result)
+
+
+def test_archetype_names_resolve_case_insensitively():
+    from deckguard.skill_bridge import resolve_archetype_name
+
+    assert resolve_archetype_name("HERO_STAT") == ("hero_stat", "exact")
+    assert resolve_archetype_name("hero_stat") == ("hero_stat", "exact")
+    assert resolve_archetype_name("Divider_D") == ("image_section_divider", "alias")
+    assert resolve_archetype_name("END_LOGO")[1] == "master_slide"
+    assert resolve_archetype_name("NOT_A_REAL_ONE") == (None, "unknown")

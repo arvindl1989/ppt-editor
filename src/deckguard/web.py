@@ -325,7 +325,10 @@ async def plan_route(request: Request, _auth: None = Depends(_require_auth)):
 
     (work_dir / "plan.json").write_text(_plan_to_json(plan, mode, deck_name), encoding="utf-8")
     entries = _review_entries(plan, mode, source_path)
-    body = tpl.transform_review_page(deck_name, token, entries, mode, plan.ai_suggestions_ran)
+    body = tpl.transform_review_page(
+        deck_name, token, entries, mode, plan.ai_suggestions_ran,
+        archetype_requests=plan.archetype_requests,
+    )
     return HTMLResponse(tpl.page_shell(f"Review plan — {deck_name}", body))
 
 

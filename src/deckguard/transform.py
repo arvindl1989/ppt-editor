@@ -81,6 +81,9 @@ class TransformPlan:
     slides: list  # list[SlidePlan]
     ai_suggestions_ran: bool = False
     deck_title: Optional[str] = None  # brief-only plans: the planned cover title
+    # What became of any archetype the brief asked for BY NAME -- see
+    # skill_bridge.check_brief_archetypes. Empty for existing-deck plans.
+    archetype_requests: dict = field(default_factory=dict)
 
 
 def _readable_text(slide) -> tuple:
@@ -311,7 +314,12 @@ def plan_transform_from_brief(
     appear. Raises RedesignError on a failed planning call, same as the
     brief-only path always has (unlike existing-deck planning there is
     no deterministic fallback to degrade to)."""
-    from deckguard.skill_bridge import _validate_kone_spec, _load_archetypes, call_claude_for_kone_spec
+    from deckguard.skill_bridge import (
+        _load_archetypes,
+        _validate_kone_spec,
+        call_claude_for_kone_spec,
+        check_brief_archetypes,
+    )
 
     spec, _usage = call_claude_for_kone_spec(
         brief, target_slides=target_slides, model=model, notes=notes, api_key=api_key, client=client,
@@ -329,7 +337,17 @@ def plan_transform_from_brief(
                 title_preview=str(content.get("title") or content.get("statement") or content.get("quote") or ""),
             )
         )
-    return TransformPlan(slides=slides, ai_suggestions_ran=True, deck_title=spec.get("title"))
+    # A brief naming COVER_A_CUT4 / DIVIDER_D / END_LOGO used to get
+    # something else built with no explanation: those names come from
+    # kone-design's 56-archetype gallery, while only 23 exist in the
+    # engine that renders .pptx, and just 17 names appear in both. The
+    # substitution is unavoidable; doing it in silence is not.
+    return TransformPlan(
+        slides=slides,
+        ai_suggestions_ran=True,
+        deck_title=spec.get("title"),
+        archetype_requests=check_brief_archetypes(brief),
+    )
 
 
 @dataclass

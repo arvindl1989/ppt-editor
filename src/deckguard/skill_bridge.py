@@ -87,6 +87,7 @@ from __future__ import annotations
 import importlib
 import json
 import os
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -748,6 +749,133 @@ _VALUE_ROLES = {"stat_value", "stat_value_md", "hero_value"}
 _LIST_ROLES = {"bullets"}
 
 _signature_cache: Optional[list] = None
+
+
+# --------------------------------------------------------------------------
+# Two archetype vocabularies, and the gap between them
+# --------------------------------------------------------------------------
+#
+# `kone-design`'s deck template ships an ARCHETYPES.md gallery naming 56
+# slide archetypes in CAPS. `kone-deck-generator` -- the engine that
+# actually renders .pptx -- defines 23. Only 17 names appear in both.
+# So someone reads the gallery, asks for COVER_A_CUT4 / DIVIDER_D /
+# END_LOGO / TITLE_TEXT_SPLIT, and the generator quietly builds
+# something else, because those four are among the 39 gallery-only
+# names. Reported by a user who got exactly that and had no way to see
+# why.
+#
+# The engine can't grow 39 archetypes here. What it can do is stop
+# substituting in silence: resolve the names that genuinely correspond,
+# and say plainly what happened to the ones that don't.
+
+# Gallery name -> engine archetype, only where the correspondence is
+# real. Anything not here resolves to None and is reported, never
+# guessed at.
+_GALLERY_ALIASES = {
+    "text_stats_picture": "text_stats_picture_right",
+    "four_picture_cards": "four_point_value",
+    "quote_panel": "quote_context",
+    "quote_plain": "quote_context",
+    "statement_full": "statement_links",
+    "statement_two_col": "statement_links",
+    "statement_three_col": "statement_links",
+    "statement_on_picture": "statement_links",
+    "statement_picture_note": "statement_links",
+    "agenda_a_text": "agenda_contents",
+    "agenda_a_bullets": "agenda_contents",
+    "agenda_a_table": "agenda_contents",
+    "divider_a": "image_section_divider",
+    "divider_b": "image_section_divider",
+    "divider_c": "image_section_divider",
+    "divider_d": "image_section_divider",
+    "divider_numbering": "image_section_divider",
+    "picture_intro": "image_section_divider",
+}
+
+# Names that describe the deck's retained master slides rather than any
+# archetype: `kone_deck_creator` always keeps the master's own cover and
+# "Thank you", and never picks among their variants.
+_MASTER_SLIDE_NAMES = {
+    "cover_a_cut4", "cover_b_cut3", "cover_c_cut4_wide", "cover_d_cut3_wide",
+    "cover_e_side", "cover_f_fullbleed", "end_logo",
+}
+
+_ARCHETYPE_TOKEN = re.compile(r"\b[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+\b")
+
+
+def resolve_archetype_name(name: str) -> tuple:
+    """Map a name someone typed onto an engine archetype.
+
+    Returns `(archetype_or_None, status)` where status is one of
+    "exact", "alias", "master_slide" or "unknown".
+    """
+    key = (name or "").strip().lower()
+    if not key:
+        return None, "unknown"
+    try:
+        known = {n.lower(): n for n in _load_archetypes().ARCHETYPES}
+    except RedesignError:
+        known = {}
+    if key in known:
+        return known[key], "exact"
+    if key in _MASTER_SLIDE_NAMES:
+        return None, "master_slide"
+    alias = _GALLERY_ALIASES.get(key)
+    if alias and alias in known.values():
+        return alias, "alias"
+    return None, "unknown"
+
+
+def check_brief_archetypes(brief: str) -> dict:
+    """Find archetype names in a brief and say what the engine can do
+    with each -- so a request for a gallery-only archetype comes back as
+    a stated substitution rather than a silent one.
+
+    Only considers snake/CAPS tokens that look like archetype names AND
+    resolve to something the vocabularies know about, so ordinary prose
+    never trips it.
+    """
+    requested, seen = [], set()
+    for token in _ARCHETYPE_TOKEN.findall(brief or ""):
+        key = token.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        archetype, status = resolve_archetype_name(token)
+        if status == "unknown" and key not in _GALLERY_NAMES:
+            continue  # ordinary snake_case prose, not an archetype request
+        requested.append({"requested": token, "archetype": archetype, "status": status})
+    return {
+        "exact": [r for r in requested if r["status"] == "exact"],
+        "alias": [r for r in requested if r["status"] == "alias"],
+        "master_slide": [r for r in requested if r["status"] == "master_slide"],
+        "unknown": [r for r in requested if r["status"] == "unknown"],
+    }
+
+
+def _gallery_names() -> set:
+    """Every archetype name the kone-design gallery documents, read from
+    its own ARCHETYPES.md so this tracks the design system rather than a
+    list copied here."""
+    for base in (
+        os.environ.get("KONE_DESIGN_DIR") and Path(os.environ["KONE_DESIGN_DIR"]),
+        Path.home() / ".claude" / "skills" / "kone-design",
+        Path(__file__).parent / "assets" / "kone-design",
+    ):
+        if not base:
+            continue
+        doc = Path(base) / "templates" / "kone-deck" / "ARCHETYPES.md"
+        try:
+            text = doc.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        return {n.lower() for n in re.findall(r"\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b", text)}
+    # No gallery reachable: fall back to the names this module knows are
+    # gallery-only, so the check still catches the reported case.
+    return set(_GALLERY_ALIASES) | _MASTER_SLIDE_NAMES
+
+
+_GALLERY_NAMES = _gallery_names()
 
 
 def archetype_signatures() -> list:

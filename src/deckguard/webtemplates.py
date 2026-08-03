@@ -481,7 +481,51 @@ def _review_card(entry: dict) -> str:
 </div>"""
 
 
-def transform_review_page(deck_name: str, token: str, entries: list[dict], mode: str, ai_ran: bool) -> str:
+def archetype_request_notice(requests: dict) -> str:
+    """What happened to archetypes a brief asked for by name.
+
+    kone-design's gallery documents 56 archetypes; the engine that
+    renders .pptx defines 23, and only 17 names appear in both. A brief
+    naming one of the other 39 gets something else built -- which is
+    unavoidable, and used to happen with nothing said about it.
+    """
+    if not requests:
+        return ""
+    aliased = requests.get("alias") or []
+    master = requests.get("master_slide") or []
+    unknown = requests.get("unknown") or []
+    if not (aliased or master or unknown):
+        return ""
+
+    lines = []
+    for item in aliased:
+        lines.append(
+            f"<li><code>{_esc(item['requested'])}</code> isn't in the deck engine — "
+            f"built as <b>{_esc(item['archetype'])}</b>, its nearest equivalent.</li>"
+        )
+    for item in master:
+        lines.append(
+            f"<li><code>{_esc(item['requested'])}</code> names a cover/end variant. The generator "
+            "always keeps the master's own cover and Thank you slides and doesn't choose between "
+            "their variants — swap the layout in PowerPoint if you need a different one.</li>"
+        )
+    for item in unknown:
+        lines.append(
+            f"<li><code>{_esc(item['requested'])}</code> has no equivalent in the deck engine — "
+            "the best-fitting archetype was used for that slide instead.</li>"
+        )
+    return (
+        '<div class="notice"><b>Not every archetype you named could be built</b>'
+        "The KONE design system documents 56 slide archetypes; the generator that writes .pptx "
+        "implements 23, and only 17 names exist in both."
+        f"<ul style=\"margin:0.5rem 0 0;padding-left:1.1rem;\">{''.join(lines)}</ul></div>"
+    )
+
+
+def transform_review_page(
+    deck_name: str, token: str, entries: list[dict], mode: str, ai_ran: bool,
+    archetype_requests: dict | None = None,
+) -> str:
     """The human decision point: one card per slide, then one Transform
     button. `mode` is "deck" or "brief" (brief cards are include/skip
     checkboxes rather than action radios -- handled by the entries'
@@ -500,6 +544,18 @@ def transform_review_page(deck_name: str, token: str, entries: list[dict], mode:
 </div>""")
         cards_html = "".join(cards)
         intro = "The planned deck, slide by slide — untick anything you don't want, then build."
+        ai_note = archetype_request_notice(archetype_requests or {})
+        return f"""<div class="card"><div class="result-head"><h2 style="font-size:1.05rem;">Review plan — {_esc(deck_name)}</h2></div>
+<p class="muted" style="margin:0;">{intro}</p>
+</div>
+{ai_note}
+<form method="post" action="/transform/{_esc(token)}">
+{cards_html}
+<div class="card" style="text-align:center;">
+  <button type="submit" class="primary">Transform deck</button>
+  <a class="dl secondary" href="/" style="margin-left:0.6rem;">Start over</a>
+</div>
+</form>"""
     else:
         cards_html = "".join(_review_card(e) for e in entries)
         ai_note = "" if ai_ran else (
