@@ -96,20 +96,6 @@ BASE_CSS = """
   input[type="file"] { margin-bottom: 1rem; font-size: 0.85rem; }
   .btn-row { display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap; }
 
-  /* -- unified tool: segmented method switcher (radio-as-pills) -- */
-  .tool-card { padding: 1.75rem; }
-  .tabs { display: flex; gap: 0.35rem; background: var(--surface-sunken); border-radius: 10px; padding: 0.3rem; margin-bottom: 1.5rem; }
-  .tabs input { position: absolute; opacity: 0; pointer-events: none; }
-  .tabs label {
-    flex: 1; text-align: center; padding: 0.55rem 0.5rem; border-radius: 7px; cursor: pointer;
-    font-size: 0.83rem; font-weight: 600; color: var(--ink-muted);
-    transition: background-color 140ms ease, color 140ms ease;
-  }
-  .tabs input:checked + label { background: var(--accent); color: #FFFFFF; }
-  .tabs input:focus-visible + label { box-shadow: var(--shadow-focus); }
-  .tabs label:hover { color: var(--ink); }
-  .tabs input:checked + label:hover { color: #FFFFFF; }
-
   .field { margin-bottom: 1.1rem; }
   .field:last-child { margin-bottom: 0; }
   .field-hint { color: var(--ink-faint); font-size: 0.78rem; margin: 0.35rem 0 0; }
@@ -193,8 +179,14 @@ BASE_CSS = """
     font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
     color: var(--ok); background: var(--ok-soft); padding: 0.15rem 0.5rem; border-radius: 999px;
   }
-  .method-pane { display: none; }
-  .method-pane.active { display: block; }
+
+  /* -- transform review cards -- */
+  .review-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 0.9rem; }
+  @media (max-width: 620px) { .review-cols { grid-template-columns: 1fr; } }
+  .prev-label {
+    margin: 0 0 0.3rem; font-family: 'KONE Information', 'Inter', sans-serif;
+    font-size: 0.65rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.07em; color: var(--ink-faint);
+  }
 
   /* -- home hero: orientation for a first-time visitor, above the tool card -- */
   .hero { padding: 0.4rem 0 2.4rem; }
@@ -251,47 +243,22 @@ def page_shell(title: str, body: str, home: bool = False) -> str:
   {back}
 </div>
 {body}
-<footer>Deterministic by default — colors, fonts, effects, layout. Nothing is sent to an AI model unless
-you use AI rewrite or review, which need an API key set by the operator.</footer>
+<footer>Deterministic by default — colors, fonts, effects, layout. The AI is only ever a suggestion
+layer (archetype proposals, brief planning), needs an API key set by the operator, and nothing executes
+without your per-slide approval.</footer>
 </div>
-<script>
-(function () {{
-  var radios = document.querySelectorAll('#unified-tool input[name="method"]');
-  var panes = document.querySelectorAll('#unified-tool .method-pane');
-  if (!radios.length || !panes.length) return;
-  function show(method) {{
-    panes.forEach(function (p) {{ p.classList.toggle('active', p.dataset.method === method); }});
-  }}
-  radios.forEach(function (r) {{
-    r.addEventListener('change', function () {{ if (this.checked) show(this.value); }});
-  }});
-  // A link like "/#redesign" (e.g. from a result page's cross-sell
-  // callout) jumps straight to that method's tab instead of always
-  // landing on the default -- falls back to whatever's already
-  // checked (or "fix") when the hash doesn't match a known method.
-  var wanted = (location.hash || '').replace('#', '');
-  var target = document.getElementById('method-' + wanted);
-  if (target) {{
-    target.checked = true;
-  }}
-  var checked = document.querySelector('#unified-tool input[name="method"]:checked');
-  show(checked ? checked.value : 'fix');
-}})();
-</script>
+
 </body></html>"""
 
 
 def home_hero() -> str:
-    """Orientation for a first-time visitor, above the tool card -- the
-    tool card's tabs are self-explanatory once you know which of the
-    four you want, but nothing on the page previously said what
-    deckguard actually does before you had to guess from tab labels."""
+    """Orientation for a first-time visitor: the one Transform flow,
+    told as its four steps."""
     caps = [
-        ("Fix & audit", "Find and correct off-brand colors, fonts, effects and layout in an existing deck."),
-        ("Learn", "Diff two decks to learn a client's palette/font choices, then apply them consistently."),
-        ("Create", "Compose a new deck from a plain-text outline, entirely on the org template's own layouts."),
-        ("AI redesign", "Rework a deck's content onto approved layouts, or author one from a brief using "
-                         "KONE's 23-archetype slide library."),
+        ("1 · Upload", "An old deck to transform, a reference deck to match, a brief for a new deck — any combination."),
+        ("2 · Review", "Every slide side by side: what it is now, what it would become — approve or override each one."),
+        ("3 · Transform", "Approved slides rebuild onto approved layouts or KONE archetypes; everything gets brand patches."),
+        ("4 · Audit", "The result is audited against the brand rules — and against your reference deck, when given."),
     ]
     cap_html = "".join(f'<div class="cap"><b>{_esc(t)}</b><span>{_esc(d)}</span></div>' for t, d in caps)
     return f"""<div class="hero">
@@ -304,402 +271,6 @@ def home_hero() -> str:
 </div>"""
 
 
-def unified_tool_card(ai_enabled: bool = True) -> str:
-    """The home page's single consolidated tool: a segmented control picks
-    which of the four working methodologies to run, each still submitting
-    to its own existing route (`/fix`, `/audit`, `/learn`, `/create`,
-    `/redesign`) with exactly the fields that route already expects --
-    this is a presentation-only consolidation, not a new backend. Each
-    method is its own independent `<form>`; showing/hiding one via CSS
-    (see `page_shell`'s script) means only the visible form's fields are
-    ever submitted or required-validated, so there's no need to toggle
-    `required` attributes by hand.
-
-    Kept entirely separate from `upload_form`/`learn_form`/
-    `compose_form`/`redesign_form` below, which stay in use for each
-    route's own error-redisplay page after a failed submission.
-    """
-    if ai_enabled:
-        mode_toggle = """<div class="field">
-    <div class="mini-toggle">
-      <input type="radio" name="mode" id="mode-rewrite" value="rewrite" checked>
-      <label for="mode-rewrite">AI rewrite</label>
-      <input type="radio" name="mode" id="mode-brand" value="brand">
-      <label for="mode-brand">Brand only</label>
-    </div>
-    <p class="field-hint">AI rewrite picks each slide's layout and may split dense content across several
-      — wording stays verbatim. Brand only is deterministic, no model call.</p>
-  </div>"""
-        review_field = """<div class="field">
-    <label class="checkbox-row">
-      <input type="checkbox" name="review" value="1">
-      <span>AI review (brand only) — rebuilds divider-style slides onto the Section Divider layout and
-        flags leftover placeholder text.</span>
-    </label>
-  </div>"""
-    else:
-        mode_toggle = (
-            '<input type="hidden" name="mode" value="brand">'
-            '<p class="field-hint" style="margin-bottom:1.1rem;">Brand-only mode — no '
-            "<code>ANTHROPIC_API_KEY</code> configured, so AI rewrite is unavailable.</p>"
-        )
-        review_field = ""
-
-    return f"""<div class="card tool-card" id="unified-tool">
-<div class="tabs">
-  <input type="radio" name="method" id="method-fix" value="fix" checked>
-  <label for="method-fix">Fix &amp; audit</label>
-  <input type="radio" name="method" id="method-learn" value="learn">
-  <label for="method-learn">Learn</label>
-  <input type="radio" name="method" id="method-create" value="create">
-  <label for="method-create">Create</label>
-  <input type="radio" name="method" id="method-redesign" value="redesign">
-  <label for="method-redesign">AI redesign</label>
-</div>
-
-<form class="method-pane active" data-method="fix" method="post" action="/fix" enctype="multipart/form-data">
-  <div class="drop">
-    <p>Choose a .pptx deck (max 50&nbsp;MB)</p>
-    <input type="file" name="file" accept=".pptx" required>
-    <div class="btn-row">
-      <button type="submit" class="primary" formaction="/fix">Fix deck</button>
-      <button type="submit" class="secondary" formaction="/audit">Audit only</button>
-    </div>
-  </div>
-  <label class="checkbox-row" style="margin-top:1rem;">
-    <input type="checkbox" name="rebuild_layouts" value="1">
-    <span>Also rebuild slides on a non-approved layout onto one that fits, verbatim (Fix deck only —
-      deterministic, no AI). Colors/fonts on that layout are still patched normally afterward.</span>
-  </label>
-</form>
-
-<form class="method-pane" data-method="learn" method="post" action="/learn" enctype="multipart/form-data">
-  <p class="field-hint" style="margin:0 0 1.1rem;">Learns the color/font differences between the two decks,
-    then rebuilds the old deck onto approved layouts with those changes applied — its wording and images
-    carried over verbatim.</p>
-  <div class="field">
-    <label class="field-label">Old deck (to be fixed)</label>
-    <input type="file" name="old_file" accept=".pptx" required>
-  </div>
-  <div class="field">
-    <label class="field-label">Reference deck (already on-brand)</label>
-    <input type="file" name="new_file" accept=".pptx" required>
-  </div>
-  <div class="btn-row"><button type="submit" class="primary">Learn &amp; transform</button></div>
-</form>
-
-<form class="method-pane" data-method="create" method="post" action="/create">
-  <div class="field">
-    <textarea name="outline" rows="12" style="width:100%;font-family:ui-monospace,'SF Mono',Consolas,monospace;
-      font-size:0.85rem;padding:0.75rem;border-radius:8px;border:1px solid var(--border);
-      background:var(--surface);color:var(--ink);" required>{_esc(SAMPLE_OUTLINE)}</textarea>
-    <p class="field-hint">Every slide is built on one of the org template's own approved layouts. Prefer
-      typing a plain-English brief instead? Use AI redesign.</p>
-  </div>
-  <div class="field">
-    <label class="field-label">Optional: append to an existing deck instead of starting a new one</label>
-    <input type="file" name="existing_file" accept=".pptx">
-  </div>
-  <div class="btn-row"><button type="submit" class="primary">Compose deck</button></div>
-</form>
-
-<form class="method-pane" data-method="redesign" method="post" action="/redesign" enctype="multipart/form-data">
-  {mode_toggle}
-  <div class="field">
-    <label class="field-label">Deck (optional for AI rewrite, required for Brand only)</label>
-    <input type="file" name="file" accept=".pptx">
-  </div>
-  <div class="field">
-    <textarea name="brief" rows="2" placeholder="e.g. a short deck on predictive maintenance for facilities managers"
-      style="width:100%;font-size:0.85rem;padding:0.6rem;border-radius:8px;border:1px solid var(--border);
-      background:var(--surface);color:var(--ink);"></textarea>
-    <p class="field-hint">Required if no deck is uploaded; also authors any blank slides in an uploaded one.
-      With no deck uploaded, the brief builds a fresh deck from KONE's own 23-archetype slide library
-      (real icons, charts and photos) rather than plain org-template layouts.</p>
-  </div>
-  <details class="advanced">
-    <summary>Advanced options</summary>
-    <div class="field">
-      <label class="field-label">Steering notes</label>
-      <textarea name="notes" rows="2" placeholder="e.g. prefer stat slides for anything with a percentage"
-        style="width:100%;font-size:0.85rem;padding:0.6rem;border-radius:8px;border:1px solid var(--border);
-        background:var(--surface);color:var(--ink);"></textarea>
-    </div>
-    <div class="field" style="display:flex;gap:1rem;flex-wrap:wrap;">
-      <label style="font-size:0.82rem;color:var(--ink-muted);">Model
-        <select name="model" style="display:block;margin-top:0.3rem;">
-          <option value="claude-opus-5" selected>claude-opus-5</option>
-          <option value="claude-sonnet-5">claude-sonnet-5 (cheaper)</option>
-        </select>
-      </label>
-      <label style="font-size:0.82rem;color:var(--ink-muted);">Effort
-        <select name="effort" style="display:block;margin-top:0.3rem;">
-          <option value="low">low</option>
-          <option value="medium">medium</option>
-          <option value="high" selected>high</option>
-          <option value="xhigh">xhigh</option>
-        </select>
-      </label>
-      <label style="font-size:0.82rem;color:var(--ink-muted);">Target slides
-        <input type="number" name="slides" min="1" max="60" style="display:block;margin-top:0.3rem;width:6rem;">
-      </label>
-    </div>
-    {review_field}
-  </details>
-  <div class="btn-row" style="margin-top:1.25rem;"><button type="submit" class="primary">Redesign</button></div>
-</form>
-</div>"""
-
-
-def upload_form(error: str | None = None) -> str:
-    error_html = f'<div class="error">{_esc(error)}</div><div style="height:1rem"></div>' if error else ""
-    return f"""{error_html}<div class="card">
-<form class="drop" method="post" action="/fix" enctype="multipart/form-data" id="uploadForm">
-  <p>Choose a .pptx deck (max 50&nbsp;MB)</p>
-  <input type="file" name="file" accept=".pptx" required>
-  <div class="btn-row">
-    <button type="submit" class="primary" formaction="/fix">Fix deck</button>
-    <button type="submit" class="secondary" formaction="/audit">Audit only</button>
-  </div>
-  <label class="checkbox-row" style="margin-top:1rem;text-align:left;">
-    <input type="checkbox" name="rebuild_layouts" value="1">
-    <span>Also rebuild slides on a non-approved layout onto one that fits, verbatim (Fix deck only —
-      deterministic, no AI).</span>
-  </label>
-</form>
-</div>"""
-
-
-def learn_form(error: str | None = None) -> str:
-    error_html = f'<div class="error">{_esc(error)}</div><div style="height:1rem"></div>' if error else ""
-    return f"""{error_html}<div class="card">
-<form method="post" action="/learn" enctype="multipart/form-data">
-  <label class="field-label">Old deck (to be fixed)</label>
-  <input type="file" name="old_file" accept=".pptx" required style="margin-bottom:1rem;">
-  <label class="field-label">Reference deck (already on-brand)</label>
-  <input type="file" name="new_file" accept=".pptx" required style="margin-bottom:1rem;">
-  <button type="submit" class="primary">Learn &amp; transform</button>
-</form>
-</div>"""
-
-
-SAMPLE_OUTLINE = """slides:
-  - kind: cover
-    title: "Deck title"
-    subtitle: "Subtitle line"
-
-  - kind: agenda
-    title: "Agenda"
-    bullets: ["First topic", "Second topic", "Third topic"]
-
-  - kind: content
-    title: "Three priorities"
-    columns:
-      - ["Reliability", {level: 1, text: "Supporting detail"}]
-      - ["Speed"]
-      - ["Simplicity"]
-
-  - kind: quote
-    title: "Customer voice"
-    quote_text: "A short, punchy quote goes here."
-    quote_author: "Attribution"
-
-  - kind: end
-    title: "Thank you"
-"""
-
-
-def compose_form(error: str | None = None) -> str:
-    error_html = f'<div class="error">{_esc(error)}</div><div style="height:1rem"></div>' if error else ""
-    return f"""{error_html}<div class="card">
-<h2 style="margin-top:0;font-size:1.05rem;">Compose a new deck</h2>
-<p style="color:var(--ink-muted);font-size:0.88rem;margin:0 0 1rem;">
-  Describe your slides as a YAML outline; every slide is built directly on
-  one of the org template's own approved layouts, so there's nothing to fix
-  afterward. See the README for the full outline schema (slide kinds: cover,
-  agenda, section, content, quote, statement, stat, timeline, end, blank).
-</p>
-<p class="note">Don't want to hand-write YAML? Skip to <a href="#redesign">AI redesign</a>
-  below, leave "Existing deck" empty, and just type what the deck should be about — Claude
-  writes the outline and builds it on these same approved layouts.</p>
-<form method="post" action="/create">
-  <textarea name="outline" rows="16" style="width:100%;font-family:ui-monospace,'SF Mono',Consolas,monospace;
-    font-size:0.85rem;padding:0.75rem;border-radius:8px;border:1px solid var(--border);
-    background:var(--surface);color:var(--ink);" required>{_esc(SAMPLE_OUTLINE)}</textarea>
-  <div style="height:0.75rem"></div>
-  <label style="display:block;font-size:0.82rem;color:var(--ink-muted);margin-bottom:0.3rem;">
-    Optional: append these slides to an existing deck instead of starting a new one
-  </label>
-  <input type="file" name="existing_file" accept=".pptx" style="margin-bottom:1rem;">
-  <div class="btn-row">
-    <button type="submit" class="primary">Compose deck</button>
-  </div>
-</form>
-</div>"""
-
-
-def compose_result_page(out_name: str, result_dict: dict, download_links: dict) -> str:
-    stats = f"""<div class="stat-row">
-  <div class="stat"><b style="color:#1ED273">{result_dict['slide_count']}</b><span>slides built</span></div>
-  <div class="stat"><b>{len(result_dict['manual_review'])}</b><span>need review</span></div>
-</div>"""
-    dl = (
-        f'<a class="dl" href="{download_links["pptx"]}">Download composed .pptx</a>'
-        f'<a class="dl secondary" href="/">Compose another deck</a>'
-    )
-    layouts_used = ", ".join(sorted(set(result_dict["layouts_used"])))
-    body = f"""<div class="card"><h2 style="margin-top:0;font-size:1.05rem;">Composed — {_esc(out_name)}</h2>
-{stats}
-<p class="muted" style="margin:0.5rem 0 1rem;">Layouts used: {_esc(layouts_used)}</p>
-{dl}
-</div>
-<div class="card"><h3 style="margin-top:0;font-size:0.95rem;">Manual review ({len(result_dict['manual_review'])})</h3>
-<div class="table-wrap"><table>
-<thead><tr><th>Slide</th><th>Severity</th><th>Rule</th><th>Shape</th><th>Message</th><th>Fix?</th></tr></thead>
-<tbody>{_violation_rows(result_dict['manual_review'])}</tbody>
-</table></div></div>"""
-    return body
-
-
-def redesign_form(error: str | None = None, ai_enabled: bool = True) -> str:
-    error_html = f'<div class="error">{_esc(error)}</div><div style="height:1rem"></div>' if error else ""
-    mode_options = (
-        '<option value="rewrite" selected>AI rewrite — Claude picks each slide\'s layout and lays out its '
-        "existing wording verbatim, splitting dense slides across several if needed</option>"
-        '<option value="brand">Brand only — deterministic, no API call, wording and images kept exactly as written</option>'
-    ) if ai_enabled else (
-        '<option value="brand" selected>Brand only — deterministic, no API call, wording and images kept exactly as written</option>'
-    )
-    ai_note = "" if ai_enabled else (
-        '<p class="muted" style="margin:0 0 1rem;">AI rewrite mode isn\'t enabled on this server — set '
-        '<code>ANTHROPIC_API_KEY</code> to turn it on. Brand mode below needs no key: it never touches your '
-        "wording, it just carries the deck's own text and images onto approved, on-brand layouts.</p>"
-    )
-    review_row = (
-        """<label class="checkbox-row">
-    <input type="checkbox" name="review" value="1">
-    <span><strong>AI review</strong> (brand only, needs an API key) — one small extra call that rebuilds any
-    slide reading as a divider/transition page onto the org template's Section Divider layout, and flags
-    (never auto-fixes) leftover placeholder text or an odd confidentiality notice.</span>
-  </label>"""
-        if ai_enabled else ""
-    )
-    return f"""{error_html}<div class="card">
-<h2 style="margin-top:0;font-size:1.05rem;">Redesign a deck</h2>
-<p style="color:var(--ink-muted);font-size:0.88rem;margin:0 0 1rem;">
-  Two modes, and neither one ever rewords your existing content. <strong>AI rewrite</strong> works from any
-  starting point (an existing deck, a brief to fill its blank slides, or a brief alone with no deck at all) —
-  for a slide that already has real content, Claude only decides which layout fits it and, if it doesn't fit
-  on one slide, how to split its wording verbatim across several; a blank slide or a bare brief is the one
-  case it authors real content, grounded in what you tell it. <strong>Brand only</strong> needs an existing
-  deck and is fully deterministic — it carries the deck's own text and images onto approved layouts (picked
-  for visual variety, with the cover/closing slide swapped to the current brand look) and leaves everything
-  else exactly as written. Both modes run the same deterministic engine <code>create</code> uses for
-  color/font/layout compliance. A slide with a table, chart, or embedded media is always left alone and
-  reported, never guessed at, in either mode.
-</p>
-{ai_note}<form method="post" action="/redesign" enctype="multipart/form-data">
-  <label style="display:block;font-size:0.82rem;color:var(--ink-muted);margin-bottom:0.3rem;">
-    Existing deck (required for Brand only; optional for AI rewrite — omit to build a new deck from just the brief below)
-  </label>
-  <input type="file" name="file" accept=".pptx" style="margin-bottom:1rem;">
-  <label style="display:block;font-size:0.82rem;color:var(--ink-muted);margin-bottom:0.3rem;">Mode</label>
-  <select name="mode" style="display:block;margin-bottom:1rem;">{mode_options}</select>
-  {review_row}
-  <label style="display:block;font-size:0.82rem;color:var(--ink-muted);margin-bottom:0.3rem;">
-    Brief (AI rewrite only — required if no deck is uploaded; also authors any blank slides in an uploaded deck)
-  </label>
-  <textarea name="brief" rows="2" placeholder="e.g. a short deck on predictive maintenance for facilities managers"
-    style="width:100%;font-size:0.85rem;padding:0.6rem;border-radius:8px;border:1px solid var(--border);
-    background:var(--surface);color:var(--ink);margin-bottom:1rem;"></textarea>
-  <label style="display:block;font-size:0.82rem;color:var(--ink-muted);margin-bottom:0.3rem;">
-    Optional steering notes for the model (AI rewrite only)
-  </label>
-  <textarea name="notes" rows="2" placeholder="e.g. prefer stat slides for anything with a percentage"
-    style="width:100%;font-size:0.85rem;padding:0.6rem;border-radius:8px;border:1px solid var(--border);
-    background:var(--surface);color:var(--ink);margin-bottom:1rem;"></textarea>
-  <div style="display:flex;gap:1rem;margin-bottom:1rem;flex-wrap:wrap;">
-    <label style="font-size:0.82rem;color:var(--ink-muted);">Model (AI rewrite only)
-      <select name="model" style="display:block;margin-top:0.3rem;">
-        <option value="claude-opus-5" selected>claude-opus-5 (recommended)</option>
-        <option value="claude-sonnet-5">claude-sonnet-5 (cheaper)</option>
-      </select>
-    </label>
-    <label style="font-size:0.82rem;color:var(--ink-muted);">Effort (AI rewrite only)
-      <select name="effort" style="display:block;margin-top:0.3rem;">
-        <option value="low">low</option>
-        <option value="medium">medium</option>
-        <option value="high" selected>high</option>
-        <option value="xhigh">xhigh</option>
-      </select>
-    </label>
-    <label style="font-size:0.82rem;color:var(--ink-muted);">Target slide count (AI rewrite only)
-      <input type="number" name="slides" min="1" max="60" style="display:block;margin-top:0.3rem;width:6rem;">
-    </label>
-  </div>
-  <div class="btn-row">
-    <button type="submit" class="primary">Redesign</button>
-  </div>
-</form>
-</div>"""
-
-
-def redesign_result_page(deck_name: str, redesign_dict: dict, compose_dict: dict, download_links: dict) -> str:
-    usage = redesign_dict["usage"]
-    stats = f"""<div class="stat-row">
-  <div class="stat"><b style="color:#1ED273">{compose_dict['slide_count']}</b><span>slides built</span></div>
-  <div class="stat"><b>{len(redesign_dict['skipped'])}</b><span>skipped</span></div>
-  <div class="stat"><b>{len(compose_dict['manual_review'])}</b><span>need review</span></div>
-  <div class="stat"><b>${usage['estimated_cost_usd']:.3f}</b><span>est. cost</span></div>
-</div>"""
-    dl = (
-        f'<a class="dl" href="{download_links["pptx"]}">Download redesigned .pptx</a>'
-        f'<a class="dl secondary" href="/">Redesign another deck</a>'
-    )
-    layouts_used = ", ".join(sorted(set(compose_dict["layouts_used"])))
-    usage_line = (
-        "brand mode — fully deterministic, no API call made" if usage["model"] == "none" else
-        f"{_esc(usage['input_tokens'])} in / {_esc(usage['output_tokens'])} out tokens ({_esc(usage['model'])})"
-    )
-    skipped_rows = "".join(
-        f"<tr><td>{_esc(s['slide_index'])}</td><td>{_esc(s['reason'])}</td></tr>" for s in redesign_dict["skipped"]
-    ) or '<tr><td colspan="2" class="empty">Every slide was eligible.</td></tr>'
-    skipped_note = (
-        "Left untouched — carry a table, chart, embedded media, or too much text to migrate verbatim."
-        if usage["model"] == "none" else
-        "Never sent to the model — carry a table, chart, embedded media, or too much content to redesign safely."
-    )
-    review_notes = redesign_dict.get("review_notes") or []
-    review_section = ""
-    if review_notes:
-        items = "".join(f"<li>{_esc(n)}</li>" for n in review_notes)
-        review_section = f"""<div class="card"><h3 style="margin-top:0;font-size:0.95rem;">--review findings ({len(review_notes)})</h3>
-<p class="muted" style="margin:0 0 0.5rem;">Flagged for a human to look at — nothing here was auto-fixed beyond divider/transition slides.</p>
-<ul style="margin:0;padding-left:1.2rem;font-size:0.88rem;">{items}</ul>
-</div>"""
-    sev_counts = {"critical": 0, "major": 0, "minor": 0}
-    for v in compose_dict["manual_review"]:
-        if v["severity"] in sev_counts:
-            sev_counts[v["severity"]] += 1
-    pill = _status_pill(sev_counts["critical"], sev_counts["major"], sev_counts["minor"])
-    body = f"""<div class="card"><div class="result-head"><h2 style="font-size:1.05rem;">Redesigned — {_esc(deck_name)}</h2>{pill}</div>
-{stats}
-<p class="muted" style="margin:0.5rem 0 1rem;">Layouts used: {_esc(layouts_used)} &middot; {usage_line}</p>
-{dl}
-</div>
-{review_section}
-<div class="card"><h3 style="margin-top:0;font-size:0.95rem;">Skipped slides ({len(redesign_dict['skipped'])})</h3>
-<p class="muted" style="margin:0 0 0.5rem;">{skipped_note}</p>
-<div class="table-wrap"><table>
-<thead><tr><th>Slide</th><th>Reason</th></tr></thead>
-<tbody>{skipped_rows}</tbody>
-</table></div></div>
-<div class="card"><h3 style="margin-top:0;font-size:0.95rem;">Manual review ({len(compose_dict['manual_review'])})</h3>
-<div class="table-wrap"><table>
-<thead><tr><th>Slide</th><th>Severity</th><th>Rule</th><th>Shape</th><th>Message</th><th>Fix?</th></tr></thead>
-<tbody>{_violation_rows(compose_dict['manual_review'])}</tbody>
-</table></div></div>"""
-    return body
 
 
 def _status_pill(critical: int, major: int, minor: int) -> str:
@@ -714,28 +285,6 @@ def _status_pill(critical: int, major: int, minor: int) -> str:
     if minor:
         return f'<span class="pill pill-warn">{minor} minor</span>'
     return '<span class="pill pill-ok">All clear</span>'
-
-
-def _layout_rebuild_callout(violations: list[dict]) -> str:
-    """Fix corrects colors/fonts/effects on a slide's EXISTING layout --
-    it can never rebuild the layout itself, so a deck with slides on a
-    non-approved layout will still look structurally off no matter how
-    many times Fix runs. `non_standard_layout` (never auto-fixable) is
-    the precise signal for exactly that case -- surfaced here as a
-    pointer to Brand rebuild (deterministic, no AI) instead of leaving
-    someone to conclude Fix just doesn't work well."""
-    count = sum(1 for v in violations if v.get("rule") == "non_standard_layout")
-    if not count:
-        return ""
-    noun = "slide" if count == 1 else "slides"
-    verb = "uses" if count == 1 else "use"
-    return (
-        f'<div class="note">{count} {noun} {verb} a layout outside the approved template -- '
-        "Fix corrects colors/fonts on a slide, but can't rebuild its layout. "
-        '<a href="/#redesign">Try Brand rebuild</a> instead for a cleaner result: it rebuilds every eligible '
-        "slide onto an approved layout, carrying your content over verbatim -- still deterministic, no AI, "
-        "no API key needed.</div>"
-    )
 
 
 def _violation_rows(violations: list[dict]) -> str:
@@ -771,10 +320,10 @@ def audit_result_page(deck_name: str, summary: dict, violations: list[dict], dow
         f'<a class="dl secondary" href="/">Audit another deck</a>'
     )
     pill = _status_pill(summary["critical"], summary["major"], summary["minor"])
-    callout = _layout_rebuild_callout(violations)
     body = f"""<div class="card"><div class="result-head"><h2 style="font-size:1.05rem;">Audit — {_esc(deck_name)}</h2>{pill}</div>
 {stats}
-{callout}
+<div class="note">Audit is read-only. <a href="/">Transform this deck</a> to fix these — patches, layout
+rebuilds and archetype upgrades, each slide approved by you first.</div>
 <div class="table-wrap"><table>
 <thead><tr><th>Slide</th><th>Severity</th><th>Rule</th><th>Shape</th><th>Message</th><th>Fix?</th></tr></thead>
 <tbody>{_violation_rows(violations)}</tbody>
@@ -784,317 +333,201 @@ def audit_result_page(deck_name: str, summary: dict, violations: list[dict], dow
     return body
 
 
-def _change_rows(changes: list[dict]) -> str:
-    if not changes:
-        return '<tr><td colspan="5" class="empty">No changes applied.</td></tr>'
-    rows = []
-    for c in changes[:500]:
-        rows.append(
-            f"<tr><td>{_esc(c['scope'])}</td><td>{_esc(c.get('shape_name') or c.get('location') or '')}</td>"
-            f"<td>{_esc(c['rule'])}</td><td>{_esc(c['old'])}</td><td>{_esc(c['new'])}</td></tr>"
-        )
-    truncated = ""
-    if len(changes) > 500:
-        truncated = f'<tr><td colspan="5" class="empty">…and {len(changes) - 500} more (see the JSON download for the full list)</td></tr>'
-    return "".join(rows) + truncated
 
-
-def _color_select(field_name: str, current_hex: str, approved_colors: list[str]) -> str:
-    options = []
-    seen = set()
-    for hexval in approved_colors:
-        norm = hexval.lstrip("#").upper()
-        seen.add(norm)
-        selected = " selected" if norm == current_hex else ""
-        options.append(f'<option value="{_esc(norm)}"{selected}>#{_esc(norm)}</option>')
-    if current_hex not in seen:
-        options.insert(0, f'<option value="{_esc(current_hex)}" selected>#{_esc(current_hex)}</option>')
-    swatch_id = f"swatch_{_esc(field_name)}"
-    onchange = f"document.getElementById('{swatch_id}').style.background='#'+this.value"
-    return (
-        f'<span class="swatch" id="{swatch_id}" style="background:#{_esc(current_hex)}"></span>'
-        f'<select name="{_esc(field_name)}" onchange="{onchange}">{"".join(options)}</select>'
+def transform_card(ai_enabled: bool = True, error: str | None = None) -> str:
+    """The home page's single tool: one form, three optional inputs --
+    an old deck, a reference deck, a brief -- covering every starting
+    point the four old tabs handled between them. Deck alone =
+    fix/rebrand; deck + reference = the old Learn flow; brief alone =
+    a new deck; deck + brief isn't a combination the engine supports
+    yet, so the brief is ignored when a deck is present (said in the
+    hint, not silently)."""
+    error_html = f'<div class="error">{_esc(error)}</div><div style="height:1rem"></div>' if error else ""
+    ai_hint = (
+        "AI archetype suggestions are on (server has an API key) — each one still needs your approval."
+        if ai_enabled else
+        "No <code>ANTHROPIC_API_KEY</code> configured — deck transforms stay fully deterministic "
+        "(no archetype suggestions), and a brief-only new deck is unavailable."
     )
-
-
-def _font_select(field_name: str, current_font: str, approved_fonts: list[str]) -> str:
-    options = []
-    seen = set()
-    for font in approved_fonts:
-        seen.add(font)
-        selected = " selected" if font == current_font else ""
-        options.append(f'<option value="{_esc(font)}"{selected}>{_esc(font)}</option>')
-    if current_font not in seen:
-        options.insert(0, f'<option value="{_esc(current_font)}" selected>{_esc(current_font)}</option>')
-    return f'<select name="{_esc(field_name)}">{"".join(options)}</select>'
-
-
-def remap_override_section(
-    remap_summary: dict, approved_colors: list[str], approved_fonts: list[str], token: str
-) -> str:
-    colors = remap_summary.get("colors", [])
-    fonts = remap_summary.get("fonts", [])
-    if not colors and not fonts:
-        return ""
-
-    color_rows = ""
-    if colors:
-        rows = []
-        for row in colors:
-            old_hex, new_hex = row["old_hex"], row["new_hex"]
-            rows.append(
-                f"<tr><td><span class='swatch' style='background:#{_esc(old_hex)}'></span><code>#{_esc(old_hex)}</code></td>"
-                f"<td>&rarr;</td>"
-                f"<td>{_color_select(f'color_override__{old_hex}', new_hex, approved_colors)}</td>"
-                f"<td>{_esc(row['count'])}</td></tr>"
-            )
-        color_rows = f"""<h4 style="margin:1.25rem 0 0.5rem;font-size:0.85rem;">Colors</h4>
-<div class="table-wrap"><table>
-<thead><tr><th>Original</th><th></th><th>Remapped to</th><th>Uses</th></tr></thead>
-<tbody>{"".join(rows)}</tbody>
-</table></div>"""
-
-    font_rows = ""
-    if fonts:
-        rows = []
-        for row in fonts:
-            old_font, new_font = row["old_font"], row["new_font"]
-            rows.append(
-                f"<tr><td>{_esc(old_font)}</td><td>&rarr;</td>"
-                f"<td>{_font_select(f'font_override__{old_font}', new_font, approved_fonts)}</td>"
-                f"<td>{_esc(row['count'])}</td></tr>"
-            )
-        font_rows = f"""<h4 style="margin:1.25rem 0 0.5rem;font-size:0.85rem;">Fonts</h4>
-<div class="table-wrap"><table>
-<thead><tr><th>Original</th><th></th><th>Remapped to</th><th>Uses</th></tr></thead>
-<tbody>{"".join(rows)}</tbody>
-</table></div>"""
-
-    return f"""<div class="card">
-<h3 style="margin-top:0;font-size:0.95rem;">Review remapped colors &amp; fonts</h3>
-<p class="muted" style="margin:0 0 0.5rem;">Every original color/font found in the deck, and what it was
-remapped to. Pick a different target (constrained to the approved brand palette/fonts) and regenerate.</p>
-<form method="post" action="/regenerate/{_esc(token)}">
-{color_rows}
-{font_rows}
-<div style="height:1rem"></div>
-<button type="submit" class="primary">Regenerate with these choices</button>
+    return f"""{error_html}<div class="card tool-card">
+<form method="post" action="/plan" enctype="multipart/form-data">
+  <div class="field">
+    <label class="field-label">Deck to transform (.pptx)</label>
+    <input type="file" name="file" accept=".pptx">
+    <p class="field-hint">Leave empty to build a new deck from the brief below instead.</p>
+  </div>
+  <div class="field">
+    <label class="field-label">Reference deck (optional, already on-brand)</label>
+    <input type="file" name="reference" accept=".pptx">
+    <p class="field-hint">Slides sharing a layout with it keep that exact layout (chrome refreshed from the
+      reference), and the final audit includes a similarity report against it.</p>
+  </div>
+  <div class="field">
+    <label class="field-label">Brief (for a new deck, when no file is uploaded)</label>
+    <textarea name="brief" rows="2" placeholder="e.g. a Marketing Hub Q2 review: volume up ~2x, 91% resolution, 2025–2027 roadmap"
+      style="width:100%;font-size:0.85rem;padding:0.6rem;"></textarea>
+  </div>
+  <p class="field-hint" style="margin:0 0 1.1rem;">{ai_hint}</p>
+  <div class="btn-row">
+    <button type="submit" class="primary">Plan transform</button>
+    <button type="submit" class="secondary" formaction="/audit">Audit only</button>
+  </div>
 </form>
 </div>"""
 
 
-def fix_result_page(
-    deck_name: str,
-    fix_summary: dict,
-    changes: list[dict],
-    manual_review: list[dict],
-    download_links: dict,
-    migrate_note: str | None = None,
-    remap_summary: dict | None = None,
-    approved_colors: list[str] | None = None,
-    approved_fonts: list[str] | None = None,
-    token: str | None = None,
-) -> str:
-    stats = f"""<div class="stat-row">
-  <div class="stat"><b style="color:#1ED273">{fix_summary['changes_applied']}</b><span>changes applied</span></div>
-  <div class="stat"><b>{fix_summary['manual_review_required']}</b><span>need review</span></div>
-  <div class="stat"><b style="color:#FF5F28">{fix_summary['manual_review_by_severity']['critical']}</b><span>critical left</span></div>
+_ACTION_LABELS = {
+    "keep": "Keep (structure untouched; brand patches still apply)",
+    "rebuild": "Rebuild on layout",
+    "reference_layout": "Keep layout, refresh chrome from reference",
+    "archetype": "Use archetype",
+}
+
+
+def _review_card(entry: dict) -> str:
+    """One slide's review card: current preview | proposed preview,
+    plus the action radios. `entry` carries pre-rendered preview HTML
+    (built by the route, which has file access) and the plan fields."""
+    idx = entry["index"]
+    default = entry["default_action"]
+
+    options = []
+    if default == "keep":
+        reason = entry.get("reason") or "not eligible for a rebuild"
+        options.append(f'<p class="field-hint" style="margin:0;">Kept as-is: {_esc(reason)}.</p>')
+        options.append(f'<input type="hidden" name="action_{idx}" value="keep">')
+    else:
+        def radio(value: str, label: str) -> str:
+            checked = " checked" if value == default else ""
+            return (
+                f'<label class="checkbox-row" style="margin-bottom:0.35rem;">'
+                f'<input type="radio" name="action_{idx}" value="{value}"{checked}>'
+                f"<span>{label}</span></label>"
+            )
+        if entry.get("archetype_name"):
+            options.append(radio("archetype", f"{_ACTION_LABELS['archetype']} <b>{_esc(entry['archetype_name'])}</b>"))
+        if default == "reference_layout":
+            options.append(radio("rebuild", _ACTION_LABELS["reference_layout"]))
+        elif entry.get("layout_name"):
+            options.append(radio("rebuild", f"{_ACTION_LABELS['rebuild']} <b>{_esc(entry['layout_name'])}</b>"))
+        options.append(radio("keep", _ACTION_LABELS["keep"]))
+
+    current = entry.get("current_html") or ""
+    proposed = entry.get("proposed_html") or ""
+    cols = ""
+    if current and proposed:
+        cols = f"""<div class="review-cols">
+  <div><p class="prev-label">Current</p>{current}</div>
+  <div><p class="prev-label">Proposed</p>{proposed}</div>
 </div>"""
-    dl = (
-        f'<a class="dl" href="{download_links["pptx"]}">Download fixed .pptx</a>'
-        f'<a class="dl secondary" href="{download_links["json"]}">JSON change log</a>'
-        f'<a class="dl secondary" href="{download_links["md"]}">Markdown change log</a>'
-        f'<a class="dl secondary" href="/">Fix another deck</a>'
-    )
-    note_html = (
-        f'<p style="color:var(--ink-muted);font-size:0.85rem;margin-top:0.75rem;">{_esc(migrate_note)}</p>'
-        if migrate_note else ""
-    )
-    override_section = ""
-    if remap_summary is not None and token is not None:
-        override_section = remap_override_section(
-            remap_summary, approved_colors or [], approved_fonts or [], token
+    elif proposed:
+        cols = f'<div><p class="prev-label">Proposed</p>{proposed}</div>'
+    elif current:
+        cols = f'<div><p class="prev-label">Current</p>{current}</div>'
+
+    return f"""<div class="card">
+<h3 style="font-size:0.92rem;">Slide {idx}{': ' + _esc(entry.get('title_preview') or '') if entry.get('title_preview') else ''}</h3>
+{cols}
+<div style="margin-top:0.9rem;">{''.join(options)}</div>
+</div>"""
+
+
+def transform_review_page(deck_name: str, token: str, entries: list[dict], mode: str, ai_ran: bool) -> str:
+    """The human decision point: one card per slide, then one Transform
+    button. `mode` is "deck" or "brief" (brief cards are include/skip
+    checkboxes rather than action radios -- handled by the entries'
+    default "new" action rendering as a checkbox here)."""
+    if mode == "brief":
+        cards = []
+        for e in entries:
+            idx = e["index"]
+            cards.append(f"""<div class="card">
+<h3 style="font-size:0.92rem;">Slide {idx}: {_esc(e.get('archetype_name') or '')}</h3>
+<div><p class="prev-label">Proposed</p>{e.get('proposed_html') or ''}</div>
+<label class="checkbox-row" style="margin-top:0.9rem;">
+  <input type="checkbox" name="include_{idx}" value="1" checked>
+  <span>Include this slide</span>
+</label>
+</div>""")
+        cards_html = "".join(cards)
+        intro = "The planned deck, slide by slide — untick anything you don't want, then build."
+    else:
+        cards_html = "".join(_review_card(e) for e in entries)
+        ai_note = "" if ai_ran else (
+            '<p class="field-hint" style="margin:0.4rem 0 0;">Archetype suggestions were unavailable for this '
+            "plan (no API key or the call failed) — every proposal below is deterministic.</p>"
         )
-    by_sev = fix_summary["manual_review_by_severity"]
-    pill = _status_pill(by_sev["critical"], by_sev["major"], by_sev["minor"])
-    callout = _layout_rebuild_callout(manual_review)
-    body = f"""<div class="card"><div class="result-head"><h2 style="font-size:1.05rem;">Fixed — {_esc(deck_name)}</h2>{pill}</div>
-{stats}
-{dl}
-{note_html}
+        intro = f"Approve or override each slide, then transform. Nothing executes until you do.{ai_note}"
+
+    return f"""<div class="card"><div class="result-head"><h2 style="font-size:1.05rem;">Review plan — {_esc(deck_name)}</h2></div>
+<p class="muted" style="margin:0;">{intro}</p>
 </div>
-{callout}
-{override_section}
-<div class="card"><h3 style="margin-top:0;font-size:0.95rem;">Changes applied</h3>
-<div class="table-wrap"><table>
-<thead><tr><th>Scope</th><th>Where</th><th>Rule</th><th>Old</th><th>New</th></tr></thead>
-<tbody>{_change_rows(changes)}</tbody>
-</table></div></div>
-<div class="card"><h3 style="margin-top:0;font-size:0.95rem;">Manual review ({len(manual_review)})</h3>
-<div class="table-wrap"><table>
-<thead><tr><th>Slide</th><th>Severity</th><th>Rule</th><th>Shape</th><th>Message</th><th>Fix?</th></tr></thead>
-<tbody>{_violation_rows(manual_review)}</tbody>
-</table></div></div>"""
-    return body
+<form method="post" action="/transform/{_esc(token)}">
+{cards_html}
+<div class="card" style="text-align:center;">
+  <button type="submit" class="primary">Transform deck</button>
+  <a class="dl secondary" href="/" style="margin-left:0.6rem;">Start over</a>
+</div>
+</form>"""
 
 
-def _color_proposal_rows(proposals: list[dict]) -> str:
-    if not proposals:
-        return '<tr><td colspan="6" class="empty">No color differences found.</td></tr>'
-    rows = []
-    for p in proposals:
-        conf_color = "#1ED273" if p["confidence"] == "high" else "#FFA023"
-        rows.append(
-            f"<tr><td><span class='sev' style='background:{conf_color}'></span>{_esc(p['confidence'])}</td>"
-            f"<td>{_esc(p['role'])}</td>"
-            f"<td><span style='display:inline-block;width:14px;height:14px;border-radius:4px;"
-            f"background:#{_esc(p['old_hex'])};vertical-align:-2px;margin-right:0.3em;'></span><code>#{_esc(p['old_hex'])}</code></td>"
-            f"<td><span style='display:inline-block;width:14px;height:14px;border-radius:4px;"
-            f"background:#{_esc(p['new_hex'])};vertical-align:-2px;margin-right:0.3em;'></span><code>#{_esc(p['new_hex'])}</code></td>"
-            f"<td>{_esc(p['old_count'])}</td><td>{_esc(p['new_count'])}</td></tr>"
-        )
-    return "".join(rows)
-
-
-def _font_proposal_rows(proposals: list[dict]) -> str:
-    if not proposals:
-        return '<tr><td colspan="5" class="empty">No font differences found.</td></tr>'
-    rows = []
-    for p in proposals:
-        conf_color = "#1ED273" if p["confidence"] == "high" else "#FFA023"
-        old_label = p["old_font"] + (" (bold)" if p["old_bold"] else "")
-        new_label = p["new_font"] + (" (bold)" if p["new_bold"] else "")
-        rows.append(
-            f"<tr><td><span class='sev' style='background:{conf_color}'></span>{_esc(p['confidence'])}</td>"
-            f"<td>{_esc(old_label)}</td><td>{_esc(new_label)}</td>"
-            f"<td>{_esc(p['old_count'])}</td><td>{_esc(p['new_count'])}</td></tr>"
-        )
-    return "".join(rows)
-
-
-def _layout_panel_proposal_rows(proposals: list[dict]) -> str:
-    if not proposals:
-        return '<tr><td colspan="7" class="empty">No layout background-panel differences found.</td></tr>'
-    rows = []
-    for p in proposals:
-        conf_color = "#1ED273" if p["confidence"] == "high" else "#FFA023"
-        rows.append(
-            f"<tr><td><span class='sev' style='background:{conf_color}'></span>{_esc(p['confidence'])}</td>"
-            f"<td>{_esc(p['layout_name'])}</td>"
-            f"<td>{_esc(p['old_shape_name'])}</td><td>{_esc(p['new_shape_name'])}</td>"
-            f"<td><span style='display:inline-block;width:14px;height:14px;border-radius:4px;"
-            f"background:#{_esc(p['old_hex'])};vertical-align:-2px;margin-right:0.3em;'></span><code>#{_esc(p['old_hex'])}</code></td>"
-            f"<td><span style='display:inline-block;width:14px;height:14px;border-radius:4px;"
-            f"background:#{_esc(p['new_hex'])};vertical-align:-2px;margin-right:0.3em;'></span><code>#{_esc(p['new_hex'])}</code></td>"
-            f"<td>{_esc(p['area_sq_in'])}</td></tr>"
-        )
-    return "".join(rows)
-
-
-def learn_result_page(
-    old_name: str,
-    new_name: str,
-    result_dict: dict,
-    compose_dict: dict,
-    redesign_dict: dict,
-    applied_count: int,
-    download_links: dict,
+def transform_result_page(
+    deck_name: str, outcome: dict, audit: dict, similarity: dict | None, download_links: dict,
 ) -> str:
-    color_proposals = result_dict["color_proposals"]
-    font_proposals = result_dict["font_proposals"]
-    layout_panel_proposals = result_dict.get("layout_panel_proposals", [])
-    all_proposals = color_proposals + font_proposals + layout_panel_proposals
-    n_high = sum(1 for p in all_proposals if p["confidence"] == "high")
-    n_low = sum(1 for p in all_proposals if p["confidence"] == "low")
-
+    summary = audit["summary"]
+    pill = _status_pill(summary["critical"], summary["major"], summary["minor"])
     stats = f"""<div class="stat-row">
-  <div class="stat"><b style="color:#1ED273">{n_high}</b><span>high-confidence</span></div>
-  <div class="stat"><b style="color:#FFA023">{n_low}</b><span>low-confidence</span></div>
-  <div class="stat"><b style="color:#1ED273">{compose_dict['slide_count']}</b><span>slides rebuilt</span></div>
-  <div class="stat"><b>{len(redesign_dict['skipped'])}</b><span>skipped</span></div>
-  <div class="stat"><b>{len(compose_dict['manual_review'])}</b><span>need review</span></div>
+  <div class="stat"><b style="color:#1ED273">{len(outcome['rebuilt'])}</b><span>rebuilt</span></div>
+  <div class="stat"><b>{len(outcome['archetype_swapped'])}</b><span>archetypes</span></div>
+  <div class="stat"><b>{len(outcome['reference_carryover'])}</b><span>ref layouts</span></div>
+  <div class="stat"><b>{len(outcome['kept'])}</b><span>kept</span></div>
 </div>"""
-
     dl = (
         f'<a class="dl" href="{download_links["pptx"]}">Download transformed .pptx</a>'
-        f'<a class="dl secondary" href="{download_links["yaml"]}">Updated brand_rules.yaml</a>'
-        f'<a class="dl secondary" href="{download_links["json"]}">Full proposal (JSON)</a>'
-        f'<a class="dl secondary" href="/">Try another pair</a>'
+        f'<a class="dl secondary" href="{download_links["json"]}">JSON report</a>'
+        f'<a class="dl secondary" href="/">Transform another deck</a>'
+    )
+    suppressed = audit.get("suppressed_archetype_findings", 0)
+    suppressed_note = (
+        f'<p class="field-hint" style="margin:0.5rem 0 0;">{suppressed} finding(s) on archetype-rendered slides '
+        "excluded — those slides are brand-compliant by construction; the generic rules false-positive on their "
+        "deliberate styling.</p>"
+        if suppressed else ""
     )
 
-    low_note = ""
-    if n_low:
-        low_note = (
-            f'<p style="color:var(--ink-muted);font-size:0.85rem;margin-top:0.75rem;">'
-            f"{n_low} low-confidence difference(s) were <b>not</b> applied automatically — "
-            f"review them below and re-run with the CLI's <code>--min-confidence low</code> if they're correct.</p>"
-        )
-
-    layouts_used = ", ".join(sorted(set(compose_dict["layouts_used"])))
-    note = (
-        f'<p class="muted" style="margin:0.5rem 0 0;">The old deck\'s own wording and images were carried over '
-        f"verbatim, rebuilt onto the org template's approved layouts (used: {_esc(layouts_used)}) with the "
-        f"color/font differences learned above applied on top.</p>"
-    )
-
-    review_notes = redesign_dict.get("review_notes") or []
-    review_section = ""
-    if review_notes:
-        items = "".join(f"<li>{_esc(n)}</li>" for n in review_notes)
-        review_section = f"""<div class="card"><h3 style="margin-top:0;font-size:0.95rem;">AI review findings ({len(review_notes)})</h3>
-<p class="muted" style="margin:0 0 0.5rem;">Flagged for a human to look at — nothing here was auto-fixed beyond divider/transition slides.</p>
-<ul style="margin:0;padding-left:1.2rem;font-size:0.88rem;">{items}</ul>
+    similarity_card = ""
+    if similarity is not None:
+        colors = similarity["colors_not_in_reference"]
+        fonts = similarity["fonts_not_in_reference"]
+        color_bits = " ".join(
+            f'<span class="swatch" style="background:#{_esc(c)}"></span><code>#{_esc(c)}</code>' for c in colors[:8]
+        ) or '<span class="muted">none — every color also appears in the reference</span>'
+        font_bits = ", ".join(_esc(f) for f in fonts[:8]) or "none — every font also appears in the reference"
+        similarity_card = f"""<div class="card"><h3 style="font-size:0.95rem;">Vs. reference deck</h3>
+<div class="stat-row">
+  <div class="stat"><b>{similarity['layout_matches']}/{similarity['slides_compared']}</b><span>layouts match</span></div>
+  <div class="stat"><b>{len(colors)}</b><span>extra colors</span></div>
+  <div class="stat"><b>{len(fonts)}</b><span>extra fonts</span></div>
+</div>
+<p class="muted" style="margin:0 0 0.4rem;">Colors used here but never in the reference: {color_bits}</p>
+<p class="muted" style="margin:0;">Fonts used here but never in the reference: {font_bits}</p>
 </div>"""
 
-    reference_match_notes = redesign_dict.get("reference_match_notes") or []
-    reference_match_section = ""
-    if reference_match_notes:
-        items = "".join(f"<li>{_esc(n)}</li>" for n in reference_match_notes)
-        reference_match_section = f"""<div class="card"><h3 style="margin-top:0;font-size:0.95rem;">Exact reference match</h3>
-<p class="muted" style="margin:0 0 0.5rem;">Wherever a shape's identity (name, at the same slide position) survives
-into the reference deck, its exact fill/line/font treatment was copied onto that one shape — precise per-element
-matching on top of the color/font differences above, never written to brand_rules.yaml. Slides the reference
-redraws from scratch (different shapes entirely) are flagged for you to finish by hand instead of guessed at.</p>
-<ul style="margin:0;padding-left:1.2rem;font-size:0.88rem;">{items}</ul>
-</div>"""
-
-    skipped_rows = "".join(
-        f"<tr><td>{_esc(s['slide_index'])}</td><td>{_esc(s['reason'])}</td></tr>" for s in redesign_dict["skipped"]
-    ) or '<tr><td colspan="2" class="empty">Every slide was eligible.</td></tr>'
-
-    body = f"""<div class="card"><h2 style="margin-top:0;font-size:1.05rem;">Learned — {_esc(old_name)} → {_esc(new_name)}</h2>
+    violations = [
+        v if isinstance(v, dict) else {
+            "slide_index": v.slide_index, "severity": v.severity, "rule": v.rule,
+            "shape_name": v.shape_name, "message": v.message, "auto_fixable": v.auto_fixable,
+        }
+        for v in audit["violations"]
+    ]
+    return f"""<div class="card"><div class="result-head"><h2 style="font-size:1.05rem;">Transformed — {_esc(deck_name)}</h2>{pill}</div>
 {stats}
 {dl}
-{note}
-{low_note}
 </div>
-{review_section}
-{reference_match_section}
-<div class="card"><h3 style="margin-top:0;font-size:0.95rem;">Skipped slides ({len(redesign_dict['skipped'])})</h3>
-<p class="muted" style="margin:0 0 0.5rem;">Left untouched — carry a table, chart, embedded media, or too much text to migrate verbatim.</p>
-<div class="table-wrap"><table>
-<thead><tr><th>Slide</th><th>Reason</th></tr></thead>
-<tbody>{skipped_rows}</tbody>
-</table></div></div>
-<div class="card"><h3 style="margin-top:0;font-size:0.95rem;">Manual review ({len(compose_dict['manual_review'])})</h3>
+{similarity_card}
+<div class="card"><h3 style="font-size:0.95rem;">Remaining findings ({len(violations)})</h3>
+{suppressed_note}
 <div class="table-wrap"><table>
 <thead><tr><th>Slide</th><th>Severity</th><th>Rule</th><th>Shape</th><th>Message</th><th>Fix?</th></tr></thead>
-<tbody>{_violation_rows(compose_dict['manual_review'])}</tbody>
-</table></div></div>
-<div class="card"><h3 style="margin-top:0;font-size:0.95rem;">Color differences</h3>
-<div class="table-wrap"><table>
-<thead><tr><th>Confidence</th><th>Role</th><th>Old</th><th>New</th><th>Old count</th><th>New count</th></tr></thead>
-<tbody>{_color_proposal_rows(color_proposals)}</tbody>
-</table></div></div>
-<div class="card"><h3 style="margin-top:0;font-size:0.95rem;">Font differences</h3>
-<div class="table-wrap"><table>
-<thead><tr><th>Confidence</th><th>Old</th><th>New</th><th>Old count</th><th>New count</th></tr></thead>
-<tbody>{_font_proposal_rows(font_proposals)}</tbody>
-</table></div></div>
-<div class="card"><h3 style="margin-top:0;font-size:0.95rem;">Layout background-panel differences</h3>
-<p style="color:var(--ink-muted);font-size:0.85rem;margin-top:-0.25rem;">Large background panels defined on a slide layout rather than any slide — invisible to ordinary slide-level color remap.</p>
-<div class="table-wrap"><table>
-<thead><tr><th>Confidence</th><th>Layout</th><th>Old shape</th><th>New shape</th><th>Old</th><th>New</th><th>Area (in²)</th></tr></thead>
-<tbody>{_layout_panel_proposal_rows(layout_panel_proposals)}</tbody>
+<tbody>{_violation_rows(violations)}</tbody>
 </table></div></div>"""
-    return body
