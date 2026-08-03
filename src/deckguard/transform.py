@@ -69,6 +69,11 @@ class SlidePlan:
     # (ineligible/keep-only ones).
     title: Optional[str] = None
     text_blocks: list = field(default_factory=list)  # list[list[str]]
+    # Where the archetype came from ("model" | "structural") and what it
+    # costs: how many content chunks it can't hold, out of how many.
+    archetype_source: Optional[str] = None
+    archetype_dropped: int = 0
+    content_chunks: int = 0
 
 
 @dataclass
@@ -76,6 +81,45 @@ class TransformPlan:
     slides: list  # list[SlidePlan]
     ai_suggestions_ran: bool = False
     deck_title: Optional[str] = None  # brief-only plans: the planned cover title
+
+
+def _readable_text(slide) -> tuple:
+    """Every non-empty line on a slide, groups included, as
+    (title, text_blocks) -- enough to offer an archetype for a slide no
+    org-template layout can accept. Deliberately dumber than
+    `_extract_slide_content`: no placeholder-role reasoning, no
+    eligibility judgement, just the words."""
+    blocks: list = []
+    title = None
+    for shape in slide.shapes:
+        for candidate in _iter_shapes(shape):
+            if not getattr(candidate, "has_text_frame", False):
+                continue
+            lines = [
+                para.text.strip()
+                for para in candidate.text_frame.paragraphs
+                if para.text and para.text.strip()
+            ]
+            if not lines:
+                continue
+            if title is None and candidate == slide.shapes.title:
+                title = " ".join(lines)
+                continue
+            blocks.append(lines)
+    if title is None and blocks:
+        title = blocks[0][0]
+    return title, blocks
+
+
+def _iter_shapes(shape):
+    """Depth-first over a live python-pptx shape and any group children."""
+    yield shape
+    try:
+        if shape.shape_type is not None and shape.shape_type.name == "GROUP":
+            for child in shape.shapes:
+                yield from _iter_shapes(child)
+    except (AttributeError, ValueError):
+        return
 
 
 def plan_transform(
@@ -112,6 +156,7 @@ def plan_transform(
     prs = Presentation(str(deck_path))
     slide_height_in = prs.slide_height / 914400 if prs.slide_height else None
     content_by_index: dict = {}
+    readable_by_index: dict = {}  # {index: (title, text_blocks)} for reason-bearing slides
     for p in plan.proposals:
         if p.slide_index in reference_indices:
             continue
@@ -123,12 +168,22 @@ def plan_transform(
         # it stays keep-only and says so.
         if not reason:
             content_by_index[p.slide_index] = (title, text_blocks, images)
+        else:
+            # A reason means no ORG-TEMPLATE rebuild is safe -- a group
+            # or an embedded object can't be reflowed into placeholders.
+            # It does not mean the slide has nothing to say. Reading its
+            # words straight off the shape tree (groups included) is
+            # enough to offer an archetype, which is the only route
+            # these slides ever had; leaving them with none is what made
+            # a third of a real deck un-actionable.
+            readable_by_index[p.slide_index] = _readable_text(prs.slides[p.slide_index - 1])
 
     suggestions: dict = {}
     ai_ran = False
     if suggest_archetypes:
         from deckguard.skill_bridge import (
             archetype_suggestions_available,
+            match_archetypes,
             select_archetype_overrides_for_rebrand,
         )
 
@@ -150,6 +205,47 @@ def plan_transform(
                     profile_by_index, model=model, api_key=api_key, client=client,
                 )
 
+    # Every slide the tool can READ now has an archetype it could become,
+    # model or no model. Choosing a new format for an old slide sounds
+    # like a job only a model can do; the part that genuinely needs
+    # judgement is narrower -- which of several plausible formats reads
+    # best, and how the copy should be reworded. What CAN hold the
+    # content is a fitting problem, and the archetype library states its
+    # own capacity. Before this, the model was the ONLY route, so a
+    # keyless server offered nothing but "keep" on every dense slide.
+    structural: dict = {}
+    if suggest_archetypes:
+        from deckguard.skill_bridge import match_archetypes as _match
+
+        cover_end = {plan.cover_index, plan.end_index}
+        pool = {
+            idx: ([[text for _level, text in block] for block in blocks], len(images))
+            for idx, (title, blocks, images) in content_by_index.items()
+        }
+        titles = {idx: t for idx, (t, _b, _i) in content_by_index.items()}
+        for idx, (title, blocks) in readable_by_index.items():
+            pool[idx] = (blocks, 0)
+            titles[idx] = title
+        # Picking each slide's single best fit independently gave a deck
+        # where six of eight slides became the same archetype -- every
+        # one individually defensible, the deck as a whole monotonous.
+        # A short memory of what the previous slides used breaks the tie
+        # in favour of variety, and only ever among candidates that
+        # already fit.
+        recent: list = []
+        for idx in sorted(pool):
+            if idx in suggestions or idx in cover_end:
+                continue
+            flat, image_count = pool[idx]
+            candidates = _match(titles.get(idx), flat, image_count=image_count, limit=4)
+            if not candidates:
+                continue
+            fresh = [c for c in candidates if c["archetype"] not in recent]
+            chosen = fresh[0] if fresh else candidates[0]
+            structural[idx] = chosen
+            recent.append(chosen["archetype"])
+            del recent[:-2]  # remember only the last two
+
     slides = []
     for p in plan.proposals:
         if p.slide_index in suggestions:
@@ -166,12 +262,26 @@ def plan_transform(
             default_action = "keep"
         else:
             default_action = "keep"
+        match = structural.get(p.slide_index)
+        archetype = suggestions.get(p.slide_index)
+        source = "model" if archetype else ("structural" if match else None)
+        if archetype is None and match:
+            archetype = match["content"]
+            # A structural match that loses nothing is strictly better
+            # than leaving an old slide as it was; one that would drop
+            # content is offered, never imposed -- that call is the
+            # reviewer's, and the card says what it costs.
+            if default_action == "keep" and match["dropped"] == 0:
+                default_action = "archetype"
         slides.append(
             SlidePlan(
                 index=p.slide_index,
                 default_action=default_action,
                 layout_name=p.layout_name,
-                archetype=suggestions.get(p.slide_index),
+                archetype=archetype,
+                archetype_source=source,
+                archetype_dropped=match["dropped"] if match else 0,
+                content_chunks=(match["dropped"] + match["capacity"]) if match else 0,
                 reason=p.reason,
                 title_preview=p.title_preview,
                 body_preview=p.body_preview,

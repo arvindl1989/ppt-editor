@@ -61,15 +61,20 @@ def test_plan_transform_merges_deterministic_proposals_with_ai_suggestions(tmp_p
 
 
 def test_plan_transform_degrades_to_deterministic_with_no_api_key(tmp_path, monkeypatch):
-    """No key, no client -> plan still succeeds, just without archetype
-    suggestions -- the AI step must never be load-bearing."""
+    """No key, no client -> the plan still succeeds AND still offers
+    archetypes, matched structurally rather than by a model. The AI step
+    must never be load-bearing -- and "not load-bearing" has to mean
+    degrading to a deterministic answer, not to no answer at all."""
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     src = _three_slide_deck(tmp_path)
 
     plan = plan_transform(str(src))
 
-    assert all(s.archetype is None for s in plan.slides)
+    assert plan.ai_suggestions_ran is False
     assert {s.default_action for s in plan.slides} == {"rebuild"}
+    body = [s for s in plan.slides if s.index == 2][0]
+    assert body.archetype is not None
+    assert body.archetype_source == "structural"
 
 
 @needs_skill
@@ -99,17 +104,34 @@ def test_execute_transform_honors_per_slide_choices(tmp_path):
 
 
 @needs_skill
-def test_execute_transform_downgrades_archetype_choice_without_a_suggestion(tmp_path):
-    """A stray "archetype" action for a slide the plan never suggested
-    one for degrades to a rebuild -- never invents content, never fails."""
+def test_execute_transform_downgrades_archetype_choice_with_nothing_to_render(tmp_path):
+    """A stray "archetype" action for a slide that has NO archetype at
+    all in the plan degrades to a rebuild -- never invents content,
+    never fails. (A slide the structural matcher did find an archetype
+    for is a different case: that one renders, see below.)"""
     src = _three_slide_deck(tmp_path)
-    plan = plan_transform(str(src), client=_FakeClient(_FakeResponse(json.dumps({"overrides": []}))))
+    plan = plan_transform(str(src), suggest_archetypes=False)
     out = tmp_path / "out.pptx"
 
     outcome = execute_transform(str(src), str(out), plan, actions={2: "archetype"})
 
     assert 2 in outcome.rebuilt
     assert outcome.archetype_swapped == []
+
+
+@needs_skill
+def test_a_structurally_matched_archetype_actually_renders(tmp_path):
+    """The point of matching without a model: choosing that offered
+    archetype has to execute, not quietly fall back to a rebuild."""
+    src = _three_slide_deck(tmp_path)
+    plan = plan_transform(str(src), suggest_archetypes=True, client=None, api_key=None)
+    body = [s for s in plan.slides if s.index == 2][0]
+    assert body.archetype_source == "structural"
+
+    out = tmp_path / "out.pptx"
+    outcome = execute_transform(str(src), str(out), plan, actions={2: "archetype"})
+
+    assert outcome.archetype_swapped == [2]
 
 
 @needs_skill
@@ -444,7 +466,8 @@ def test_plan_says_suggestions_are_off_when_the_server_has_no_key(tmp_path, monk
 
     plan = plan_transform(str(src))
     assert plan.ai_suggestions_ran is False
-    assert all(s.archetype is None for s in plan.slides)
+    # ...but archetypes are still offered, matched structurally
+    assert any(s.archetype_source == "structural" for s in plan.slides)
 
     with_key = plan_transform(str(src), client=_FakeClient(_FakeResponse(_hero_stat_override(2))))
     assert with_key.ai_suggestions_ran is True

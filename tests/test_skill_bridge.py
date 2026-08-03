@@ -651,3 +651,65 @@ def test_archetype_suggestions_availability_reports_a_keyless_server(monkeypatch
 
     monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
     assert archetype_suggestions_available() is True
+
+
+def test_every_archetype_exposes_a_machine_readable_shape():
+    """The matcher reads the skill's own region/group data, so a skill
+    update changes what can be matched with no code change here."""
+    from deckguard.skill_bridge import archetype_signatures
+
+    sigs = archetype_signatures()
+    assert len(sigs) >= 20
+    assert all(s["name"] and isinstance(s["capacity"], int) for s in sigs)
+    # only an archetype needing content nothing can synthesise (a real
+    # table) is excluded from matching
+    assert sum(1 for s in sigs if s["unfillable"]) <= 2
+
+
+def test_a_slide_is_matched_to_an_archetype_without_any_model():
+    """The capability the whole thing turns on: the model was the ONLY
+    route to an archetype, so a keyless server offered dense slides
+    nothing but "keep"."""
+    from deckguard.skill_bridge import match_archetypes
+
+    blocks = [[f"Point {i}: something the slide says"] for i in range(8)]
+    candidates = match_archetypes("Subject: get ready for your next project", blocks, image_count=4)
+
+    assert candidates, "a readable slide must always have somewhere to go"
+    best = candidates[0]
+    assert best["content"]["archetype"] == best["archetype"]
+    # 8 chunks into a 6-slot archetype: 6 kept, 2 honestly reported lost
+    assert best["capacity"] >= 5
+    assert best["dropped"] == len(blocks) - best["capacity"]
+
+
+def test_matching_prefers_the_archetype_whose_capacity_fits():
+    from deckguard.skill_bridge import match_archetypes
+
+    three = match_archetypes("A title", [["A", "detail"], ["B", "detail"], ["C", "detail"]])
+    assert three[0]["capacity"] == 3 and three[0]["dropped"] == 0
+
+    two = match_archetypes("A title", [["Left", "why"], ["Right", "why"]])
+    assert two[0]["dropped"] == 0
+
+
+def test_a_stat_slide_matches_a_stat_archetype():
+    """Archetypes with a value slot are only offered when the slide
+    actually has a number to put in it."""
+    from deckguard.skill_bridge import archetype_signatures, match_archetypes
+
+    value_archetypes = {s["name"] for s in archetype_signatures() if s["needs_value"]}
+    with_stat = match_archetypes("Resolution rate", [["91.2%", "of requests cleared"]])
+    assert any(c["archetype"] in value_archetypes for c in with_stat)
+
+    without = match_archetypes("Some words", [["No numbers here", "none at all"]])
+    assert all(c["archetype"] not in value_archetypes for c in without)
+
+
+def test_matched_content_uses_the_slides_own_words():
+    from deckguard.skill_bridge import match_archetypes
+
+    best = match_archetypes("Quarter in review", [["Requests in", "739 across three teams"]])[0]
+    flat = json.dumps(best["content"])
+    assert "Quarter in review" in flat
+    assert "Requests in" in flat

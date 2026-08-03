@@ -729,6 +729,219 @@ def _validate_overrides(raw_overrides: list, candidate_indices: set) -> dict:
     return overrides
 
 
+# --------------------------------------------------------------------------
+# Structural archetype matching -- mapping an old slide onto a new format
+# WITHOUT a model. See `match_archetypes` for why this exists.
+# --------------------------------------------------------------------------
+
+# Roles whose content this can't synthesise from an old slide's text.
+# A table needs real headers/rows; a photo can be filled from the KONE
+# library (see `fill_empty_photo_slots`) and a figure gets the skill's
+# own bundled chart art, so neither disqualifies an archetype.
+_UNFILLABLE_ROLES = {"table"}
+_TEXT_ROLES = {
+    "title", "heading", "eyebrow", "eyebrow_light", "title_light", "body", "body_muted",
+    "caption", "quote", "attribution", "label", "statement", "on_panel_heading",
+    "on_panel_body", "price", "item",
+}
+_VALUE_ROLES = {"stat_value", "stat_value_md", "hero_value"}
+_LIST_ROLES = {"bullets"}
+
+_signature_cache: Optional[list] = None
+
+
+def archetype_signatures() -> list:
+    """One machine-readable shape per archetype, derived at runtime from
+    the skill's own region/group data -- so a skill update changes what
+    can be matched with no code change here, the same contract the
+    renderer and the previews already follow.
+
+    Each signature says what the archetype can HOLD: how many repeating
+    items, which content key each slot reads, and whether it needs a
+    value, a picture, a chart or a table.
+    """
+    global _signature_cache
+    if _signature_cache is not None:
+        return _signature_cache
+    try:
+        mod = _load_archetypes()
+    except RedesignError:
+        return []
+
+    catalog = _kone_catalog() or {}
+    signatures = []
+    for name, arch in mod.ARCHETYPES.items():
+        regions = arch.get("regions", []) or []
+        groups = arch.get("groups", []) or []
+        roles = {r.get("role") for r in regions}
+        for grp in groups:
+            roles |= {r.get("role") for r in grp.get("regions", [])}
+
+        group = None
+        for grp in groups:
+            item_roles = [(r.get("role"), r.get("content")) for r in grp.get("regions", [])]
+            if any(role in _TEXT_ROLES | _LIST_ROLES for role, _key in item_roles):
+                group = {
+                    "key": grp["content"],
+                    "capacity": len(grp["origins"]),
+                    "slots": [(role, key) for role, key in item_roles if key],
+                }
+                break
+
+        signatures.append({
+            "name": name,
+            "regions": [(r.get("role"), r.get("content")) for r in regions if r.get("content")],
+            "group": group,
+            "capacity": group["capacity"] if group else 0,
+            "needs_value": bool(roles & _VALUE_ROLES),
+            "unfillable": bool(roles & _UNFILLABLE_ROLES),
+            "keywords": [k.lower() for k in (catalog.get(name, {}).get("keywords") or [])],
+            "purpose": (catalog.get(name, {}).get("purpose") or ""),
+        })
+    _signature_cache = signatures
+    return signatures
+
+
+def _looks_like_a_value(text: str) -> bool:
+    """A short token carrying a number -- "91.2%", "739", "2x", "€1.4M"."""
+    stripped = text.strip()
+    return bool(stripped) and len(stripped) <= 12 and any(c.isdigit() for c in stripped)
+
+
+def _chunk_slide(title: Optional[str], text_blocks: list) -> tuple:
+    """Turn an old slide's extracted text into (title, chunks, values).
+
+    A chunk is one repeatable unit -- a heading plus whatever supports
+    it -- which is exactly the shape every archetype's group takes. A
+    text block whose first line is short and whose remainder is longer
+    reads as heading + body; a block of similar-length lines reads as a
+    list of separate points.
+    """
+    blocks = [[line for line in block if str(line).strip()] for block in text_blocks or []]
+    blocks = [b for b in blocks if b]
+
+    resolved_title = title
+    if not resolved_title and blocks:
+        resolved_title = blocks[0][0]
+        blocks[0] = blocks[0][1:]
+        blocks = [b for b in blocks if b]
+
+    chunks, values = [], []
+    for block in blocks:
+        head = str(block[0]).strip()
+        rest = [str(line).strip() for line in block[1:]]
+        if _looks_like_a_value(head):
+            values.append(head)
+        if len(block) == 1:
+            chunks.append({"heading": head, "body": [], "text": head})
+        elif len(head) <= 60:
+            chunks.append({"heading": head, "body": rest, "text": " ".join([head] + rest)})
+        else:
+            for line in block:
+                chunks.append({"heading": str(line).strip(), "body": [], "text": str(line).strip()})
+    return resolved_title, chunks, values
+
+
+def _fit_content(signature: dict, title: Optional[str], chunks: list, values: list, image_count: int) -> dict:
+    """Pour the slide's own words into this archetype's slots."""
+    content: dict = {"archetype": signature["name"]}
+    spare = [c for c in chunks]
+
+    for role, key in signature["regions"]:
+        if role in ("title", "title_light", "statement", "quote"):
+            content[key] = title or (spare[0]["heading"] if spare else "")
+        elif role in _VALUE_ROLES:
+            content[key] = values[0] if values else (spare[0]["heading"] if spare else "")
+        elif role in ("eyebrow", "eyebrow_light", "label"):
+            content[key] = (title or "").split(":")[0][:40] if title else ""
+        elif role in _TEXT_ROLES:
+            source = spare.pop() if spare else None
+            content[key] = source["text"] if source else ""
+
+    group = signature["group"]
+    if group:
+        capacity = group["capacity"]
+        items = []
+        for i, chunk in enumerate(spare[:capacity], start=1):
+            item = {}
+            for role, key in group["slots"]:
+                if role == "number":
+                    item[key] = f"{i:02d}"
+                elif role in _LIST_ROLES:
+                    item[key] = chunk["body"] or [chunk["heading"]]
+                elif role in _VALUE_ROLES:
+                    item[key] = values[i - 1] if i - 1 < len(values) else chunk["heading"]
+                elif role in _TEXT_ROLES:
+                    item[key] = chunk["heading"] if key not in item else " ".join(chunk["body"])
+            items.append(item)
+        content[group["key"]] = items
+    del image_count
+    return content
+
+
+def match_archetypes(
+    title: Optional[str], text_blocks: list, image_count: int = 0, limit: int = 3,
+) -> list:
+    """Rank archetypes that could hold this slide, WITHOUT a model.
+
+    Choosing a new format for an old slide reads like a job only a model
+    can do, and the part that actually needs judgement is narrower than
+    that: which of several plausible formats reads best, and how the copy
+    should be reworded. Deciding what CAN hold the content is a fitting
+    problem -- the archetype library states its own capacity (a title
+    plus three [label, value, caption] groups; a title plus five
+    [number, heading] rows), and an old slide's content shape is
+    extractable. So this matches shape to shape.
+
+    It exists because the model was the ONLY route to an archetype: on a
+    server with no API key every dense slide was offered nothing but
+    "keep", which is the tool switching off rather than degrading. With
+    this, a slide always has somewhere to go, and the model -- when
+    present -- upgrades the choice and the wording instead of gating it.
+
+    Returns up to `limit` candidates, best first, each:
+        {"archetype", "content", "score", "capacity", "dropped"}
+    where `dropped` is how many content chunks the archetype cannot
+    hold -- the honest cost of the mapping, for the review page to show.
+    """
+    resolved_title, chunks, values = _chunk_slide(title, text_blocks)
+    haystack = " ".join([resolved_title or ""] + [c["text"] for c in chunks]).lower()
+
+    scored = []
+    for signature in archetype_signatures():
+        if signature["unfillable"]:
+            continue
+        if signature["needs_value"] and not values:
+            continue
+
+        capacity = signature["capacity"]
+        if capacity:
+            # closest capacity wins; overfilling costs more than a spare slot
+            if len(chunks) >= capacity:
+                score = 100.0 - (len(chunks) - capacity) * 6.0
+            else:
+                score = 100.0 - (capacity - len(chunks)) * 10.0
+        else:
+            # no repeating group: only a good home for a small slide
+            score = 100.0 - abs(len(chunks) - 2) * 18.0
+
+        score += 8.0 * sum(1 for kw in signature["keywords"] if kw in haystack)
+        if values and signature["needs_value"]:
+            score += 12.0
+
+        dropped = max(0, len(chunks) - capacity) if capacity else max(0, len(chunks) - 2)
+        scored.append({
+            "archetype": signature["name"],
+            "content": _fit_content(signature, resolved_title, chunks, values, image_count),
+            "score": round(score, 1),
+            "capacity": capacity,
+            "dropped": dropped,
+        })
+
+    scored.sort(key=lambda c: (-c["score"], c["dropped"], c["archetype"]))
+    return scored[:limit]
+
+
 def archetype_suggestions_available(api_key: Optional[str] = None, client=None) -> bool:
     """Whether an archetype-suggestion call can be made at all.
 

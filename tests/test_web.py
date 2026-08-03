@@ -259,3 +259,19 @@ def test_result_page_names_slides_that_need_a_manual_redraw(tmp_path, monkeypatc
         audit, None, {"pptx": "/a", "json": "/b"},
     )
     assert "manual redraw" not in quiet
+
+
+def test_a_keyless_server_still_offers_every_readable_slide_an_archetype(tmp_path, monkeypatch):
+    """The complaint this closes: with no ANTHROPIC_API_KEY the route
+    switched the archetype step off entirely, so dense slides showed
+    "Structure kept" and nothing else. Structural matching runs
+    regardless, and the card states what the mapping would cost."""
+    client, _ = _client(tmp_path, monkeypatch)  # no ANTHROPIC_API_KEY
+    deck = tmp_path / "d.pptx"
+    _write_three_slide_deck(deck)
+
+    resp = _post_plan(client, deck)
+
+    assert resp.status_code == 200
+    assert 'value="archetype"' in resp.text
+    assert "Archetype suggestions are switched off" in resp.text  # honest about why

@@ -397,6 +397,21 @@ def _review_card(entry: dict) -> str:
     idx = entry["index"]
     default = entry["default_action"]
 
+    # What choosing the archetype costs, stated up front. A structural
+    # match can always find SOMEWHERE for a slide to go; on a dense
+    # slide that means leaving content behind, and the reviewer needs
+    # that number before they pick, not after they download.
+    dropped = entry.get("archetype_dropped") or 0
+    chunks = entry.get("content_chunks") or 0
+    cost = ""
+    if dropped and chunks:
+        cost = (
+            f' <span class="muted">— keeps {chunks - dropped} of {chunks} points; '
+            f"{dropped} would be left out</span>"
+        )
+    elif entry.get("archetype_source") == "structural" and chunks:
+        cost = f' <span class="muted">— holds all {chunks} points</span>'
+
     options = []
     if default == "keep" and not entry.get("archetype_name"):
         # "Kept as-is: <reason>" read as a failure notice on decks where
@@ -420,7 +435,7 @@ def _review_card(entry: dict) -> str:
         options.append(
             f'<label class="checkbox-row" style="margin-bottom:0.35rem;">'
             f'<input type="radio" name="action_{idx}" value="archetype">'
-            f"<span>{_ACTION_LABELS['archetype']} <b>{_esc(entry['archetype_name'])}</b></span></label>"
+            f"<span>{_ACTION_LABELS['archetype']} <b>{_esc(entry['archetype_name'])}</b>{cost}</span></label>"
         )
         options.append(
             f'<label class="checkbox-row" style="margin-bottom:0.35rem;">'
@@ -436,7 +451,10 @@ def _review_card(entry: dict) -> str:
                 f"<span>{label}</span></label>"
             )
         if entry.get("archetype_name"):
-            options.append(radio("archetype", f"{_ACTION_LABELS['archetype']} <b>{_esc(entry['archetype_name'])}</b>"))
+            options.append(radio(
+                "archetype",
+                f"{_ACTION_LABELS['archetype']} <b>{_esc(entry['archetype_name'])}</b>{cost}",
+            ))
         if default == "reference_layout":
             options.append(radio("rebuild", _ACTION_LABELS["reference_layout"]))
         elif entry.get("layout_name"):

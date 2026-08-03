@@ -255,6 +255,9 @@ def _review_entries(plan: TransformPlan, mode: str, source_path: Optional[Path])
             "layout_name": s.layout_name,
             "archetype_name": archetype_name,
             "reason": s.reason,
+            "archetype_source": s.archetype_source,
+            "archetype_dropped": s.archetype_dropped,
+            "content_chunks": s.content_chunks,
             "title_preview": s.title_preview,
             "current_html": current_by_index.get(s.index, ""),
             "proposed_html": proposed,
@@ -301,7 +304,11 @@ async def plan_route(request: Request, _auth: None = Depends(_require_auth)):
             plan = plan_transform(
                 str(source_path),
                 reference_path=str(reference_path) if reference_path else None,
-                suggest_archetypes=ai_enabled,
+                # Always on: with no key this now falls back to
+                # structural matching rather than skipping the step, so
+                # a keyless server still offers every readable slide an
+                # archetype instead of nothing but "keep".
+                suggest_archetypes=True,
             )
             mode, deck_name = "deck", file.filename
         else:
