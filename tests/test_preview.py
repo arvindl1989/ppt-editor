@@ -99,3 +99,78 @@ def test_org_layout_preview_places_verbatim_content_in_real_placeholders():
     assert "My title" in html
     assert "Point one" in html
     assert "border:1px dashed" in html  # placeholder outlines
+
+
+def _text_shape(width_in, height_in, text, size_pt):
+    """A slide record carrying exactly one text box, for sizing tests."""
+    from tests.helpers import add_slide, new_deck, set_run, title_run
+    from pptx.util import Inches
+
+    prs = new_deck()
+    s = add_slide(prs)
+    box = s.shapes.add_textbox(Inches(0.5), Inches(0.5), Inches(width_in), Inches(height_in))
+    box.text_frame.text = text
+    set_run(box.text_frame.paragraphs[0].runs[0], text=text, size_pt=size_pt)
+    title_run(s).text = ""
+    return prs, box
+
+
+def test_slide_preview_sizes_text_in_the_inline_axis_not_cqh():
+    """Regression for previews whose type had nothing to do with the
+    preview box: `container-type:inline-size` establishes only an INLINE
+    query container, so `cqh` had no container to resolve against and
+    silently fell back to the viewport height -- a 60pt heading rendered
+    at 100px inside a 372px-tall frame. Type must be sized in `cqw`."""
+    import re
+
+    from pptx import Presentation
+
+    from deckguard.inventory import build_inventory
+    from deckguard.preview import slide_preview_html
+
+    import tempfile, pathlib
+
+    with tempfile.TemporaryDirectory() as td:
+        prs, _ = _text_shape(6.0, 3.0, "Ascenseur", 60.0)
+        path = pathlib.Path(td) / "d.pptx"
+        prs.save(str(path))
+        inv = build_inventory(Presentation(str(path)))
+
+    html = slide_preview_html(inv.slides[0])
+
+    assert "cqh" not in html, "block-axis container units don't resolve here"
+    sizes = [float(m) for m in re.findall(r"font-size:([\d.]+)cqw", html)]
+    assert sizes, "the run must carry an explicit size"
+    # 60pt on a 960pt-wide slide is 6.25% of the inline axis.
+    assert any(abs(s - 6.25) < 0.05 for s in sizes)
+
+
+def test_overfull_text_box_shrinks_instead_of_clipping_mid_word():
+    """A 60pt word in a 2in column can't be drawn at 60pt without the
+    frame slicing it in half. PowerPoint autofits; so must the preview."""
+    from deckguard.preview import _fit_scale
+
+    class _R:
+        def __init__(self, text, size_pt):
+            self.text, self.size_pt = text, size_pt
+
+    class _P:
+        def __init__(self, runs):
+            self.runs = runs
+
+    roomy = [_P([_R("Ascenseur", 24.0)])]
+    assert _fit_scale(roomy, 6.0, 3.0) == 1.0, "text that fits is never shrunk"
+
+    # one word wider than its column
+    narrow = [_P([_R("hydraulique", 60.0)])]
+    assert _fit_scale(narrow, 2.0, 3.0) < 1.0
+
+    # many lines taller than the box
+    tall = [_P([_R("word " * 40, 28.0)])]
+    assert _fit_scale(tall, 4.0, 0.6) < 1.0
+
+    # and it never shrinks into illegibility
+    assert _fit_scale([_P([_R("x" * 400, 80.0)])], 1.0, 0.3) >= 0.45
+
+    # unknown geometry is left alone
+    assert _fit_scale(narrow, None, 3.0) == 1.0

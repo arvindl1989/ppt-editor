@@ -22,8 +22,17 @@ Three renderers, one per thing a review card can show:
 
 All three emit a fixed-aspect container (`aspect-ratio:1280/720`,
 `container-type:inline-size`) with children positioned in percentages
-and fonts in `cqw`/`cqh` units, so one preview scales to whatever card
-width the page gives it.
+and fonts in `cqw` units, so one preview scales to whatever card width
+the page gives it.
+
+`cqw` specifically, never `cqh`: `container-type:inline-size` only
+establishes an INLINE-axis query container, so block-axis container
+units have no container to resolve against and silently fall back to
+the small viewport height. Text sized in `cqh` therefore came out at a
+size that had nothing to do with the preview box -- a 60pt title
+rendered at 100px inside a 372px-tall frame, ~2.4x oversized, blowing
+out of its box and clipping mid-word. Because the frame's aspect is
+fixed, the inline axis carries the same information: 1cqh == 0.5625cqw.
 
 Every renderer is fail-soft: any error degrades to a plain gray card
 naming the slide, never an exception -- previews are a review aid, not
@@ -71,7 +80,8 @@ def _box(left_pct, top_pct, w_pct, h_pct, inner: str, extra_style: str = "") -> 
 
 def _placeholder_box(left_pct, top_pct, w_pct, h_pct, label: str, bg: str = "#F3EEE6") -> str:
     inner = (
-        f'<span style="font-size:1.6cqw;letter-spacing:.08em;color:#727272;">{_esc(label)}</span>'
+        f'<span style="font-size:max(6px,1.6cqw);letter-spacing:.08em;color:#727272;'
+        f'white-space:nowrap;">{_esc(label)}</span>'
     )
     return _box(
         left_pct, top_pct, w_pct, h_pct, inner,
@@ -84,6 +94,50 @@ def _placeholder_box(left_pct, top_pct, w_pct, h_pct, label: str, bg: str = "#F3
 # --------------------------------------------------------------------------
 
 _BOXY_TYPES = {"TABLE", "CHART", "GROUP", "MEDIA", "OLE_OBJECT", "EMBEDDED_OLE_OBJECT"}
+
+_AVG_GLYPH_EM = 0.52  # mean advance width of a lowercase sans glyph, in em
+_LINE_HEIGHT = 1.25
+_MIN_FIT_SCALE = 0.45  # never shrink past this -- illegible is worse than tight
+
+
+def _fit_scale(paragraphs, width_in: Optional[float], height_in: Optional[float]) -> float:
+    """How much a text box's type has to shrink to stay inside its own
+    box, as PowerPoint's "shrink text on overflow" autofit would.
+
+    deckguard has no text-shaping engine, so this estimates: a glyph
+    advances ~0.52em, a line occupies 1.25x its point size. Rough, but
+    it is the difference between a preview that reads like the slide and
+    one where a 60pt heading in a narrow column overruns its box and
+    gets sliced mid-word by the frame's clip.
+
+    Returns 1.0 (no shrink) whenever the box is unknown or the text
+    already fits, so it can only ever tighten an overflowing box.
+    """
+    if not width_in or not height_in:
+        return 1.0
+    box_w_pt, box_h_pt = width_in * 72.0, height_in * 72.0
+    if box_w_pt <= 0 or box_h_pt <= 0:
+        return 1.0
+
+    used_pt = 0.0
+    widest_word_pt = 0.0
+    for para in paragraphs:
+        text = "".join(r.text for r in para.runs).strip()
+        pt = max((r.size_pt or 12.0) for r in para.runs) if para.runs else 12.0
+        if not text:
+            used_pt += pt * _LINE_HEIGHT
+            continue
+        for word in text.split():
+            widest_word_pt = max(widest_word_pt, len(word) * pt * _AVG_GLYPH_EM)
+        per_line = max(box_w_pt / (pt * _AVG_GLYPH_EM), 1.0)
+        used_pt += max(1, -(-len(text) // int(per_line))) * pt * _LINE_HEIGHT
+
+    scale = 1.0
+    if used_pt > box_h_pt:  # too many lines to stack
+        scale = box_h_pt / used_pt
+    if widest_word_pt > box_w_pt:  # a single word wider than the column
+        scale = min(scale, box_w_pt / widest_word_pt)
+    return max(min(scale, 1.0), _MIN_FIT_SCALE)
 
 
 def slide_preview_html(slide_record, slide_w_in: float = 13.333, slide_h_in: float = 7.5) -> str:
@@ -111,6 +165,12 @@ def slide_preview_html(slide_record, slide_w_in: float = 13.333, slide_h_in: flo
             if shape.fill and shape.fill.type == "solid" and shape.fill.colors and shape.fill.colors[0].hex:
                 fill_hex = shape.fill.colors[0].hex
 
+            # One point is 1/(slide width in points) of the inline axis.
+            # This is the whole reason type in a preview lands at the
+            # same relative size it has on the slide.
+            pt_to_cqw = 100.0 / (slide_w_in * 72.0)
+            fit = _fit_scale(shape.paragraphs, shape.width_in, shape.height_in)
+
             lines = []
             for para in shape.paragraphs[:4]:
                 run_bits = []
@@ -118,16 +178,18 @@ def slide_preview_html(slide_record, slide_w_in: float = 13.333, slide_h_in: flo
                     if not run.text.strip():
                         continue
                     color = f"#{run.color.hex}" if run.color and run.color.hex else "#141414"
-                    size_cqh = min(max(((run.size_pt or 12.0) / 540.0) * 100, 1.4), 12.0)
+                    size_cqw = min(max((run.size_pt or 12.0) * fit * pt_to_cqw, 0.8), 9.0)
                     weight = "600" if run.bold else "400"
                     run_bits.append(
-                        f'<span style="color:{color};font-size:{size_cqh:.2f}cqh;font-weight:{weight};">'
+                        f'<span style="color:{color};font-size:{size_cqw:.2f}cqw;font-weight:{weight};">'
                         f"{_esc(_clip(run.text))}</span>"
                     )
                 if run_bits:
-                    lines.append('<div style="line-height:1.25;">' + " ".join(run_bits) + "</div>")
+                    lines.append(
+                        f'<div style="line-height:{_LINE_HEIGHT};">' + " ".join(run_bits) + "</div>"
+                    )
 
-            style = ""
+            style = "overflow-wrap:anywhere;"  # wrap a long word, never slice it
             if fill_hex:
                 style += f"background:#{fill_hex};padding:1.5% 2%;"
             if not lines and not fill_hex:
