@@ -812,5 +812,51 @@ def redesign(
         )
 
 
+@main.command("visual-check")
+@click.argument("deck", type=click.Path(exists=True, dir_okay=False))
+@click.option("--format", "fmt", type=click.Choice(["json", "md"]), default="md")
+def visual_check(deck: str, fmt: str):
+    """Measure what DECK's slides actually LAY OUT to, in a headless browser.
+
+    Everything else here reads XML. This renders each slide's preview and
+    measures the result, so it catches what structure can't see: text
+    overflowing its box, shapes hanging off the slide edge, type below the
+    legible floor, and text without enough contrast against what is
+    actually behind it.
+    """
+    from deckguard import visual as visual_mod
+
+    if not visual_mod.playwright_available():
+        console.print(
+            "[bold red]unavailable:[/] visual-check needs Playwright and a Chromium "
+            "build. Install with 'pip install playwright' and point "
+            "DECKGUARD_CHROMIUM at a browser binary."
+        )
+        sys.exit(1)
+
+    report = visual_mod.audit_deck_previews(deck)
+    if fmt == "json":
+        click.echo(visual_mod.to_json(report))
+        return
+
+    summary = report.summary
+    console.print(
+        f"[bold]{Path(deck).name}[/] — {report.frames_measured} slides measured, "
+        f"{summary.get('major', 0)} major, {summary.get('minor', 0)} minor"
+    )
+    if not report.findings:
+        console.print("[bold green]clean:[/] nothing renders outside its box.")
+        return
+    table = Table(show_header=True, header_style="bold")
+    for col in ("Slide", "Severity", "Rule", "Shape", "What renders wrong"):
+        table.add_column(col)
+    for f in report.findings:
+        color = "red" if f.severity == "major" else "yellow"
+        table.add_row(
+            str(f.frame_index + 1), f"[{color}]{f.severity}[/]", f.rule,
+            f.shape_name, f.message,
+        )
+    console.print(table)
+
 if __name__ == "__main__":
     main()

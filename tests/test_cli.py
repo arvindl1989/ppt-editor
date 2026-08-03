@@ -439,3 +439,28 @@ def test_sync_skill_refuses_to_sync_the_vendored_copy_onto_itself(tmp_path, monk
 
     assert result.exit_code == 1
     assert "IS the vendored copy" in result.output
+
+
+def test_visual_check_reports_what_a_deck_lays_out_to(tmp_path):
+    """`visual-check` measures rendered layout rather than reading XML.
+    Without a browser it must say so and exit non-zero, not crash."""
+    from deckguard.visual import playwright_available
+
+    prs = new_deck()
+    s = add_slide(prs)
+    set_run(title_run(s), text="Readable title", font="Inter", color_hex="141414")
+    deck = tmp_path / "d.pptx"
+    prs.save(str(deck))
+
+    result = CliRunner().invoke(main, ["visual-check", str(deck), "--format", "json"])
+
+    if not playwright_available():
+        assert result.exit_code == 1
+        assert "Playwright" in result.output
+        return
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["ran"] is True
+    assert payload["frames_measured"] == 1
+    assert payload["summary"]["major"] == 0

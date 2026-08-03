@@ -49,6 +49,7 @@ SLIDE_W_PX = 1280.0
 SLIDE_H_PX = 720.0
 _MAX_TEXT = 110  # chars per text box in a preview -- enough to recognize the slide
 
+_FRAME_ATTR = ' data-dg-frame="1"'
 _FRAME_STYLE = (
     "position:relative;aspect-ratio:1280/720;container-type:inline-size;"
     "background:{bg};overflow:hidden;border:1px solid #D0D0D0;border-radius:6px;width:100%;"
@@ -66,26 +67,44 @@ def _clip(text: str, limit: int = _MAX_TEXT) -> str:
 
 def _fallback_card(label: str) -> str:
     return (
-        f'<div style="{_FRAME_STYLE.format(bg="#F3EEE6")}display:flex;align-items:center;'
+        f'<div{_FRAME_ATTR} style="{_FRAME_STYLE.format(bg="#F3EEE6")}display:flex;align-items:center;'
         f'justify-content:center;color:#727272;font-size:0.8rem;">{_esc(label)}</div>'
     )
 
 
-def _box(left_pct, top_pct, w_pct, h_pct, inner: str, extra_style: str = "") -> str:
+def _box(left_pct, top_pct, w_pct, h_pct, inner: str, extra_style: str = "", label: str = "") -> str:
+    # `data-dg-shape` is the hook deckguard.visual measures against: it
+    # marks the box a shape's content has to stay inside, so a headless
+    # browser can tell overflow and collisions from correct layout
+    # without anyone eyeballing a screenshot.
+    attr = f' data-dg-shape="{_esc(label)}"' if label else ' data-dg-shape=""'
     return (
-        f'<div style="position:absolute;left:{left_pct:.2f}%;top:{top_pct:.2f}%;'
+        # border-box, because filled shapes carry padding: under the
+        # default content-box that padding is ADDED to the declared
+        # width, so a shape drew wider and taller than the shape
+        # actually is -- found by deckguard.visual reporting shapes
+        # hanging off a slide edge that nothing in the deck sits past.
+        f'<div{attr} style="position:absolute;box-sizing:border-box;'
+        f'left:{left_pct:.2f}%;top:{top_pct:.2f}%;'
         f'width:{w_pct:.2f}%;height:{h_pct:.2f}%;overflow:hidden;{extra_style}">{inner}</div>'
     )
 
 
-def _placeholder_box(left_pct, top_pct, w_pct, h_pct, label: str, bg: str = "#F3EEE6") -> str:
+def _placeholder_box(left_pct, top_pct, w_pct, h_pct, label: str, bg: str = "#F3EEE6", name: str = "") -> str:
+    # A box too small to hold its own label gets drawn as a plain
+    # swatch. The label is preview chrome, not deck content, and a
+    # 0.15in chevron with "GROUP" jammed into it is both unreadable and
+    # a false "content overflows its box" finding for deckguard.visual.
+    # At 1.6cqw a glyph is ~0.96% of slide width.
+    fits = w_pct >= len(label) * 0.96 and h_pct >= 2.5
     inner = (
         f'<span style="font-size:max(6px,1.6cqw);letter-spacing:.08em;color:#727272;'
         f'white-space:nowrap;">{_esc(label)}</span>'
-    )
+    ) if fits else ""
     return _box(
         left_pct, top_pct, w_pct, h_pct, inner,
         f"background:{bg};display:flex;align-items:center;justify-content:center;",
+        label=name or label,
     )
 
 
@@ -145,6 +164,27 @@ def slide_preview_html(slide_record, slide_w_in: float = 13.333, slide_h_in: flo
     real geometry, real solid fills, real text (clipped)."""
     try:
         parts = []
+
+        # Decorative panels drawn on the slide's LAYOUT render behind
+        # every slide built on it but never appear in the slide's own
+        # shape tree. Skipping them made previews lie about the slides
+        # that lean on them hardest: the AMP layout puts a full KONE
+        # Blue panel behind its right-hand text column, so its white
+        # body text previewed as white-on-white and read as missing.
+        # Drawn first, so the slide's own shapes paint over them.
+        for bg_shape in getattr(slide_record, "layout_background_shapes", None) or []:
+            if None in (bg_shape.left_in, bg_shape.top_in, bg_shape.width_in, bg_shape.height_in):
+                continue
+            if not (bg_shape.fill and bg_shape.fill.type == "solid"
+                    and bg_shape.fill.colors and bg_shape.fill.colors[0].hex):
+                continue
+            parts.append(_box(
+                bg_shape.left_in / slide_w_in * 100, bg_shape.top_in / slide_h_in * 100,
+                bg_shape.width_in / slide_w_in * 100, bg_shape.height_in / slide_h_in * 100,
+                "", f"background:#{bg_shape.fill.colors[0].hex};",
+                label=bg_shape.name or "layout background",
+            ))
+
         for shape in slide_record.shapes:
             if None in (shape.left_in, shape.top_in, shape.width_in, shape.height_in):
                 continue
@@ -155,10 +195,10 @@ def slide_preview_html(slide_record, slide_w_in: float = 13.333, slide_h_in: flo
 
             type_name = (shape.shape_type or "").upper()
             if shape.image is not None or type_name == "PICTURE":
-                parts.append(_placeholder_box(left, top, w, h, "IMG"))
+                parts.append(_placeholder_box(left, top, w, h, "IMG", name=shape.name or "picture"))
                 continue
             if type_name in _BOXY_TYPES:
-                parts.append(_placeholder_box(left, top, w, h, type_name, bg="#EEF2FE"))
+                parts.append(_placeholder_box(left, top, w, h, type_name, bg="#EEF2FE", name=shape.name or type_name))
                 continue
 
             fill_hex = None
@@ -194,9 +234,9 @@ def slide_preview_html(slide_record, slide_w_in: float = 13.333, slide_h_in: flo
                 style += f"background:#{fill_hex};padding:1.5% 2%;"
             if not lines and not fill_hex:
                 continue  # nothing visible to draw for this shape
-            parts.append(_box(left, top, w, h, "".join(lines), style))
+            parts.append(_box(left, top, w, h, "".join(lines), style, label=shape.name or "text"))
 
-        return f'<div style="{_FRAME_STYLE.format(bg="#FFFFFF")}">{"".join(parts)}</div>'
+        return f'<div{_FRAME_ATTR} style="{_FRAME_STYLE.format(bg="#FFFFFF")}">{"".join(parts)}</div>'
     except Exception:
         return _fallback_card(f"slide {getattr(slide_record, 'index', '?')}")
 
@@ -293,7 +333,7 @@ def archetype_preview_html(archetype_name: str, content: dict) -> str:
                     cval = item.get(reg["content"]) if reg.get("content") and isinstance(item, dict) else reg.get("value", "")
                     draw(reg["role"], [ox + rx, oy + ry, rw, rh], cval)
 
-        return f'<div style="{_FRAME_STYLE.format(bg=bg_hex)}">{"".join(parts)}</div>'
+        return f'<div{_FRAME_ATTR} style="{_FRAME_STYLE.format(bg=bg_hex)}">{"".join(parts)}</div>'
     except Exception:
         return _fallback_card(archetype_name)
 
@@ -355,6 +395,6 @@ def org_layout_preview_html(
             left, top, w, h = pct(ph)
             parts.append(_placeholder_box(left, top, w, h, "PHOTO" if i < image_count else "PHOTO SLOT"))
 
-        return f'<div style="{_FRAME_STYLE.format(bg="#FFFFFF")}">{"".join(parts)}</div>'
+        return f'<div{_FRAME_ATTR} style="{_FRAME_STYLE.format(bg="#FFFFFF")}">{"".join(parts)}</div>'
     except Exception:
         return _fallback_card(getattr(layout, "name", "layout"))
