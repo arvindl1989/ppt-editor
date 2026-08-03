@@ -325,6 +325,12 @@ def parse_section(name: str, section_html: str) -> Optional[dict]:
             # of those a nameless text block.
             sizes = [(_px(c["css"].get("font-size")) or 0) for c in stack]
             biggest = max(sizes)
+            # Share out the wrapper's REAL height in proportion to type
+            # size. Giving each line a flat 1.5x its own size ignored the
+            # column it sits in -- a 19px lead paragraph in a 539px
+            # column got a 28px box, and shrink-to-fit crushed it to
+            # 8.5pt to make it fit a box it never needed to fit.
+            total_size = sum(sizes) or 1
             # ...but only when one line actually stands out, and only
             # once: a table's rows all share a size, and calling every
             # one of them "title" is worse than naming none.
@@ -340,11 +346,12 @@ def parse_section(name: str, section_html: str) -> Optional[dict]:
                 c_slot = _claim(c_slot)
                 text_index += 1
                 role_styles[c_role] = c_style
-                height = max(c_style[1] * 1.5, 24)
+                share = (box[3] or 0) * ((_px(child["css"].get("font-size")) or 0) / total_size)
+                height = max(c_style[1] * 1.5, share, 24)
                 regions.append({"role": c_role, "content": c_slot,
                                 "box": [box[0], top, box[2], height]})
                 sample[c_slot] = child["text"]
-                top += height + 10
+                top += height
             continue
 
         role, slot, style = derived
@@ -505,10 +512,34 @@ def install(archetypes_module) -> int:
     original_render = archetypes_module.render
 
     def render_with_chrome(slide, name, content):
+        """Paint order is the whole point here: background, then the
+        chrome, then the regions. Drawing chrome before delegating put
+        TITLE_TEXT_SPLIT's white field down first and let the engine's
+        own full-slide background paint straight over it -- the slide
+        came out solid blue. So the background is drawn here and
+        suppressed for the delegated call."""
         arch = archetypes_module.ARCHETYPES.get(name) or {}
-        if arch.get("chrome"):
-            draw_chrome(slide, arch, content)
-        return original_render(slide, name, content)
+        if not arch.get("chrome"):
+            return original_render(slide, name, content)
+
+        background = archetypes_module.BG.get(name) or arch.get("background")
+        if background and str(background).upper() != "FFFFFF":
+            rgb = engine._BG.get(background) or (
+                engine._hex(background) if len(str(background)) == 6 else None
+            )
+            if rgb is not None:
+                engine._rect(slide, [0, 0, 1280, 720], rgb)
+        draw_chrome(slide, arch, content)
+
+        saved = archetypes_module.BG.get(name)
+        archetypes_module.BG[name] = None
+        stripped = {k: v for k, v in arch.items() if k != "background"}
+        archetypes_module.ARCHETYPES[name] = stripped
+        try:
+            return original_render(slide, name, content)
+        finally:
+            archetypes_module.ARCHETYPES[name] = arch
+            archetypes_module.BG[name] = saved
 
     archetypes_module.render = render_with_chrome
     _installed = True
