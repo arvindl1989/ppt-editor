@@ -432,3 +432,19 @@ def test_slides_the_reference_redrew_are_reported_not_shipped_silently(tmp_path)
         actions={2: "keep"}, reference_path=str(matching),
     )
     assert quiet.needs_manual_redraw == []
+
+
+def test_plan_says_suggestions_are_off_when_the_server_has_no_key(tmp_path, monkeypatch):
+    """Reported from a real run: a keyless server reported archetype
+    suggestions as having RUN, then offered nothing but "keep" on ten of
+    twelve slides. The flag has to distinguish "couldn't ask" from
+    "asked and got nothing", or the review page can't explain itself."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    src = _three_slide_deck(tmp_path)
+
+    plan = plan_transform(str(src))
+    assert plan.ai_suggestions_ran is False
+    assert all(s.archetype is None for s in plan.slides)
+
+    with_key = plan_transform(str(src), client=_FakeClient(_FakeResponse(_hero_stat_override(2))))
+    assert with_key.ai_suggestions_ran is True

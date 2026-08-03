@@ -127,7 +127,10 @@ def plan_transform(
     suggestions: dict = {}
     ai_ran = False
     if suggest_archetypes:
-        from deckguard.skill_bridge import select_archetype_overrides_for_rebrand
+        from deckguard.skill_bridge import (
+            archetype_suggestions_available,
+            select_archetype_overrides_for_rebrand,
+        )
 
         cover_end = {plan.cover_index, plan.end_index}
         profile_by_index = {
@@ -136,10 +139,16 @@ def plan_transform(
             if idx not in cover_end
         }
         if profile_by_index:
-            suggestions = select_archetype_overrides_for_rebrand(
-                profile_by_index, model=model, api_key=api_key, client=client,
-            )
-            ai_ran = True
+            # `ai_ran` says whether the model could be ASKED, not whether
+            # it happened to suggest anything -- a keyless server used to
+            # report suggestions as having run and then offer nothing but
+            # "keep", which reads as the tool failing rather than the
+            # tool being switched off.
+            ai_ran = archetype_suggestions_available(api_key=api_key, client=client)
+            if ai_ran:
+                suggestions = select_archetype_overrides_for_rebrand(
+                    profile_by_index, model=model, api_key=api_key, client=client,
+                )
 
     slides = []
     for p in plan.proposals:
@@ -226,6 +235,7 @@ class TransformOutcome:
     transplanted_shapes: int = 0  # per-shape styles copied verbatim from the reference
     duplicate_logos_removed: int = 0  # see _dedupe_reference_master_logos
     needs_manual_redraw: list = field(default_factory=list)  # 1-based indices; see below
+    photos_added: int = 0  # picture slots filled from the KONE photo library
 
 
 def _dedupe_reference_master_logos(out_path, reference_path) -> int:
@@ -484,18 +494,22 @@ def execute_transform_from_brief(out_path, plan: TransformPlan, approved_indices
     """Render the approved subset of a brief-only plan through the
     skill's own whole-deck builder (retained master cover + outro, same
     as the brief-only path always produced)."""
-    from deckguard.skill_bridge import _load_creator
+    from deckguard.skill_bridge import _load_creator, fill_empty_photo_slots
 
     creator = _load_creator()
     approved = approved_indices if approved_indices is not None else {s.index for s in plan.slides}
     spec_slides = [dict(s.archetype) for s in plan.slides if s.index in approved and s.archetype]
     spec = {"title": plan.deck_title or "Untitled deck", "slides": spec_slides}
+    # The review previews draw picture slots as PHOTO; without this the
+    # built deck came back with blank sand blocks where they were.
+    photos_added = fill_empty_photo_slots(spec)
     creator.build_deck(spec, str(out_path))
     return TransformOutcome(
         out_path=str(out_path),
         archetype_swapped=sorted(s.index for s in plan.slides if s.index in approved),
         kept=sorted(s.index for s in plan.slides if s.index not in approved),
         layouts_used={s.index: s.archetype["archetype"] for s in plan.slides if s.index in approved and s.archetype},
+        photos_added=photos_added,
     )
 
 

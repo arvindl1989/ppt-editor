@@ -408,6 +408,9 @@ def build_deck_via_skill(
     )
     _validate_kone_spec(spec, set(archetypes.ARCHETYPES.keys()))
 
+    # Nothing carries images into a from-a-brief build, so every photo
+    # slot would otherwise render as a blank sand block.
+    fill_empty_photo_slots(spec)
     creator.build_deck(spec, str(out_path))
 
     layouts_used = ["Cover F"] + [s["archetype"] for s in spec["slides"]] + ["Outro"]
@@ -522,6 +525,84 @@ def archetype_image_capacity(archetype_name: str) -> int:
     if slot[0] == "single":
         return 1
     return 99  # group-based: bounded by however many group items the content actually has
+
+
+def _photo_library() -> list:
+    """KONE's own photography, for picture slots nothing else can fill.
+
+    Resolved like the skill itself: an explicit env override, then the
+    installed `kone-design` skill, then the copy vendored into this
+    package so a deploy without the skills installed still has photos.
+    """
+    from pathlib import Path
+
+    candidates = []
+    env = os.environ.get("KONE_DESIGN_DIR")
+    if env:
+        candidates.append(Path(env) / "assets" / "photos")
+    candidates.append(Path.home() / ".claude" / "skills" / "kone-design" / "assets" / "photos")
+    candidates.append(Path(__file__).parent / "assets" / "kone-design" / "photos")
+    for directory in candidates:
+        try:
+            photos = sorted(p for p in directory.glob("*.jpg") if p.is_file())
+        except OSError:
+            continue
+        if photos:
+            return [str(p) for p in photos]
+    return []
+
+
+def fill_empty_photo_slots(spec: dict) -> int:
+    """Give every unfilled picture slot in a from-scratch deck spec a
+    real KONE photograph.
+
+    `kone_engine._image()` draws a flat sand rectangle when handed no
+    path. That is the right fallback for a missing file; it is the wrong
+    OUTCOME for a deck built from a brief, where there is no source deck
+    to carry images from and so EVERY photo slot is empty. The review
+    previews drew those slots as "PHOTO", the built deck came back with
+    blank sand blocks, and the two didn't match.
+
+    Selection is deterministic -- keyed on the slide's own text, so the
+    same brief always produces the same deck -- and walks the library
+    rather than repeating one image down the deck.
+
+    Returns how many slots were filled. A no-op when the archetype has
+    no picture slot, when the slot is already filled (a transform
+    carrying the source deck's own images always wins), or when no photo
+    library is reachable.
+    """
+    photos = _photo_library()
+    if not photos:
+        return 0
+    slots = _archetype_image_slots()
+    filled = 0
+    used = 0
+
+    def _next_photo(seed: str) -> str:
+        nonlocal used
+        start = sum(ord(c) for c in seed) if seed else 0
+        photo = photos[(start + used) % len(photos)]
+        used += 1
+        return photo
+
+    for slide in spec.get("slides") or []:
+        slot = slots.get(slide.get("archetype"))
+        if not slot:
+            continue
+        seed = str(slide.get("title") or slide.get("heading") or slide.get("archetype") or "")
+        if slot[0] == "single":
+            key = slot[1]
+            if not slide.get(key):
+                slide[key] = _next_photo(seed)
+                filled += 1
+        else:
+            _kind, group_key, item_key = slot
+            for item in slide.get(group_key) or []:
+                if isinstance(item, dict) and not item.get(item_key):
+                    item[item_key] = _next_photo(seed)
+                    filled += 1
+    return filled
 
 
 def _inject_source_images(archetype_name: str, content: dict, image_blobs: list, tmpdir: str) -> dict:
@@ -646,6 +727,22 @@ def _validate_overrides(raw_overrides: list, candidate_indices: set) -> dict:
         content = {k: v for k, v in item.items() if k not in ("outline_index", "archetype")}
         overrides[idx] = {"archetype": archetype, **content}
     return overrides
+
+
+def archetype_suggestions_available(api_key: Optional[str] = None, client=None) -> bool:
+    """Whether an archetype-suggestion call can be made at all.
+
+    The selection helpers below fail CLOSED -- no key, an API error and
+    a model that legitimately suggests nothing all return `{}`. That is
+    the right contract for them and the wrong one for the review page,
+    which told a user "archetype suggestions ran" on a server with no
+    `ANTHROPIC_API_KEY` and then offered nothing but "keep" on ten of
+    twelve slides, with no hint why. This separates "couldn't ask" from
+    "asked and got nothing", so the page can say which happened.
+    """
+    if client is not None:
+        return True
+    return bool(api_key or os.environ.get("ANTHROPIC_API_KEY"))
 
 
 def select_archetype_overrides(

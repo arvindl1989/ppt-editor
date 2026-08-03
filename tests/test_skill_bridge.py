@@ -567,3 +567,87 @@ def test_image_slots_are_derived_from_the_skills_own_archetype_data():
     assert "segment_breakdown" not in slots
     assert archetype_image_capacity("chart_commentary") == 0
     assert archetype_image_capacity("numbered_summary_picture") == 1
+
+
+def test_photo_library_is_reachable_without_the_skills_installed(monkeypatch):
+    """The deploy has no ~/.claude/skills, so the photos have to be
+    vendored or picture slots stay empty there forever."""
+    from pathlib import Path
+
+    from deckguard.skill_bridge import _photo_library
+
+    monkeypatch.delenv("KONE_DESIGN_DIR", raising=False)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: Path("/nonexistent-home")))
+
+    photos = _photo_library()
+    assert photos, "a vendored photo library must exist"
+    assert all(p.endswith(".jpg") for p in photos)
+
+
+def test_empty_photo_slots_are_filled_for_a_from_scratch_deck():
+    """Reported on a real build: the review previews drew PHOTO slots,
+    the delivered deck had blank sand blocks where they were, because
+    `kone_engine._image()` draws a sand rectangle when handed no path
+    and nothing carries images into a build from a brief."""
+    from deckguard.skill_bridge import _archetype_image_slots, fill_empty_photo_slots
+
+    slots = _archetype_image_slots()
+    single = next((n for n, s in slots.items() if s[0] == "single"), None)
+    group = next((n for n, s in slots.items() if s[0] == "group"), None)
+    assert single and group, "the skill must expose both slot shapes"
+
+    spec = {"title": "t", "slides": [
+        {"archetype": single, "title": "The growth of marketing"},
+        {"archetype": group, "title": "Compare", "items": [{"label": "A"}, {"label": "B"}]},
+    ]}
+    assert fill_empty_photo_slots(spec) == 3
+
+    key = slots[single][1]
+    assert spec["slides"][0][key].endswith(".jpg")
+    item_key = slots[group][2]
+    photos = {item[item_key] for item in spec["slides"][1]["items"]}
+    assert len(photos) == 2, "the library is walked, not repeated down the deck"
+
+
+def test_filling_never_overwrites_an_image_the_deck_already_supplied():
+    """A transform carrying the source deck's own images always wins --
+    this fallback is only for slots nothing else can fill."""
+    from deckguard.skill_bridge import _archetype_image_slots, fill_empty_photo_slots
+
+    slots = _archetype_image_slots()
+    single = next(n for n, s in slots.items() if s[0] == "single")
+    key = slots[single][1]
+
+    spec = {"title": "t", "slides": [{"archetype": single, "title": "x", key: "/from/the/deck.png"}]}
+    assert fill_empty_photo_slots(spec) == 0
+    assert spec["slides"][0][key] == "/from/the/deck.png"
+
+
+def test_filling_is_deterministic_for_the_same_brief():
+    from deckguard.skill_bridge import _archetype_image_slots, fill_empty_photo_slots
+
+    slots = _archetype_image_slots()
+    single = next(n for n, s in slots.items() if s[0] == "single")
+    key = slots[single][1]
+
+    def _built():
+        spec = {"title": "t", "slides": [{"archetype": single, "title": "Same brief"}]}
+        fill_empty_photo_slots(spec)
+        return spec["slides"][0][key]
+
+    assert _built() == _built()
+
+
+def test_archetype_suggestions_availability_reports_a_keyless_server(monkeypatch):
+    """The review page told a user suggestions had run on a server with
+    no API key, then offered nothing but "keep" on ten of twelve slides
+    with no explanation."""
+    from deckguard.skill_bridge import archetype_suggestions_available
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    assert archetype_suggestions_available() is False
+    assert archetype_suggestions_available(api_key="k") is True
+    assert archetype_suggestions_available(client=object()) is True
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    assert archetype_suggestions_available() is True

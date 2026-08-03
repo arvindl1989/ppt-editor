@@ -399,8 +399,15 @@ def _review_card(entry: dict) -> str:
 
     options = []
     if default == "keep" and not entry.get("archetype_name"):
-        reason = entry.get("reason") or "not eligible for a rebuild"
-        options.append(f'<p class="field-hint" style="margin:0;">Kept as-is: {_esc(reason)}.</p>')
+        # "Kept as-is: <reason>" read as a failure notice on decks where
+        # keeping the structure IS the right answer (a slide of dense
+        # copy has nothing a template layout could improve). Say what
+        # keep actually does, then why the other routes are closed.
+        reason = entry.get("reason") or "no template layout fits it"
+        options.append(
+            '<p class="field-hint" style="margin:0;"><b>Structure kept</b> — brand colors, fonts '
+            f"and logo are still applied to this slide. No layout rebuild offered: {_esc(reason)}.</p>"
+        )
         options.append(f'<input type="hidden" name="action_{idx}" value="keep">')
     elif default == "keep":
         # Too big for any org-template layout, but an archetype CAN hold
@@ -478,10 +485,25 @@ def transform_review_page(deck_name: str, token: str, entries: list[dict], mode:
     else:
         cards_html = "".join(_review_card(e) for e in entries)
         ai_note = "" if ai_ran else (
-            '<p class="field-hint" style="margin:0.4rem 0 0;">Archetype suggestions were unavailable for this '
-            "plan (no API key or the call failed) — every proposal below is deterministic.</p>"
+            '<div class="notice"><b>Archetype suggestions are switched off</b>'
+            "The server has no <code>ANTHROPIC_API_KEY</code>, so no archetype alternatives were "
+            "generated. Slides that no template layout fits can only be kept — their structure "
+            "stays and the brand pass still restyles them, but you won't be offered a redesign. "
+            "<p>Set <code>ANTHROPIC_API_KEY</code> on the server to get archetype options for "
+            "those slides.</p></div>"
         )
-        intro = f"Approve or override each slide, then transform. Nothing executes until you do.{ai_note}"
+        intro = "Approve or override each slide, then transform. Nothing executes until you do."
+        return f"""<div class="card"><div class="result-head"><h2 style="font-size:1.05rem;">Review plan — {_esc(deck_name)}</h2></div>
+<p class="muted" style="margin:0;">{intro}</p>
+</div>
+{ai_note}
+<form method="post" action="/transform/{_esc(token)}">
+{cards_html}
+<div class="card" style="text-align:center;">
+  <button type="submit" class="primary">Transform deck</button>
+  <a class="dl secondary" href="/" style="margin-left:0.6rem;">Start over</a>
+</div>
+</form>"""
 
     return f"""<div class="card"><div class="result-head"><h2 style="font-size:1.05rem;">Review plan — {_esc(deck_name)}</h2></div>
 <p class="muted" style="margin:0;">{intro}</p>

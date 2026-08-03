@@ -41,7 +41,16 @@ deckguard = "deckguard.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-deckguard = ["brand_rules.yaml", "assets/*.png", "assets/*.pptx"]
+deckguard = [
+    "brand_rules.yaml",
+    "assets/*.png",
+    "assets/*.pptx",
+    # the vendored skill + the KONE photo library picture slots fall back
+    # to, so a deploy with no ~/.claude/skills still renders them
+    "assets/kone_deck_generator/**/*",
+    "assets/kone-design/**/*",
+    "assets/fonts/*",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
