@@ -797,58 +797,27 @@ class RebrandResult:
     reference_layout_indices: list = field(default_factory=list)  # subset of `transformed` handled by reference layout carryover, not org-template rebuild
 
 
-def apply_rebrand(
-    deck_path, out_path, template_path=None, rules_config: Optional[dict] = None,
-    reference_path: Optional[str] = None,
-) -> RebrandResult:
-    """A fully deterministic alternative to `redesign`'s AI content-rewrite
-    mode, for a deck whose wording is fine as written and just needs to
-    land on brand: every eligible slide's title/body text/images are
-    carried over VERBATIM -- same eligibility rules `apply_retemplate`
-    already uses (nothing here condenses, so there's no reason to accept
-    more than a layout can literally hold, unlike `redesign`'s permissive
-    caps). Matched to a layout with an anti-repeat tie-break
-    (`match_layout`'s `usage_counts`) so the deck doesn't read as one
-    layout stamped out slide after slide, and the deck's own cover/
-    closing slide -- when confidently identifiable as one, see
-    `_looks_like_cover_or_end_slide` -- is swapped onto the org
-    template's current `Cover B`/`Outro` layout instead of whatever
-    ordinary-content layout would otherwise fit it (its own image, if it
-    has one, is carried into that layout's own picture placeholder same
-    as any other -- a normal, independently editable placeholder in the
-    output file, not baked into anything). No LLM call, no API key, no
-    wording changes anywhere. Color/font brand compliance is finished by
-    running `fix_deck` over the whole result before returning -- the same
-    engine/config `deckguard fix` uses -- so this is equivalent to
-    `deckguard retemplate` immediately followed by `deckguard fix`, plus
-    the cover/end swap and layout variety neither of those two do alone.
+@dataclass
+class RebrandProposals:
+    """`apply_rebrand`'s planning phase, computed without touching any
+    file -- split out so a guided-review flow (deckguard's Transform UI)
+    can show a human exactly what WOULD happen, collect per-slide
+    approvals, and only then execute via `apply_rebrand(...,
+    accepted_indexes=...)`. Every field mirrors what `apply_rebrand`
+    itself derives internally."""
 
-    `reference_path` (optional -- the "Learn from a reference" flow
-    only): when the swapped-in cover/end slide has no picture of its own
-    to carry over, its picture placeholder is normally padded out with
-    the org template's own generic stock photo (see
-    `_layout_placeholder_image_blob`). If a reference deck is given here,
-    its own first/last slide's picture (if it has one) is tried FIRST --
-    the deck-specific answer for THIS run beats the org template's
-    generic default. Never persisted anywhere; purely a per-call source
-    for this one picture.
+    proposals: list  # list[SlideProposal], every slide
+    reference_layout_by_index: dict  # {index: layout_name} reference-layout carryovers
+    cover_index: Optional[int] = None
+    end_index: Optional[int] = None
 
-    `reference_path` also drives a SECOND, independent mechanism for
-    every slide EXCEPT the cover/end positions (which keep their own
-    dedicated handling above): wherever an old slide and its reference
-    counterpart at the SAME index already sit on a layout of the exact
-    same name, that's ground truth for what this slide should look like
-    -- often a deck-specific custom layout the org template has no
-    equivalent for at all (a large internal catalog deck's own one-off
-    layout, say), which `classify_slide`/`match_layout` below can never
-    correctly handle since they only ever draw from the org template.
-    These slides are re-parented onto a fresh copy of that exact layout
-    IMPORTED FROM THE REFERENCE DECK (see `_reparent_slide_layout`) --
-    content stays 100% untouched, only the layout/master (and therefore
-    its chrome: logo, footer/date format) is refreshed. They're excluded
-    from `classify_slide`/`match_layout` entirely -- there's no content
-    reflow to evaluate eligibility for.
-    """
+
+def propose_rebrand(deck_path, template_path=None, reference_path: Optional[str] = None) -> RebrandProposals:
+    """The read-only planning half of `apply_rebrand` -- identical
+    classification, layout matching (with the same anti-repeat
+    tie-break), cover/end detection, and reference-layout pairing, with
+    nothing written anywhere. `apply_rebrand` calls this itself, so plan
+    and execution can never disagree about what a slide would get."""
     template_path = template_path or default_template_path()
     prs = Presentation(deck_path)
     layout_profiles = _candidate_layout_profiles(template_path)
@@ -860,7 +829,6 @@ def apply_rebrand(
     n_slides = len(prs.slides)
 
     reference_layout_by_index: dict = {}
-    ref_prs = None
     if reference_path is not None:
         ref_prs = Presentation(str(reference_path))
         for i in range(2, n_slides):  # excludes slide 1 (cover) and n_slides (end)
@@ -930,10 +898,88 @@ def apply_rebrand(
             )
         )
 
+    return RebrandProposals(
+        proposals=proposals, reference_layout_by_index=reference_layout_by_index,
+        cover_index=cover_index, end_index=end_index,
+    )
+
+
+def apply_rebrand(
+    deck_path, out_path, template_path=None, rules_config: Optional[dict] = None,
+    reference_path: Optional[str] = None, accepted_indexes: Optional[set] = None,
+) -> RebrandResult:
+    """A fully deterministic alternative to `redesign`'s AI content-rewrite
+    mode, for a deck whose wording is fine as written and just needs to
+    land on brand: every eligible slide's title/body text/images are
+    carried over VERBATIM -- same eligibility rules `apply_retemplate`
+    already uses (nothing here condenses, so there's no reason to accept
+    more than a layout can literally hold, unlike `redesign`'s permissive
+    caps). Matched to a layout with an anti-repeat tie-break
+    (`match_layout`'s `usage_counts`) so the deck doesn't read as one
+    layout stamped out slide after slide, and the deck's own cover/
+    closing slide -- when confidently identifiable as one, see
+    `_looks_like_cover_or_end_slide` -- is swapped onto the org
+    template's current `Cover B`/`Outro` layout instead of whatever
+    ordinary-content layout would otherwise fit it (its own image, if it
+    has one, is carried into that layout's own picture placeholder same
+    as any other -- a normal, independently editable placeholder in the
+    output file, not baked into anything). No LLM call, no API key, no
+    wording changes anywhere. Color/font brand compliance is finished by
+    running `fix_deck` over the whole result before returning -- the same
+    engine/config `deckguard fix` uses -- so this is equivalent to
+    `deckguard retemplate` immediately followed by `deckguard fix`, plus
+    the cover/end swap and layout variety neither of those two do alone.
+
+    `reference_path` (optional -- the "Learn from a reference" flow
+    only): when the swapped-in cover/end slide has no picture of its own
+    to carry over, its picture placeholder is normally padded out with
+    the org template's own generic stock photo (see
+    `_layout_placeholder_image_blob`). If a reference deck is given here,
+    its own first/last slide's picture (if it has one) is tried FIRST --
+    the deck-specific answer for THIS run beats the org template's
+    generic default. Never persisted anywhere; purely a per-call source
+    for this one picture.
+
+    `reference_path` also drives a SECOND, independent mechanism for
+    every slide EXCEPT the cover/end positions (which keep their own
+    dedicated handling above): wherever an old slide and its reference
+    counterpart at the SAME index already sit on a layout of the exact
+    same name, that's ground truth for what this slide should look like
+    -- often a deck-specific custom layout the org template has no
+    equivalent for at all (a large internal catalog deck's own one-off
+    layout, say), which `classify_slide`/`match_layout` below can never
+    correctly handle since they only ever draw from the org template.
+    These slides are re-parented onto a fresh copy of that exact layout
+    IMPORTED FROM THE REFERENCE DECK (see `_reparent_slide_layout`) --
+    content stays 100% untouched, only the layout/master (and therefore
+    its chrome: logo, footer/date format) is refreshed. They're excluded
+    from `classify_slide`/`match_layout` entirely -- there's no content
+    reflow to evaluate eligibility for.
+
+    `accepted_indexes` (optional, 1-based): the guided-review filter --
+    only slides in this set may be TOUCHED at all (both ordinary
+    rebuilds and reference-layout carryovers); everything else is left
+    byte-for-byte as uploaded, even if eligible. None (the default)
+    keeps the fully-automatic behavior: every eligible slide.
+    """
+    template_path = template_path or default_template_path()
+    prs = Presentation(deck_path)
+    n_slides = len(prs.slides)
+
+    plan = propose_rebrand(deck_path, template_path=template_path, reference_path=reference_path)
+    proposals = plan.proposals
+    reference_layout_by_index = dict(plan.reference_layout_by_index)
+    cover_index, end_index = plan.cover_index, plan.end_index
+
     proposal_by_index = {p.slide_index: p for p in proposals}
     accepted = {
         p.slide_index for p in proposals if p.eligible and p.slide_index not in reference_layout_by_index
     }
+    if accepted_indexes is not None:
+        accepted &= set(accepted_indexes)
+        reference_layout_by_index = {
+            i: name for i, name in reference_layout_by_index.items() if i in accepted_indexes
+        }
     all_indexes = set(range(1, n_slides + 1))
     transformed = sorted(accepted | set(reference_layout_by_index))
     skipped = sorted(all_indexes - accepted - set(reference_layout_by_index))
@@ -951,8 +997,7 @@ def apply_rebrand(
 
     reference_image_by_index: dict = {}
     if reference_path is not None:
-        if ref_prs is None:
-            ref_prs = Presentation(str(reference_path))
+        ref_prs = Presentation(str(reference_path))
         if cover_index in accepted and len(ref_prs.slides) > 0:
             blob = _first_picture_blob(ref_prs.slides[0])
             if blob is not None:

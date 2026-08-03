@@ -1,0 +1,166 @@
+"""Tests for the unified Transform pipeline (transform.py): plan ->
+human review -> execute -> audit. No real network calls -- the AI
+suggestion step injects the same fake Anthropic-shaped client the rest
+of the suite uses, and everything else is deterministic."""
+
+import json
+
+import pytest
+
+from deckguard.skill_bridge import _skill_dir
+from deckguard.slide_import import default_template_path
+from deckguard.transform import (
+    audit_transform_result,
+    execute_transform,
+    execute_transform_from_brief,
+    plan_transform,
+    plan_transform_from_brief,
+    reference_similarity,
+)
+from tests.helpers import add_slide, body_run, new_deck, title_run
+from tests.test_redesign import _FakeClient, _FakeResponse, _kone_slide, _kone_spec_json
+
+TEMPLATE_PATH = default_template_path()
+pytestmark = pytest.mark.skipif(not TEMPLATE_PATH.exists(), reason="bundled template asset not present")
+
+_skill_installed = (_skill_dir() / "kone_deck_creator.py").is_file()
+needs_skill = pytest.mark.skipif(not _skill_installed, reason="kone-deck-generator skill not installed")
+
+
+def _three_slide_deck(tmp_path):
+    prs = new_deck()
+    c = add_slide(prs)
+    title_run(c).text = "Annual Review"
+    m = add_slide(prs)
+    title_run(m).text = "Resolution rate"
+    body_run(m).text = "91.2% resolved"
+    e = add_slide(prs)
+    title_run(e).text = "Thank you"
+    path = tmp_path / "src.pptx"
+    prs.save(str(path))
+    return path
+
+
+def _hero_stat_override(index):
+    return json.dumps({"overrides": [
+        {"outline_index": index, "archetype": "hero_stat", "eyebrow": "Resolution rate", "value": "91.2%",
+         "caption": "of requests cleared", "support": "91.2% resolved"},
+    ]})
+
+
+@needs_skill
+def test_plan_transform_merges_deterministic_proposals_with_ai_suggestions(tmp_path):
+    src = _three_slide_deck(tmp_path)
+    plan = plan_transform(str(src), client=_FakeClient(_FakeResponse(_hero_stat_override(2))))
+
+    by_index = {s.index: s for s in plan.slides}
+    assert by_index[1].default_action == "rebuild" and by_index[1].layout_name == "Cover B"
+    assert by_index[2].default_action == "archetype" and by_index[2].archetype["archetype"] == "hero_stat"
+    assert by_index[3].default_action == "rebuild" and by_index[3].layout_name == "Outro"
+    assert plan.ai_suggestions_ran
+
+
+def test_plan_transform_degrades_to_deterministic_with_no_api_key(tmp_path, monkeypatch):
+    """No key, no client -> plan still succeeds, just without archetype
+    suggestions -- the AI step must never be load-bearing."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    src = _three_slide_deck(tmp_path)
+
+    plan = plan_transform(str(src))
+
+    assert all(s.archetype is None for s in plan.slides)
+    assert {s.default_action for s in plan.slides} == {"rebuild"}
+
+
+@needs_skill
+def test_execute_transform_honors_per_slide_choices(tmp_path):
+    """The human decision point: keep one slide untouched, accept the
+    archetype for another, rebuild the rest -- exactly and only those
+    choices execute."""
+    from pptx import Presentation
+
+    src = _three_slide_deck(tmp_path)
+    plan = plan_transform(str(src), client=_FakeClient(_FakeResponse(_hero_stat_override(2))))
+    out = tmp_path / "out.pptx"
+
+    outcome = execute_transform(str(src), str(out), plan, actions={3: "keep"})
+
+    assert outcome.rebuilt == [1]
+    assert outcome.archetype_swapped == [2]
+    assert outcome.kept == [3]
+    assert outcome.layouts_used == {1: "Cover B", 2: "hero_stat"}
+
+    prs = Presentation(str(out))
+    assert len(prs.slides) == 3
+    assert any(
+        "91.2%" in s.text_frame.text for s in prs.slides[1].shapes if getattr(s, "has_text_frame", False)
+    )
+    assert prs.slides[2].shapes.title.text_frame.text == "Thank you"  # kept byte-for-byte
+
+
+@needs_skill
+def test_execute_transform_downgrades_archetype_choice_without_a_suggestion(tmp_path):
+    """A stray "archetype" action for a slide the plan never suggested
+    one for degrades to a rebuild -- never invents content, never fails."""
+    src = _three_slide_deck(tmp_path)
+    plan = plan_transform(str(src), client=_FakeClient(_FakeResponse(json.dumps({"overrides": []}))))
+    out = tmp_path / "out.pptx"
+
+    outcome = execute_transform(str(src), str(out), plan, actions={2: "archetype"})
+
+    assert 2 in outcome.rebuilt
+    assert outcome.archetype_swapped == []
+
+
+@needs_skill
+def test_audit_transform_result_suppresses_archetype_false_positives(tmp_path):
+    """The known trap this closes for good: rules_engine flags the
+    archetype engine's own deliberate styling (muted caption grey) as a
+    text violation. The transform audit excludes archetype slides from
+    the report and says how many findings were suppressed, instead of
+    reporting correct slides as defects."""
+    src = _three_slide_deck(tmp_path)
+    plan = plan_transform(str(src), client=_FakeClient(_FakeResponse(_hero_stat_override(2))))
+    out = tmp_path / "out.pptx"
+    outcome = execute_transform(str(src), str(out), plan)
+
+    audit = audit_transform_result(str(out), archetype_indices=set(outcome.archetype_swapped))
+
+    assert audit["suppressed_archetype_findings"] >= 1
+    assert all(v.slide_index != 2 for v in audit["violations"])
+
+
+def test_reference_similarity_reports_layout_matches_and_divergence(tmp_path):
+    src = _three_slide_deck(tmp_path)
+
+    sim = reference_similarity(str(src), str(src))
+
+    assert sim["slides_compared"] == 3
+    assert sim["layout_matches"] == 3
+    assert sim["colors_not_in_reference"] == []
+    assert sim["fonts_not_in_reference"] == []
+
+
+@needs_skill
+def test_plan_and_execute_from_brief_builds_only_approved_slides(tmp_path):
+    spec_json = _kone_spec_json(
+        "Planned deck",
+        _kone_slide("agenda_contents", title="Agenda", items=[{"number": "01", "item": "One"}]),
+        _kone_slide("hero_stat", eyebrow="KPI", value="91%", caption="resolved", support="s"),
+    )
+    plan = plan_transform_from_brief("A brief.", client=_FakeClient(_FakeResponse(spec_json)))
+
+    assert plan.deck_title == "Planned deck"
+    assert [s.archetype["archetype"] for s in plan.slides] == ["agenda_contents", "hero_stat"]
+
+    from pptx import Presentation
+
+    out = tmp_path / "out.pptx"
+    outcome = execute_transform_from_brief(str(out), plan, approved_indices={2})
+
+    assert outcome.kept == [1]
+    prs = Presentation(str(out))
+    assert len(prs.slides) == 3  # retained cover + 1 approved body + retained outro
+    assert any(
+        "91%" in s.text_frame.text for s in prs.slides[1].shapes if getattr(s, "has_text_frame", False)
+    )
