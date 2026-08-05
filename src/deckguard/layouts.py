@@ -469,18 +469,201 @@ def render(slide, name: str, content: dict, archetypes_module) -> None:
     for key, filename in getattr(archetypes_module, "FIGURES", {}).get(name, {}).items():
         filled.setdefault(key, os.path.join(archetypes_module._icondir, filename))
 
+    # Regions the reference describes more precisely than ROLE_STYLE can
+    # express are drawn here and withheld from the engine.
+    engine_spec = {k: v for k, v in spec.items() if k not in ("regions", "groups")}
+    engine_spec["regions"] = [r for r in spec.get("regions", []) if "dg" not in r]
+    engine_spec["groups"] = [
+        {**g, "regions": [r for r in g["regions"] if "dg" not in r]}
+        for g in spec.get("groups", [])
+    ]
+
+    for region in spec.get("regions", []):
+        if "dg" in region:
+            _draw(slide, engine, region, filled.get(region.get("content")))
+    for group in spec.get("groups", []):
+        items = filled.get(group["content"]) or []
+        for (ox, oy), item in zip(group["origins"], items):
+            for region in group["regions"]:
+                if "dg" not in region:
+                    continue
+                rx, ry, rw, rh = region["box"]
+                shifted = {**region, "box": [ox + rx, oy + ry, rw, rh]}
+                _draw(slide, engine, shifted, (item or {}).get(region.get("content")))
+
     marks = pictograms()
     slots = _icon_slots(spec)
     icons = [marks[i % len(marks)] for i in range(slots)] if marks and slots else None
 
     engine.render_archetype(
-        slide, spec, filled, icons=icons, bg=getattr(archetypes_module, "BG", {}).get(name)
+        slide, engine_spec, filled, icons=icons,
+        bg=getattr(archetypes_module, "BG", {}).get(name),
     )
+
+
+def _draw(slide, engine, region: dict, value) -> None:
+    """Draw one reference-specified block."""
+    if value in (None, "", []):
+        return
+    style = region["dg"]
+    if style["kind"] == "bullets":
+        _draw_bullets(slide, engine, region["box"], value, style)
+    else:
+        _draw_text(slide, engine, region["box"], value, style)
+
+
+def _draw_text(slide, engine, box, value, style) -> None:
+    from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
+
+    frame = engine._tf(slide, box, MSO_ANCHOR.TOP)
+    paragraph = frame.paragraphs[0]
+    engine._run(
+        paragraph, value, style.get("font", "Inter"), style["px"],
+        engine._hex(style.get("color", "141414")), caps=style.get("caps", False),
+    )
+    if style.get("align") == "r":
+        paragraph.alignment = PP_ALIGN.RIGHT
+
+
+def _draw_bullets(slide, engine, box, items, style) -> None:
+    """A real list, not a typed dash.
+
+    The brand rule is explicit and the engine breaks it: `_dash_bullets`
+    writes an em dash followed by two spaces, which is a character in a
+    paragraph, not a list marker. It does not indent, does not hang, does
+    not survive editing in PowerPoint's outline view, and cannot nest.
+
+    This writes `buChar` paragraph formatting instead -- marker in KONE
+    Blue, text in black, one nested level as the spec allows. A nested
+    item is any list entry given as `{"text": ..., "sub": [...]}`.
+    """
+    from lxml import etree
+    from pptx.enum.text import MSO_ANCHOR
+    from pptx.util import Pt
+
+    A_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
+
+    def mark(paragraph, level: int, px: float) -> None:
+        pPr = paragraph._pPr if paragraph._pPr is not None else paragraph._p.get_or_add_pPr()
+        pPr.set("lvl", str(level))
+        pPr.set("indent", str(-int(px * 0.75 * 12700)))
+        pPr.set("marL", str(int((level + 1) * px * 0.9 * 0.75 * 12700)))
+        colour = etree.SubElement(pPr, f"{{{A_NS}}}buClr")
+        srgb = etree.SubElement(colour, f"{{{A_NS}}}srgbClr")
+        srgb.set("val", "1450F5")
+        etree.SubElement(pPr, f"{{{A_NS}}}buSzPct").set("val", "100000")
+        etree.SubElement(pPr, f"{{{A_NS}}}buFont").set("typeface", "Arial")
+        etree.SubElement(pPr, f"{{{A_NS}}}buChar").set("char", "•" if level == 0 else "◦")
+
+    frame = engine._tf(slide, box, MSO_ANCHOR.TOP)
+    first = True
+    for item in items if isinstance(items, (list, tuple)) else [items]:
+        text = item.get("text") if isinstance(item, dict) else item
+        children = item.get("sub", []) if isinstance(item, dict) else []
+        for level, line, px in [(0, text, style["px"])] + [
+            (1, child, style["nested_px"]) for child in children
+        ]:
+            paragraph = frame.paragraphs[0] if first else frame.add_paragraph()
+            first = False
+            paragraph.space_after = Pt(px * 0.35)
+            engine._run(paragraph, line, "Inter", px, engine._hex("141414"))
+            mark(paragraph, level, px)
 
 
 # --------------------------------------------------------------------------
 # building and installing
 # --------------------------------------------------------------------------
+
+
+# --------------------------------------------------------------------------
+# refinements from the rendered reference
+# --------------------------------------------------------------------------
+#
+# `LAYOUTS.md` is a placeholder map, not a design. It carries four
+# content roles, and 109 of its 321 boxes are the single label
+# `Text/body` -- so binding it alone produces a headline over an
+# undifferentiated paragraph where the design has an eyebrow, a real
+# bulleted list with KONE Blue markers, and a nested level. Measured:
+# the reference slides average 18.6 elements, generated archetypes 3.6.
+#
+# The design lives in the `.dc.html` files. These entries transcribe it
+# for the archetypes that carry the most decks, and overlay the
+# generated geometry. Each `dg` block is drawn by `render` rather than
+# by the engine, whose ROLE_STYLE has no 34px title and no real bullet
+# support. Everything here is read off the reference markup -- box,
+# size and colour -- not invented.
+#
+# This is deliberately partial. Extending it is how the rest of the
+# vocabulary gets its fidelity back; a fidelity harness should drive
+# which archetype is worth doing next.
+
+def _text(x, y, w, h, key, px, *, font="Inter", color="141414", caps=False, align="l"):
+    return {"role": "dg_text", "box": [x, y, w, h], "content": key,
+            "dg": {"kind": "text", "px": px, "font": font, "color": color,
+                   "caps": caps, "align": align}}
+
+
+def _bullets(x, y, w, h, key, px, nested_px=None):
+    return {"role": "dg_bullets", "box": [x, y, w, h], "content": key,
+            "dg": {"kind": "bullets", "px": px, "nested_px": nested_px or px - 2}}
+
+
+_REFINEMENTS: dict[str, dict] = {
+    # KoneDeck slide 4 -- eyebrow, 34px title, disc bullets with a
+    # nested circle level. The workhorse of every deck.
+    "title_content": {"regions": [
+        _text(45, 47, 917, 22, "eyebrow", 12, font="KONE Information", color="1450F5", caps=True),
+        _text(45, 91, 917, 104, "title", 34),
+        _bullets(45, 227, 917, 402, "bullets", 19, nested_px=17),
+    ]},
+    # ArchetypeLibraryB slide 07
+    "title_subtitle_content_a": {"regions": [
+        _text(45, 91, 917, 68, "title", 30),
+        _text(45, 159, 917, 36, "subtitle", 17),
+        _bullets(45, 227, 917, 402, "bullets", 18),
+    ]},
+    # KoneDeck slide 6 -- two bulleted columns, each with its own label
+    "two_content": {
+        "regions": [_text(45, 91, 1189, 104, "title", 34)],
+        "groups": [{"content": "items", "origins": [[45, 227], [657, 227]], "regions": [
+            _text(0, 0, 578, 22, "label", 12, font="KONE Information", color="1450F5", caps=True),
+            _bullets(0, 30, 578, 372, "bullets", 17),
+        ]}],
+    },
+    # ArchetypeLibraryB slide 09 -- the title is in the DESIGN but not
+    # in the master layout, so binding LAYOUTS.md alone loses it and the
+    # slide comes out headless.
+    "three_content": {
+        "regions": [_text(45, 91, 1189, 45, "title", 32)],
+        "groups": [{"content": "items", "origins": [[45, 227], [453, 227], [861, 227]],
+                    "regions": [
+                        _text(0, 0, 374, 30, "heading", 20),
+                        _text(0, 40, 374, 363, "text", 16),
+                    ]}],
+    },
+    # ArchetypeLibraryB slide 08 -- narrow title column, wide bullets
+    "two_content_narrow_title": {"regions": [
+        _text(45, 91, 374, 104, "title", 28),
+        _text(45, 227, 374, 402, "body", 16),
+        _bullets(453, 227, 781, 402, "bullets", 18),
+    ]},
+    # KoneDeck slide 3. The gallery port of this bound the title into
+    # the RIGHT-hand box and emitted no number at all -- which is the
+    # one thing a numbered divider is for. The reference puts the
+    # section label and title left, and a 420px numeral right.
+    "divider_numbering": {"regions": [
+        _text(45, 300, 374, 26, "eyebrow", 13),
+        _text(45, 332, 374, 240, "title", 46),
+        _text(700, 150, 490, 400, "number", 300, align="r"),
+    ]},
+}
+
+# Refinements that must REPLACE an existing registration rather than
+# defer to it. `install` normally leaves a hand-built archetype alone,
+# but these are transcribed from the current rendered reference while
+# the incumbent came from the superseded gallery markup -- so here the
+# newer source wins.
+_OVERRIDE = frozenset({"divider_numbering"})
 
 
 # Archetypes `ARCHETYPES.md` marks `no master`. All but one are already
@@ -537,6 +720,14 @@ def build_archetypes(
         if layout is None:
             continue
         spec = _bind_roles(layout)
+        # a twin inherits its parent's refinement along with its geometry
+        refinement = _REFINEMENTS.get(arch.engine_key) or (
+            _REFINEMENTS.get(source.engine_key) if arch.twin_of else None
+        )
+        if refinement:
+            # the reference wins on everything it describes; anything it
+            # is silent about (a panel, a picture) keeps its bound form
+            spec = {**spec, **refinement}
         if not spec["regions"] and not spec.get("groups") and not arch.is_built:
             # A layout with no bindable content is a blank slide -- real
             # for `BLANK` (logo and nothing else, and the designated
@@ -562,6 +753,15 @@ def install(archetypes_module, grades: Iterable[str] = ("A", "B", "C", "D")) -> 
     added: list[str] = []
     for key, spec in build_archetypes(grades).items():
         arch = by_key.get(key)
+        if key in _OVERRIDE and key in registry:
+            # keep the incumbent's background, replace its geometry
+            registry[key] = {
+                **({"background": registry[key]["background"]}
+                   if "background" in registry[key] else {}),
+                **spec,
+            }
+            added.append(key)
+            continue
         if key in registry:
             continue
         if arch and any(alias in registry for alias in arch.aliases):

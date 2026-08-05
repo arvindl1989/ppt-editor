@@ -492,6 +492,18 @@ def stamp_logo_chrome(slide) -> int:
         except Exception:  # noqa: BLE001 -- an empty frame supplies nothing
             pass
 
+    # Name is not enough. An archetype that draws its own mark names it
+    # whatever python-pptx auto-assigns -- `Picture 9` -- so matching on
+    # the name alone stamps a second logo directly on top of the first.
+    # What identifies a mark is where it is, so anything already sitting
+    # in the box counts as that box being taken.
+    occupied = [
+        (s.left, s.top, s.width, s.height)
+        for s in slide.shapes
+        if s.shape_type == MSO_SHAPE_TYPE.PICTURE and None not in
+        (s.left, s.top, s.width, s.height)
+    ]
+
     background = _page_background_hex(layout.element) or _page_background_hex(slide.element)
     added = 0
     for shape in layout.shapes:
@@ -502,6 +514,10 @@ def stamp_logo_chrome(slide) -> int:
         if path is None or not all(
             getattr(shape, side, None) for side in ("left", "top", "width", "height")
         ):
+            continue
+        if any(_boxes_overlap(box, (shape.left, shape.top, shape.width, shape.height))
+               for box in occupied):
+            already.add(kind)
             continue
         try:
             picture = _fit_picture(slide, path, shape.left, shape.top, shape.width, shape.height)
@@ -514,15 +530,81 @@ def stamp_logo_chrome(slide) -> int:
     return added
 
 
-def restore_logo_chrome(deck_path) -> int:
-    """`stamp_logo_chrome` over a finished deck. Returns marks added."""
+def drop_duplicate_logo_marks(slide) -> int:
+    """Remove a slide-drawn mark that the layout already provides.
+
+    `ARCHETYPES.md` settled this: the layout owns the chrome, an
+    archetype declares which variant it needs and never places the mark
+    itself. Several ported archetypes still draw their own, which was
+    harmless while the master's frames were empty and became a visible
+    double the moment they were repaired -- two logos stacked in the
+    same 81x31 box on every divider and the outro.
+
+    The layout's copy is the one that stays, because it is the one the
+    spec says owns the slot. Returns how many were removed.
+    """
+    provided = []
+    for shape in slide.slide_layout.shapes:
+        if _logo_kind(shape.name) is None or shape.is_placeholder:
+            continue
+        try:
+            shape.image.blob
+        except Exception:  # noqa: BLE001 -- an empty frame provides nothing
+            continue
+        provided.append((shape.left, shape.top, shape.width, shape.height))
+
+    removed = 0
+    for shape in list(slide.shapes):
+        if shape.shape_type != MSO_SHAPE_TYPE.PICTURE:
+            continue
+        box = (shape.left, shape.top, shape.width, shape.height)
+        if None in box:
+            continue
+        if any(_boxes_overlap(box, slot) for slot in provided):
+            shape._element.getparent().remove(shape._element)
+            removed += 1
+    return removed
+
+
+def restore_logo_chrome(deck_path) -> tuple[int, int]:
+    """One mark per logo slot per slide, across a finished deck.
+
+    Two failure modes meet here and they pull in opposite directions:
+    a layout whose logo is a placeholder supplies nothing and needs one
+    stamped, while an archetype that draws its own on a layout that
+    already has one produces two. Both are resolved against the same
+    invariant, in that order -- deduplicate first so a removal cannot
+    leave a slot empty, then fill whatever is still bare.
+
+    Returns (marks added, duplicates removed).
+    """
     from pptx import Presentation
 
     prs = Presentation(str(deck_path))
+    removed = sum(drop_duplicate_logo_marks(slide) for slide in prs.slides)
     added = sum(stamp_logo_chrome(slide) for slide in prs.slides)
-    if added:
+    if added or removed:
         prs.save(str(deck_path))
-    return added
+    return added, removed
+
+
+def _boxes_overlap(a, b, threshold: float = 0.5) -> bool:
+    """Do two EMU boxes occupy substantially the same place?
+
+    The ratio is taken against the LARGER box, which is the whole point.
+    A 1280x422 cover photo completely contains the 81x31 logo slot, so
+    measuring against the smaller box scores that pair 1.0 and reads the
+    cover photo as a duplicate logo -- which deleted the banner off
+    every cut cover until a test caught it. Against the larger box the
+    same pair scores 0.008, while a mark sitting in its own slot scores
+    about 1.
+    """
+    ax, ay, aw, ah = a
+    bx, by, bw, bh = b
+    overlap = (max(0, min(ax + aw, bx + bw) - max(ax, bx))
+               * max(0, min(ay + ah, by + bh) - max(ay, by)))
+    larger = max(aw * ah, bw * bh)
+    return bool(larger) and overlap / larger >= threshold
 
 
 def _fit_picture(slide, path, left, top, width, height):

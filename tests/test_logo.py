@@ -465,3 +465,19 @@ def test_stamping_is_idempotent():
     first = stamp_logo_chrome(slide)
     assert first >= 1
     assert stamp_logo_chrome(slide) == 0
+
+
+def test_a_full_bleed_photo_is_not_mistaken_for_a_logo():
+    """Regression, caught by the gallery's own cut-cover test: a
+    1280x422 banner completely contains the 81x31 logo slot, so scoring
+    the overlap against the SMALLER box read the banner as a duplicate
+    mark and deleted it. Against the larger box the same pair is 0.008.
+    """
+    from deckguard.logo import _boxes_overlap
+
+    banner = (0, 0, 1280 * 9525, 422 * 9525)
+    logo_slot = (45 * 9525, 45 * 9525, 81 * 9525, 31 * 9525)
+    assert _boxes_overlap(banner, logo_slot) is False
+
+    a_mark_in_the_slot = (46 * 9525, 46 * 9525, 80 * 9525, 30 * 9525)
+    assert _boxes_overlap(a_mark_in_the_slot, logo_slot) is True

@@ -769,7 +769,7 @@ def execute_transform_from_brief(out_path, plan: TransformPlan, approved_indices
     repair_empty_logo_frames(out_path)  # the master's empty logo frames
     # ...and the 15 layouts whose logo is a placeholder python-pptx never
     # clones, so the slide inherits nothing to repair. Covers, mostly.
-    restore_logo_chrome(out_path)
+    restore_logo_chrome(out_path)  # exactly one mark per slot
     # An author who asked for a cover/closer archetype gets theirs, not
     # theirs plus the master's.
     from deckguard.gallery import drop_redundant_master_slides, stamp_footers

@@ -117,11 +117,16 @@ def test_a_simple_layout_becomes_regions(spec):
     assert "groups" not in cover
 
 
-def test_equal_boxes_at_one_y_become_one_repeating_group(spec):
+def test_equal_boxes_at_one_y_become_one_repeating_group():
     """Three 374x403 boxes at y=227 are not three regions -- they are
     one group of three, which is the only form the engine can expand
-    over a content list of a different length."""
-    three = L.build_archetypes()["three_content"]
+    over a content list of a different length.
+
+    Tested on `_bind_roles` rather than `build_archetypes` because
+    THREE_CONTENT carries a reference refinement that replaces this
+    binding; the binding still has to be right underneath it."""
+    layouts = L.parse_layouts(LAYOUTS_FIXTURE)
+    three = L._bind_roles(layouts["slideLayout24"])
     assert three["regions"] == []
     (group,) = three["groups"]
     assert group["origins"] == [[45, 227], [453, 227], [861, 227]]
