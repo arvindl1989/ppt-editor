@@ -661,9 +661,13 @@ def test_every_archetype_exposes_a_machine_readable_shape():
     sigs = archetype_signatures()
     assert len(sigs) >= 20
     assert all(s["name"] and isinstance(s["capacity"], int) for s in sigs)
-    # only an archetype needing content nothing can synthesise (a real
-    # table) is excluded from matching
-    assert sum(1 for s in sigs if s["unfillable"]) <= 2
+    # Only archetypes needing content nothing can synthesise are excluded
+    # from shape matching: a real table, and the three that force the
+    # skill's own bundled chart art into a `figure` slot.
+    unfillable = {s["name"] for s in sigs if s["unfillable"]}
+    assert "comparison_table" in unfillable
+    assert "chart_commentary" in unfillable
+    assert len(unfillable) <= 6, unfillable
 
 
 def test_a_slide_is_matched_to_an_archetype_without_any_model():
@@ -760,3 +764,18 @@ def test_archetype_names_resolve_case_insensitively():
     # a gallery-2 name with no engine equivalent still reports honestly
     assert resolve_archetype_name("REPORT_8CELL")[1] == "unknown"
     assert resolve_archetype_name("NOT_A_REAL_ONE") == (None, "unknown")
+
+
+def test_shape_matching_never_puts_a_chart_on_a_slide_that_had_none():
+    """Reported on a real campaign deck: a slide of website screenshots
+    came back with a pie chart on it. The skill FORCES its own bundled
+    chart art into any `figure` slot, so a figure-bearing archetype
+    invents a chart whenever it is matched by shape alone."""
+    from deckguard.skill_bridge import archetype_signatures, match_archetypes
+
+    figure_bearing = {s["name"] for s in archetype_signatures() if s["unfillable"]}
+    assert "chart_commentary" in figure_bearing
+
+    for blocks in ([["A", "B"]], [["A"], ["B"], ["C"]], [[f"P{i}"] for i in range(6)]):
+        chosen = {c["archetype"] for c in match_archetypes("A title", blocks, 0, limit=5)}
+        assert not (chosen & figure_bearing), chosen

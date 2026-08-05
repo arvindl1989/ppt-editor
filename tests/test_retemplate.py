@@ -790,3 +790,40 @@ def test_rebuild_slides_as_dividers_alternates_variants_across_multiple_dividers
     prs2 = Presentation(str(out_path))
     layouts_used = [s.slide_layout.name for s in prs2.slides]
     assert layouts_used == ["Section divider A", "Section divider B", "Section divider A"]
+
+
+def test_an_image_inside_a_picture_placeholder_is_found(tmp_path):
+    """A filled picture PLACEHOLDER reports its shape type as
+    PLACEHOLDER, not PICTURE. Keying on the type made every photo
+    dropped into a template slot invisible: on a real campaign deck
+    three slides lost their image AND were matched to text-only layouts,
+    because extraction reported no picture to place."""
+    from pptx import Presentation
+    from pptx.util import Inches
+
+    from deckguard.retemplate import _extract_slide_content
+    from deckguard.slide_import import default_template_path
+    from tests.helpers import make_solid_png
+
+    photo = tmp_path / "p.png"
+    make_solid_png(photo)
+
+    prs = Presentation(str(default_template_path()))
+    layout = next(l for m in prs.slide_masters for l in m.slide_layouts
+                  if any(ph.placeholder_format.type and ph.placeholder_format.type.name == "PICTURE"
+                         for ph in l.placeholders))
+    slide = prs.slides.add_slide(layout)
+    filled = False
+    for ph in slide.placeholders:
+        if ph.placeholder_format.type and ph.placeholder_format.type.name == "PICTURE":
+            ph.insert_picture(str(photo))
+            filled = True
+            break
+    if not filled:
+        pytest.skip("template has no fillable picture placeholder")
+    path = tmp_path / "d.pptx"
+    prs.save(str(path))
+
+    reloaded = Presentation(str(path)).slides[0]
+    _title, _blocks, images, _reason = _extract_slide_content(reloaded, 7.5)
+    assert len(images) == 1, "a filled picture placeholder holds an image"

@@ -187,11 +187,23 @@ def _extract_slide_content(slide, slide_height_in: Optional[float] = None):
             title = shape.text_frame.text.strip()
             continue
 
+        # A picture PLACEHOLDER that has been filled reports its type as
+        # PLACEHOLDER, not PICTURE, so keying on the shape type alone
+        # made every photo dropped into a template slot invisible. On a
+        # real campaign deck that lost the image from three slides AND
+        # sent the layout matcher looking for a text-only layout, since
+        # it was told the slide had no picture to place. Asking the
+        # shape for its image is the reliable test.
+        blob = None
+        try:
+            blob = shape.image.blob
+        except Exception:  # noqa: BLE001 -- not a picture, or unreadable
+            blob = None
+        if blob is not None:
+            images.append(blob)
+            continue
         if type_name == MSO_SHAPE_TYPE.PICTURE.name:
-            try:
-                images.append(shape.image.blob)
-            except Exception:  # noqa: BLE001 -- unreadable/corrupt embedded image
-                decorative += 1
+            decorative += 1  # a picture whose bytes cannot be read
             continue
 
         if has_text:

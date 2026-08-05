@@ -753,7 +753,14 @@ def _validate_overrides(raw_overrides: list, candidate_indices: set) -> dict:
 # A table needs real headers/rows; a photo can be filled from the KONE
 # library (see `fill_empty_photo_slots`) and a figure gets the skill's
 # own bundled chart art, so neither disqualifies an archetype.
-_UNFILLABLE_ROLES = {"table"}
+# Roles whose content this can't synthesise from an old slide's text.
+# `figure` is here because the skill FORCES its own bundled chart art
+# into that slot (`archetypes.FIGURES`), so structurally matching a
+# figure-bearing archetype puts a chart on a slide that never had one --
+# a campaign slide of screenshots came back with a pie chart on it. A
+# model asked to choose deliberately may still pick these; a shape-fit
+# match may not.
+_UNFILLABLE_ROLES = {"table", "figure"}
 # Structural roles the engine handles before it ever consults
 # ROLE_STYLE. Everything else that resolves in ROLE_STYLE is, by
 # definition, a text role -- which is what lets archetypes parsed from
