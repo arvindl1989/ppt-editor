@@ -827,3 +827,48 @@ def test_an_image_inside_a_picture_placeholder_is_found(tmp_path):
     reloaded = Presentation(str(path)).slides[0]
     _title, _blocks, images, _reason = _extract_slide_content(reloaded, 7.5)
     assert len(images) == 1, "a filled picture placeholder holds an image"
+
+
+def test_body_copy_never_lands_in_a_label_sized_placeholder(tmp_path):
+    """Reported on a real transform: slides 2-4 came back showing only a
+    title. The copy was there -- 427 characters of it -- crammed into a
+    0.85 x 0.33in text placeholder in the top-right corner, because
+    placeholders were filled in document order and that label-sized one
+    came first. The real 6 x 4in body area was left empty."""
+    from pptx import Presentation
+
+    from deckguard.retemplate import _is_content_slot, _transplant_content, SlideProfile
+    from deckguard.slide_import import default_template_path
+
+    prs = Presentation(str(default_template_path()))
+    layout = next(
+        (l for m in prs.slide_masters for l in m.slide_layouts if l.name == "Text and picture A"),
+        None,
+    )
+    if layout is None:
+        pytest.skip("template has no 'Text and picture A' layout")
+
+    slide = prs.slides.add_slide(layout)
+    copy_text = "A paragraph of real body copy that belongs in the body area. " * 6
+    block = [(0, copy_text)]  # text_blocks are lists of (level, text)
+    _transplant_content(slide, SlideProfile("A title", [block], [], True))
+
+    holder = next(sh for sh in slide.shapes
+                  if sh.has_text_frame and copy_text[:24] in sh.text_frame.text)
+    area = (holder.width / 914400) * (holder.height / 914400)
+    assert area >= 1.5, f"copy landed in a {area:.2f} sq in slot"
+
+
+def test_a_tiny_body_placeholder_is_not_counted_as_capacity():
+    """It also inflated layout capacity, so a layout was chosen on the
+    promise of a body slot that could never hold anything."""
+    from deckguard.retemplate import _is_content_slot
+
+    class _Ph:
+        def __init__(self, w_in, h_in):
+            self.width = int(w_in * 914400)
+            self.height = int(h_in * 914400)
+
+    assert _is_content_slot(_Ph(6.0, 4.2)) is True
+    assert _is_content_slot(_Ph(2.83, 4.19)) is True
+    assert _is_content_slot(_Ph(0.85, 0.33)) is False

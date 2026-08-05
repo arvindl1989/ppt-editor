@@ -60,6 +60,22 @@ def _disqualifying_shape_phrase(type_name: str) -> str:
 TITLE_PLACEHOLDER_TYPES = {"TITLE", "CENTER_TITLE"}
 BODY_PLACEHOLDER_TYPES = {"BODY", "OBJECT", "SUBTITLE"}
 
+# A body-typed placeholder smaller than this is a label, not a content
+# slot. Several org layouts carry a 0.85 x 0.33in text placeholder in
+# the top-right corner -- big enough for a word, and typed BODY. Filling
+# placeholders in document order dropped a 427-character paragraph into
+# one of those and left the real 6 x 4in body area empty, so the slide
+# rendered as a title and nothing else.
+MIN_CONTENT_SLOT_SQIN = 1.5
+
+
+def _is_content_slot(placeholder) -> bool:
+    """Whether a body-typed placeholder is big enough to hold copy."""
+    width, height = placeholder.width, placeholder.height
+    if width is None or height is None:
+        return True  # unknown geometry -- assume it is real
+    return (width / 914400.0) * (height / 914400.0) >= MIN_CONTENT_SLOT_SQIN
+
 MAX_DECORATIVE_SHAPES = 4  # e.g. divider lines/accent rectangles with no text
 MAX_TEXT_BLOCKS = 3
 MAX_IMAGES = 4
@@ -264,7 +280,8 @@ def _layout_profile(layout) -> LayoutProfile:
         if name in TITLE_PLACEHOLDER_TYPES:
             has_title = True
         elif name in BODY_PLACEHOLDER_TYPES:
-            n_body += 1
+            if _is_content_slot(ph):
+                n_body += 1
         elif name == "PICTURE":
             n_picture += 1
     return LayoutProfile(name=layout.name, has_title=has_title, n_body=n_body, n_picture=n_picture)
@@ -451,13 +468,21 @@ def _transplant_content(
     body_iter = iter(profile.text_blocks)
     image_iter = iter(profile.images)
     layout = new_slide.slide_layout if fallback_to_layout_default else None
-    for ph in new_slide.placeholders:
+    # Reading order, not document order: a layout lists its placeholders
+    # by index, which bears no relation to where they sit on the slide.
+    ordered = sorted(
+        new_slide.placeholders,
+        key=lambda p: (p.top if p.top is not None else 0, p.left if p.left is not None else 0),
+    )
+    for ph in ordered:
         ph_type = ph.placeholder_format.type
         name = ph_type.name if ph_type else None
         if name in TITLE_PLACEHOLDER_TYPES:
             if profile.title:
                 ph.text_frame.text = profile.title
         elif name in BODY_PLACEHOLDER_TYPES:
+            if not _is_content_slot(ph):
+                continue  # a corner label, not somewhere copy belongs
             block = next(body_iter, None)
             if block:
                 _set_text_block(ph.text_frame, block)
