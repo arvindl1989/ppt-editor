@@ -14,6 +14,28 @@ Measurements are reproducible against:
 
 ---
 
+> **Update after the design handoff (`Gradient_Design_System_1.zip` + `All Slides.pptx`).**
+> The reworked spec landed and most of this document is now actionable rather
+> than open. Current state on deckguard's side: **all 61 canonical archetypes
+> render** (A 12/12, B 19/19, C 15/15, D 15/15), generated from `LAYOUTS.md`
+> geometry rather than ported by hand. Still open upstream, verified against
+> the files as shipped:
+>
+> - **§1.1 is NOT fixed.** `All Slides.pptx` has the same 54 empty frames
+>   (47 `Logo`, 7 `Tagline`); `ARCHETYPES.md`'s "63/63 embedded, 0 broken"
+>   does not match the file. Re-exporting did not re-link them.
+> - `ARCHETYPES.md` claims the generator "loads real pictograms from
+>   `assets/icons/`" and "knows about it (`DARK_BG_LAYOUTS`)". Neither is
+>   true of the generator in the bundle — its four `.py` files are
+>   byte-identical to the installed skill, and `DARK_BG_LAYOUTS` exists
+>   nowhere.
+> - The counts in `INSTRUCTIONS.md` (12+20+16+8=56) don't match the tables
+>   (12+19+15+15=61, of which 46 built / 9 twins / 6 spec).
+> - §1.2 (alpha), §1.3 (`FIGURES`), the em-dash bullets in
+>   `_dash_bullets`, the grey `caption`/`body_muted`/`attribution` roles,
+>   and `COVER_F_FULLBLEED`'s photo-protection gradient are all still
+>   live in `kone_engine.py`.
+
 ## 1. Blockers — these produce visibly broken slides
 
 ### 1.1 The master template ships 54 empty picture frames

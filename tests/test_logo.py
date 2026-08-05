@@ -295,14 +295,104 @@ def test_the_masters_empty_logo_frames_are_repaired(tmp_path):
                         count += 1
         return count
 
-    before = empty_frames(deck)
-    filled = repair_empty_logo_frames(deck)
-    after = empty_frames(deck)
-
-    if before == 0:
-        pytest.skip("this template has no empty logo frames")
-    assert filled == before
-    assert after == 0
-
-    # idempotent -- a second pass finds nothing left to do
+    # The vendored master is now shipped already repaired, so the
+    # invariant to hold is that it has nothing left to fix -- and that
+    # a fresh pass over it is a no-op rather than a re-write.
+    assert empty_frames(deck) == 0, (
+        "the vendored master must ship with every logo frame filled; "
+        "re-syncing it from the skill means re-running the repair"
+    )
     assert repair_empty_logo_frames(deck) == 0
+
+
+def test_an_empty_logo_frame_is_filled_with_the_right_variant(tmp_path):
+    """The repair itself, on a deck built to have the defect -- the
+    real master no longer does, and the repair still has to work for
+    every user deck built on an unrepaired copy.
+
+    A dark page gets the white mark; a light page gets the blue one.
+    """
+    from pptx import Presentation
+
+    from deckguard.logo import _brand_asset, repair_empty_logo_frames
+
+    if _brand_asset("logo", light=False) is None:
+        pytest.skip("vendored KONE marks not available")
+
+    from pptx.util import Emu
+
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    picture = slide.shapes.add_picture(
+        _brand_asset("logo", light=False), Emu(0), Emu(0), Emu(914400), Emu(914400)
+    )
+    picture.name = "Logo"
+    # strip the relationship, reproducing the master's defect exactly
+    picture._element.blipFill.blip.rEmbed = None
+
+    deck = tmp_path / "broken.pptx"
+    prs.save(str(deck))
+
+    assert repair_empty_logo_frames(deck) == 1
+    reopened = Presentation(str(deck))
+    repaired = next(
+        s for s in reopened.slides[0].shapes
+        if s._element.tag.split("}")[-1] == "pic"
+    )
+    assert repaired.image.blob, "the frame must carry a real image afterwards"
+
+
+def test_a_repaired_mark_carries_its_vector_original(tmp_path):
+    """PowerPoint keeps SVG as an extension on a raster blip. The mark
+    goes in as PNG so python-pptx accepts it, and the SVG rides along so
+    it stays crisp at any zoom -- which is exactly what the KONE master
+    does for 46 of its own images."""
+    import re
+    import zipfile
+    from pathlib import Path
+
+    from pptx import Presentation
+    from pptx.util import Emu
+
+    from deckguard.logo import _SVG_EXT_URI, _brand_asset, attach_svg
+
+    png = _brand_asset("logo", light=False)
+    if png is None or not Path(png).with_suffix(".svg").is_file():
+        pytest.skip("vendored KONE marks not available as SVG + PNG")
+
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    picture = slide.shapes.add_picture(png, Emu(0), Emu(0), Emu(914400), Emu(914400))
+    assert attach_svg(picture, Path(png).with_suffix(".svg")) is True
+
+    deck = tmp_path / "vector.pptx"
+    prs.save(str(deck))
+
+    with zipfile.ZipFile(str(deck)) as bundle:
+        assert "image/svg+xml" in bundle.read("[Content_Types].xml").decode()
+        xml = bundle.read("ppt/slides/slide1.xml").decode()
+        assert _SVG_EXT_URI in xml
+        rels = bundle.read("ppt/slides/_rels/slide1.xml.rels").decode()
+        svg_rel = re.search(r'Id="([^"]+)"[^>]*Target="[^"]*\.svg"', rels)
+        assert svg_rel, "the SVG must be a real relationship, not a dangling reference"
+        assert f'r:embed="{svg_rel.group(1)}"' in xml
+
+    # and the package is still readable -- a malformed extension would
+    # make PowerPoint offer to repair the file
+    assert len(Presentation(str(deck)).slides[0].shapes) == 1
+
+
+def test_attaching_a_missing_svg_leaves_the_raster_picture_alone(tmp_path):
+    from pptx import Presentation
+    from pptx.util import Emu
+
+    from deckguard.logo import _brand_asset, attach_svg
+
+    png = _brand_asset("logo", light=False)
+    if png is None:
+        pytest.skip("vendored KONE marks not available")
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    picture = slide.shapes.add_picture(png, Emu(0), Emu(0), Emu(914400), Emu(914400))
+    assert attach_svg(picture, tmp_path / "nope.svg") is False
+    assert picture.image.blob

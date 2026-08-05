@@ -184,6 +184,18 @@ def _load_archetypes():
         gallery_mod.install(_archetypes_module)
     except Exception:  # noqa: BLE001 -- additive; the engine's own 23 still work
         pass
+
+    # And the rest of the vocabulary, generated from the master's own
+    # published geometry. This runs last and never overwrites: anything
+    # the engine or the gallery already implements was tuned against a
+    # real rendering, while these are derived from a description.
+    # Between the three the registry covers all 61 canonical archetypes.
+    try:
+        from deckguard import layouts as layouts_mod
+
+        layouts_mod.install(_archetypes_module)
+    except Exception:  # noqa: BLE001 -- additive, same as above
+        pass
     return _archetypes_module
 
 

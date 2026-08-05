@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<!-- @template name="KONE Deck" description="On-brand KONE presentation template replicating the master slide template: cut-image cover, agenda table, secondary-color numbered section divider, bulleted title+content, text+picture, two bulleted columns, value proposition, three pictures with bullets, KONE numbers, timeline, quote and cut-image thank-you. Bullets are real list markers (KONE Blue) with one nested level. 1280x720, 45px grid. For every other master layout graded A-D, see the KONE Archetype Library template." -->
+<helmet>
+<script src="./ds-base.js"></script>
+</helmet>
+<div style="display:flex;flex-direction:column;gap:28px;align-items:flex-start;background:#d7d8dd;padding:28px;font-family:var(--font-primary)">
+
+<!-- 1 · COVER — one image cut into 3 staggered portrait blocks -->
+<section style="position:relative;width:1280px;height:720px;overflow:hidden;background:#fff">
+<img src="../../assets/logo/kone-logo.svg" alt="KONE" style="position:absolute;top:45px;left:45px;height:31px">
+<div style="position:absolute;left:330px;top:0;width:289px;height:322px;background-image:url(../../assets/photos/escalator-station.jpg);background-size:950px 419px;background-position:0px 0;background-repeat:no-repeat"></div>
+<div style="position:absolute;left:660px;top:0;width:290px;height:419px;background-image:url(../../assets/photos/escalator-station.jpg);background-size:950px 419px;background-position:-330px 0;background-repeat:no-repeat"></div>
+<div style="position:absolute;left:990px;top:0;width:290px;height:370px;background-image:url(../../assets/photos/escalator-station.jpg);background-size:950px 419px;background-position:-660px 0;background-repeat:no-repeat"></div>
+<h1 style="position:absolute;left:45px;top:480px;width:1189px;margin:0;font-weight:400;font-size:44px;line-height:1.08;letter-spacing:-.02em;color:var(--black)">Presentation title goes here</h1>
+<div style="position:absolute;left:45px;top:545px;width:578px;font-size:18px;line-height:1.4;color:var(--black)">Subtitle, audience or occasion</div>
+<img src="../../assets/logo/kone-tagline.svg" alt="Dedicated to People Flow" style="position:absolute;right:45px;bottom:41px;height:40px">
+<div style="position:absolute;left:45px;bottom:43px;font-family:var(--font-secondary);font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--black)">23 July 2026</div>
+</section>
+
+<!-- 2 · AGENDA — schedule table + image panel right -->
+<section style="position:relative;width:1280px;height:720px;overflow:hidden;background:#fff">
+<div style="position:absolute;top:0;right:0;width:470px;height:720px"><img src="../../assets/photos/elevator-women.jpg" alt="" style="width:100%;height:100%;object-fit:cover;display:block"></div>
+<img src="../../assets/logo/kone-logo-white.svg" alt="KONE" style="position:absolute;top:45px;right:46px;height:31px">
+<h2 style="position:absolute;left:45px;top:91px;margin:0;font-weight:400;font-size:34px;letter-spacing:-.01em;color:var(--black)">Agenda</h2>
+<div style="position:absolute;left:45px;top:200px;width:700px">
+<div style="display:grid;grid-template-columns:1fr 150px 70px 70px;column-gap:20px;align-items:center;padding:14px 0;border-top:1px solid var(--hairline)"><span style="font-size:17px;color:var(--black)">Welcome &amp; context</span><span style="font-size:15px;color:var(--black)">A. Virtanen</span><span style="font-family:var(--font-secondary);font-size:14px;color:var(--black)">9:00</span><span style="font-family:var(--font-secondary);font-size:14px;color:var(--black)">9:10</span></div>
+<div style="display:grid;grid-template-columns:1fr 150px 70px 70px;column-gap:20px;align-items:center;padding:14px 0;border-top:1px solid var(--hairline)"><span style="font-size:17px;color:var(--black)">Where we are today</span><span style="font-size:15px;color:var(--black)">M. Chen</span><span style="font-family:var(--font-secondary);font-size:14px;color:var(--black)">9:10</span><span style="font-family:var(--font-secondary);font-size:14px;color:var(--black)">9:30</span></div>
+<div style="display:grid;grid-template-columns:1fr 150px 70px 70px;column-gap:20px;align-items:center;padding:14px 0;border-top:1px solid var(--hairline)"><span style="font-size:17px;color:var(--black)">People Flow in numbers</span><span style="font-size:15px;color:var(--black)">S. Okonkwo</span><span style="font-family:var(--font-secondary);font-size:14px;color:var(--black)">9:30</span><span style="font-family:var(--font-secondary);font-size:14px;color:var(--black)">9:55</span></div>
+<div style="display:grid;grid-template-columns:1fr 150px 70px 70px;column-gap:20px;align-items:center;padding:14px 0;border-top:1px solid var(--hairline)"><span style="font-size:17px;color:var(--black)">Product roadmap</span><span style="font-size:15px;color:var(--black)">L. Rossi</span><span style="font-family:var(--font-secondary);font-size:14px;color:var(--black)">9:55</span><span style="font-family:var(--font-secondary);font-size:14px;color:var(--black)">10:20</span></div>
+<div style="display:grid;grid-template-columns:1fr 150px 70px 70px;column-gap:20px;align-items:center;padding:14px 0;border-top:1px solid var(--hairline)"><span style="font-size:17px;color:var(--black)">What comes next</span><span style="font-size:15px;color:var(--black)">A. Virtanen</span><span style="font-family:var(--font-secondary);font-size:14px;color:var(--black)">10:20</span><span style="font-family:var(--font-secondary);font-size:14px;color:var(--black)">10:40</span></div>
+<div style="display:grid;grid-template-columns:1fr 150px 70px 70px;column-gap:20px;align-items:center;padding:14px 0;border-top:1px solid var(--hairline);border-bottom:1px solid var(--hairline)"><span style="font-size:17px;color:var(--black)">Q&amp;A</span><span style="font-size:15px;color:var(--black)">All</span><span style="font-family:var(--font-secondary);font-size:14px;color:var(--black)">10:40</span><span style="font-family:var(--font-secondary);font-size:14px;color:var(--black)">11:00</span></div>
+</div>
+<div style="position:absolute;left:45px;bottom:43px;font-family:var(--font-secondary);font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--black)">23 July 2026</div>
+<div style="position:absolute;right:45px;bottom:43px;font-family:var(--font-secondary);font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:#fff">02</div>
+</section>
+
+<!-- 3 · SECTION DIVIDER — secondary-color bg, giant black number right, title left -->
+<section style="position:relative;width:1280px;height:720px;overflow:hidden;background:var(--pink)">
+<img src="../../assets/logo/kone-logo.svg" alt="KONE" style="position:absolute;top:45px;left:45px;height:31px">
+<div style="position:absolute;top:22px;right:45px;font-family:var(--font-secondary);font-size:10px;letter-spacing:.05em;text-transform:uppercase;color:var(--black)">KONE Internal</div>
+<div style="position:absolute;left:45px;top:0;bottom:0;width:560px;display:flex;flex-direction:column;justify-content:center">
+<div style="font-family:var(--font-secondary);text-transform:uppercase;letter-spacing:.08em;font-size:13px;color:var(--black);margin-bottom:14px">Section 01</div>
+<h2 style="margin:0;font-weight:400;font-size:46px;line-height:1.08;letter-spacing:-.015em;color:var(--black)">Connected services</h2>
+</div>
+<span style="position:absolute;right:90px;top:50%;transform:translateY(-50%);font-family:var(--font-secondary);font-size:420px;line-height:.75;color:var(--black)">1</span>
+<div style="position:absolute;left:45px;bottom:43px;font-family:var(--font-secondary);font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--black)">23 July 2026</div>
+<div style="position:absolute;right:45px;bottom:43px;font-family:var(--font-secondary);font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--black)">03</div>
+</section>
+
+<!-- 4 · TITLE AND CONTENT — real bulleted list (blue markers, black text, one nested level) -->
+<section style="position:relative;width:1280px;height:720px;overflow:hidden;background:#fff">
+<img src="../../assets/logo/kone-logo.svg" alt="KONE" style="position:absolute;top:45px;right:46px;height:31px">
+<div style="position:absolute;left:45px;top:47px;font-family:var(--font-secondary);text-transform:uppercase;letter-spacing:.08em;font-size:12px;color:var(--kone-blue)">Connected services</div>
+<h2 style="position:absolute;left:45px;top:91px;width:917px;margin:0;font-weight:400;font-size:34px;line-height:1.14;letter-spacing:-.01em;color:var(--black)">What predictive maintenance changes</h2>
+<ul style="position:absolute;left:45px;top:227px;width:917px;margin:0;padding:0 0 0 24px;list-style:disc;display:flex;flex-direction:column;gap:18px;color:var(--kone-blue)">
+<li style="font-size:19px;line-height:1.5"><span style="color:var(--black)">Equipment reports its own condition around the clock, so faults surface before passengers notice them.</span></li>
+<li style="font-size:19px;line-height:1.5"><span style="color:var(--black)">Technicians arrive with the diagnosis already made, which cuts a second visit out of most repairs.</span></li>
+<li style="font-size:19px;line-height:1.5"><span style="color:var(--black)">Building managers see availability and usage in one place:</span>
+<ul style="margin:10px 0 0;padding:0 0 0 24px;list-style:circle;display:flex;flex-direction:column;gap:8px;color:var(--kone-blue)">
+<li style="font-size:17px;line-height:1.45"><span style="color:var(--black)">Uptime and response times per unit</span></li>
+<li style="font-size:17px;line-height:1.45"><span style="color:var(--black)">Peak-hour people flow across the site</span></li>
+</ul>
+</li>
+<li style="font-size:19px;line-height:1.5"><span style="color:var(--black)">Service plans adapt to how a building is actually used, not to a fixed calendar.</span></li>
+</ul>
+<div style="position:absolute;left:45px;bottom:43px;font-family:var(--font-secondary);font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--black)">23 July 2026</div>
+<div style="position:absolute;right:45px;bottom:43px;font-family:var(--font-secondary);font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--black)">04</div>
+</section>
+
+<!-- 5 · CONTENT — text left, full-height image right -->
+<section style="position:relative;width:1280px;height:720px;overflow:hidden;background:#fff">
+<div style="position:absolute;top:0;right:0;width:590px;height:720px"><img src="../../assets/photos/product-signalization.jpg" alt="" style="width:100%;height:100%;object-fit:cover;display:block"></div>
+<img src="../../assets/logo/kone-logo-white.svg" alt="KONE" style="position:absolute;top:45px;right:46px;height:31px">
+<div style="position:absolute;left:45px;top:0;bottom:0;width:560px;display:flex;flex-direction:column;justify-content:center">
+<div style="font-family:var(--font-secondary);text-transform:uppercase;letter-spacing:.08em;font-size:12px;color:var(--kone-blue);margin-bottom:16px">Connected services</div>
+<h2 style="margin:0 0 20px;font-weight:400;font-size:34px;line-height:1.14;letter-spacing:-.01em;color:var(--black)">Predictive maintenance keeps people moving</h2>
+<p style="margin:0 0 16px;font-size:17px;line-height:1.55;color:var(--black)">KONE 24/7 Connected Services use real-time data to anticipate issues before they cause downtime — so equipment stays available and journeys stay smooth.</p>
+<p style="margin:0;font-size:17px;line-height:1.55;color:var(--black)">Highlight a <span style="font-weight:600;color:var(--black)">key result</span> in SemiBold when it earns emphasis.</p>
+</div>
+<div style="position:absolute;left:45px;bottom:43px;font-family:var(--font-secondary);font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--black)">23 July 2026</div>
+<div style="position:absolute;right:45px;bottom:43px;font-family:var(--font-secondary);font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:#fff">05</div>
+</section>
+
+<!-- 6 · TWO CONTENT — two bulleted columns -->
+<section style="position:relative;width:1280px;height:720px;overflow:hidden;background:#fff">
+<img src="../../assets/logo/kone-logo.svg" alt="KONE" style="position:absolute;top:45px;right:46px;height:31px">
+<h2 style="position:absolute;left:45px;top:91px;width:1189px;margin:0;font-weight:400;font-size:34px;line-height:1.14;letter-spacing:-.01em;color:var(--black)">Where we are, and what we do next</h2>
+<div style="position:absolute;left:45px;top:227px;width:578px">
+<div style="font-family:var(--font-secondary);text-transform:uppercase;letter-spacing:.08em;font-size:12px;color:var(--kone-blue);padding-bottom:14px;border-bottom:1px solid var(--hairline)">Today</div>
+<ul style="margin:22px 0 0;padding:0 0 0 24px;list-style:disc;display:flex;flex-direction:column;gap:16px;color:var(--kone-blue)">
+<li style="font-size:17px;line-height:1.5"><span style="color:var(--black)">Connected Services live on more than a million units.</span></li>
+<li style="font-size:17px;line-height:1.5"><span style="color:var(--black)">DX Class shipping in every key market.</span></li>
+<li style="font-size:17px;line-height:1.5"><span style="color:var(--black)">Remote diagnostics resolve a third of callouts without a site visit.</span></li>
+</ul>
+</div>
+<div style="position:absolute;left:657px;top:227px;width:578px">
+<div style="font-family:var(--font-secondary);text-transform:uppercase;letter-spacing:.08em;font-size:12px;color:var(--black);padding-bottom:14px;border-bottom:1px solid var(--hairline)">Next</div>
+<ul style="margin:22px 0 0;padding:0 0 0 24px;list-style:disc;display:flex;flex-direction:column;gap:16px;color:var(--kone-blue)">
+<li style="font-size:17px;line-height:1.5"><span style="color:var(--black)">One people-flow view across elevators, escalators and doors.</span></li>
+<li style="font-size:17px;line-height:1.5"><span style="color:var(--black)">Service windows planned around each building's quiet hours.</span></li>
+<li style="font-size:17px;line-height:1.5"><span style="color:var(--black)">Energy reporting built into the customer portal.</span></li>
+</ul>
+</div>
+<div style="position:absolute;left:45px;bottom:43px;font-family:var(--font-secondary);font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--black)">23 July 2026</div>
+<div style="position:absolute;right:45px;bottom:43px;font-family:var(--font-secondary);font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--black)">06</div>
+</section>
+
+<!-- 7 · VALUE PROPOSITION — full-height image left, product + numbered features right -->
+<section style="position:relative;width:1280px;height:720px;overflow:hidden;background:#fff">
+<div style="position:absolute;top:0;left:0;width:521px;height:720px"><img src="../../assets/photos/elevator-bike.jpg" alt="" style="width:100%;height:100%;object-fit:cover;display:block"></div>
+<img src="../../assets/logo/kone-logo.svg" alt="KONE" style="position:absolute;top:45px;right:46px;height:31px">
+<div style="position:absolute;left:590px;top:91px;right:45px">
+<div style="font-family:var(--font-secondary);text-transform:uppercase;letter-spacing:.08em;font-size:13px;color:var(--kone-blue);margin-bottom:10px">KONE DX Class</div>
+<h2 style="margin:0 0 28px;font-weight:400;font-size:32px;line-height:1.14;letter-spacing:-.01em;color:var(--black)">The first digital elevator series</h2>
+<div style="display:flex;flex-direction:column;gap:18px">
+<div style="display:flex;gap:18px"><span style="font-family:var(--font-secondary);font-size:20px;color:var(--kone-blue);width:30px;flex:0 0 auto">01</span><div><div style="font-weight:600;font-size:17px;color:var(--black)">Built-in connectivity</div><div style="font-size:15px;color:var(--black);margin-top:2px">Native digital tools from day one.</div></div></div>
+<div style="display:flex;gap:18px"><span style="font-family:var(--font-secondary);font-size:20px;color:var(--kone-blue);width:30px;flex:0 0 auto">02</span><div><div style="font-weight:600;font-size:17px;color:var(--black)">Continuous updates</div><div style="font-size:15px;color:var(--black);margin-top:2px">New services over the elevator's life.</div></div></div>
+<div style="display:flex;gap:18px"><span style="font-family:var(--font-secondary);font-size:20px;color:var(--kone-blue);width:30px;flex:0 0 auto">03</span><div><div style="font-weight:600;font-size:17px;color:var(--black)">People Flow intelligence</div><div style="font-size:15px;color:var(--black);margin-top:2px">Smarter movement through the building.</div></div></div>
+<div style="display:flex;gap:18px"><span style="font-family:var(--font-secondary);font-size:20px;color:var(--kone-blue);width:30px;flex:0 0 auto">04</span><div><div style="font-weight:600;font-size:17px;color:var(--black)">Sustainable by design</div><div style="font-size:15px;color:var(--black);margin-top:2px">Regenerative drives, eco-efficient standby.</div></div></div>
+</div>
+</div>
+<div style="position:absolute;right:45px;bottom:43px;font-family:var(--font-secondary);font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--black)">07</div>
+</section>
+
+<!-- 8 · THREE PICTURES AND TEXT — three-up pillars, each with a short bulleted list -->
+<section style="position:relative;width:1280px;height:720px;overflow:hidden;background:#fff">
+<img src="../../assets/logo/kone-logo.svg" alt="KONE" style="position:absolute;top:45px;right:46px;height:31px">
+<div style="position:absolute;left:45px;top:47px;font-family:var(--font-secondary);text-transform:uppercase;letter-spacing:.08em;font-size:12px;color:var(--kone-blue)">Three pillars</div>
+<h2 style="position:absolute;left:45px;top:70px;width:1189px;margin:0;font-weight:400;font-size:28px;line-height:1.2;letter-spacing:-.01em;color:var(--black)">What changes for the people who use the building</h2>
+<div style="position:absolute;left:45px;top:136px;width:374px;height:272px;overflow:hidden"><img src="../../assets/photos/escalator-station.jpg" alt="" style="width:100%;height:100%;object-fit:cover;display:block"></div>
+<div style="position:absolute;left:453px;top:136px;width:374px;height:272px;overflow:hidden"><img src="../../assets/photos/product-signalization.jpg" alt="" style="width:100%;height:100%;object-fit:cover;display:block"></div>
+<div style="position:absolute;left:861px;top:136px;width:374px;height:272px;overflow:hidden"><img src="../../assets/photos/technician-van-branded.jpg" alt="" style="width:100%;height:100%;object-fit:cover;display:block"></div>
+<div style="position:absolute;left:45px;top:442px;width:374px">
+<div style="font-weight:600;font-size:19px;line-height:1.25;color:var(--black)">Flow</div>
+<ul style="margin:14px 0 0;padding:0 0 0 22px;list-style:disc;display:flex;flex-direction:column;gap:10px;color:var(--kone-blue)">
+<li style="font-size:16px;line-height:1.45"><span style="color:var(--black)">Shorter waits at peak hours</span></li>
+<li style="font-size:16px;line-height:1.45"><span style="color:var(--black)">Routing that follows real demand</span></li>
+</ul>
+</div>
+<div style="position:absolute;left:453px;top:442px;width:374px">
+<div style="font-weight:600;font-size:19px;line-height:1.25;color:var(--black)">Experience</div>
+<ul style="margin:14px 0 0;padding:0 0 0 22px;list-style:disc;display:flex;flex-direction:column;gap:10px;color:var(--kone-blue)">
+<li style="font-size:16px;line-height:1.45"><span style="color:var(--black)">Clear signalization in every car</span></li>
+<li style="font-size:16px;line-height:1.45"><span style="color:var(--black)">Accessible by default</span></li>
+</ul>
+</div>
+<div style="position:absolute;left:861px;top:442px;width:374px">
+<div style="font-weight:600;font-size:19px;line-height:1.25;color:var(--black)">Care</div>
+<ul style="margin:14px 0 0;padding:0 0 0 22px;list-style:disc;display:flex;flex-direction:column;gap:10px;color:var(--kone-blue)">
+<li style="font-size:16px;line-height:1.45"><span style="color:var(--black)">Planned visits, fewer surprises</span></li>
+<li style="font-size:16px;line-height:1.45"><span style="color:var(--black)">One technician, one trip</span></li>
+</ul>
+</div>
+<div style="position:absolute;left:45px;bottom:43px;font-family:var(--font-secondary);font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--black)">23 July 2026</div>
+<div style="position:absolute;right:45px;bottom:43px;font-family:var(--font-secondary);font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--black)">08</div>
+</section>
+
+<!-- 9 · KONE NUMBERS (stats) -->
+<section style="position:relative;width:1280px;height:720px;overflow:hidden;background:var(--sand)">
+<img src="../../assets/logo/kone-logo.svg" alt="KONE" style="position:absolute;top:45px;right:46px;height:31px">
+<h2 style="position:absolute;left:45px;top:91px;margin:0;font-weight:400;font-size:34px;letter-spacing:-.01em;color:var(--black)">People Flow in numbers</h2>
+<div style="position:absolute;left:45px;top:210px;right:45px;display:flex;gap:48px">
+<div style="flex:1"><div style="font-family:var(--font-secondary);font-size:84px;line-height:1;color:var(--kone-blue)">60<span style="font-size:42px">M</span></div><div style="font-family:var(--font-secondary);text-transform:uppercase;letter-spacing:.06em;font-size:13px;color:var(--kone-blue);margin-top:12px">People moved daily</div></div>
+<div style="flex:1"><div style="font-family:var(--font-secondary);font-size:84px;line-height:1;color:var(--kone-blue)">1.65<span style="font-size:42px">M</span></div><div style="font-family:var(--font-secondary);text-transform:uppercase;letter-spacing:.06em;font-size:13px;color:var(--kone-blue);margin-top:12px">Units in service</div></div>
+<div style="flex:1"><div style="font-family:var(--font-secondary);font-size:84px;line-height:1;color:var(--black)">60<span style="font-size:42px">+</span></div><div style="font-family:var(--font-secondary);text-transform:uppercase;letter-spacing:.06em;font-size:13px;color:var(--black);margin-top:12px">Countries</div></div>
+</div>
+<div style="position:absolute;left:45px;top:430px;display:flex;gap:14px;align-items:flex-start;background:var(--blue-20);border-radius:8px;padding:22px;max-width:720px">
+<span style="font-family:var(--font-secondary);text-transform:uppercase;letter-spacing:.06em;font-size:12px;color:var(--kone-blue);flex:0 0 auto;padding-top:2px">Note</span>
+<span style="font-size:15px;line-height:1.5;color:var(--black)">Tints like this 20% KONE Blue block are for infographics and callouts — never as a full-page background.</span>
+</div>
+<div style="position:absolute;left:45px;bottom:43px;font-family:var(--font-secondary);font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--black)">23 July 2026</div>
+<div style="position:absolute;right:45px;bottom:43px;font-family:var(--font-secondary);font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--black)">09</div>
+</section>
+
+<!-- 10 · TIMELINE / ROADMAP -->
+<section style="position:relative;width:1280px;height:720px;overflow:hidden;background:#fff">
+<img src="../../assets/logo/kone-logo.svg" alt="KONE" style="position:absolute;top:45px;right:46px;height:31px">
+<h2 style="position:absolute;left:45px;top:91px;margin:0;font-weight:400;font-size:34px;letter-spacing:-.01em;color:var(--black)">Roadmap</h2>
+<div style="position:absolute;left:45px;top:240px;right:45px">
+<div style="position:relative;display:flex;justify-content:space-between">
+<div style="position:absolute;top:11px;left:0;right:0;height:2px;background:var(--hairline)"></div>
+<div style="position:relative;flex:1;padding-right:28px"><div style="width:22px;height:22px;border-radius:9999px;background:var(--kone-blue);margin-bottom:22px"></div><div style="font-family:var(--font-secondary);font-size:32px;color:var(--kone-blue);margin-bottom:8px">2024</div><div style="font-size:15px;line-height:1.5;color:var(--black)">DX Class rollout across key markets.</div></div>
+<div style="position:relative;flex:1;padding-right:28px"><div style="width:22px;height:22px;border-radius:9999px;background:var(--kone-blue);margin-bottom:22px"></div><div style="font-family:var(--font-secondary);font-size:32px;color:var(--kone-blue);margin-bottom:8px">2025</div><div style="font-size:15px;line-height:1.5;color:var(--black)">Connected Services on 1M+ units.</div></div>
+<div style="position:relative;flex:1;padding-right:28px"><div style="width:22px;height:22px;border-radius:9999px;background:var(--kone-blue);margin-bottom:22px"></div><div style="font-family:var(--font-secondary);font-size:32px;color:var(--kone-blue);margin-bottom:8px">2026</div><div style="font-size:15px;line-height:1.5;color:var(--black)">People Flow intelligence platform.</div></div>
+<div style="position:relative;flex:1"><div style="width:22px;height:22px;border-radius:9999px;background:var(--black-40);margin-bottom:22px"></div><div style="font-family:var(--font-secondary);font-size:32px;color:var(--black);margin-bottom:8px">2027</div><div style="font-size:15px;line-height:1.5;color:var(--black)">Autonomous building mobility.</div></div>
+</div>
+</div>
+<div style="position:absolute;left:45px;bottom:43px;font-family:var(--font-secondary);font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--black)">23 July 2026</div>
+<div style="position:absolute;right:45px;bottom:43px;font-family:var(--font-secondary);font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--black)">10</div>
+</section>
+
+<!-- 11 · QUOTE / STATEMENT — secondary-color panel right, label + context left -->
+<section style="position:relative;width:1280px;height:720px;overflow:hidden;background:#fff">
+<img src="../../assets/logo/kone-logo.svg" alt="KONE" style="position:absolute;top:45px;right:46px;height:31px">
+<div style="position:absolute;left:453px;top:136px;width:782px;height:493px;background:var(--light-blue)"></div>
+<h2 style="position:absolute;left:45px;top:136px;width:272px;margin:0;font-weight:400;font-size:26px;line-height:1.2;letter-spacing:-.01em;color:var(--black)">From the site</h2>
+<p style="position:absolute;left:45px;top:272px;width:272px;margin:0;font-size:16px;line-height:1.5;color:var(--black)">Nordvest Tower, Copenhagen. Six units retrofitted to Connected Services in one weekend.</p>
+<div style="position:absolute;left:510px;top:212px;width:657px;font-weight:400;font-size:36px;line-height:1.28;letter-spacing:-.015em;color:var(--black)">"We stopped hearing about the elevators. That is the highest compliment a building manager can pay them."</div>
+<div style="position:absolute;left:510px;top:561px;width:657px;font-family:var(--font-secondary);text-transform:uppercase;letter-spacing:.06em;font-size:13px;color:var(--black)">Mette Sørensen · Facility director</div>
+<div style="position:absolute;left:45px;bottom:43px;font-family:var(--font-secondary);font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--black)">23 July 2026</div>
+<div style="position:absolute;right:45px;bottom:43px;font-family:var(--font-secondary);font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--black)">11</div>
+</section>
+
+<!-- 12 · THANK YOU — one image cut into 3 blocks, big text lower-left -->
+<section style="position:relative;width:1280px;height:720px;overflow:hidden;background:#fff">
+<img src="../../assets/logo/kone-logo.svg" alt="KONE" style="position:absolute;top:45px;left:45px;height:31px">
+<div style="position:absolute;left:330px;top:0;width:289px;height:322px;background-image:url(../../assets/photos/handrail-hands.jpg);background-size:950px 419px;background-position:0px 0;background-repeat:no-repeat"></div>
+<div style="position:absolute;left:660px;top:0;width:290px;height:419px;background-image:url(../../assets/photos/handrail-hands.jpg);background-size:950px 419px;background-position:-330px 0;background-repeat:no-repeat"></div>
+<div style="position:absolute;left:990px;top:0;width:290px;height:370px;background-image:url(../../assets/photos/handrail-hands.jpg);background-size:950px 419px;background-position:-660px 0;background-repeat:no-repeat"></div>
+<h2 style="position:absolute;left:45px;top:480px;margin:0;font-weight:400;font-size:64px;letter-spacing:-.02em;color:var(--black)">Thank you</h2>
+<img src="../../assets/logo/kone-tagline.svg" alt="Dedicated to People Flow" style="position:absolute;right:45px;bottom:41px;height:40px">
+<div style="position:absolute;left:45px;bottom:43px;font-family:var(--font-secondary);font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--black)">global.brand@kone.com</div>
+</section>
+
+</div>
+</x-dc>
+</body>
+</html>

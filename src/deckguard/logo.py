@@ -13,6 +13,7 @@ from collections import Counter
 from dataclasses import dataclass
 from functools import lru_cache
 from io import BytesIO
+from pathlib import Path
 from typing import Optional
 
 import imagehash
@@ -56,6 +57,22 @@ def iter_picture_shapes(shapes):
             yield shape
 
 
+def _walk_shapes(shapes):
+    """Every shape, groups flattened -- and unlike `iter_picture_shapes`
+    this filters nothing. A `<p:pic>` whose blip has lost its
+    relationship cannot always be recognised by `shape_type`, so the
+    caller matches on the XML tag instead and needs to see everything."""
+    for shape in shapes:
+        try:
+            is_group = shape.shape_type == MSO_SHAPE_TYPE.GROUP
+        except Exception:  # noqa: BLE001 -- damaged shapes still need walking
+            is_group = False
+        if is_group:
+            yield from _walk_shapes(shape.shapes)
+        else:
+            yield shape
+
+
 @dataclass
 class LogoMatch:
     shape: object
@@ -87,6 +104,68 @@ def replace_logo_image(shape, new_image_path: str) -> None:
     image_part, rId = shape.part.get_or_add_image_part(new_image_path)
     blip = shape._element.blipFill.blip
     blip.rEmbed = rId
+
+
+# PowerPoint 2016+ stores a vector image as a raster blip carrying an
+# extension that points at the SVG. The URI is Microsoft's fixed
+# identifier for that extension -- the master template uses this exact
+# mechanism for 46 of its own image parts.
+_SVG_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
+_SVG_NS = "http://schemas.microsoft.com/office/drawing/2016/SVG/main"
+
+
+def attach_svg(shape, svg_path) -> bool:
+    """Give a picture shape a vector version of itself.
+
+    A .pptx cannot hold an SVG on its own -- `add_picture` refuses one,
+    because python-pptx identifies images through Pillow and Pillow does
+    not read SVG. What PowerPoint actually does is keep BOTH: the
+    `<a:blip>` points at a raster fallback, and an extension on that
+    blip points at the SVG. Readers that understand the extension draw
+    the vector and stay crisp at any zoom; readers that don't fall back
+    to the PNG. Nothing is lost either way.
+
+    So a KONE pictogram or logo goes in as the PNG we rasterised, plus
+    this. Returns False if the part could not be added, leaving the
+    raster picture perfectly usable.
+    """
+    from pathlib import Path
+
+    from lxml import etree
+    from pptx.opc.constants import RELATIONSHIP_TYPE as RT
+    from pptx.opc.package import Part
+    from pptx.opc.packuri import PackURI
+
+    svg_path = Path(svg_path)
+    if not svg_path.is_file():
+        return False
+    part = shape.part
+    package = part.package
+
+    used = {p.partname for p in package.iter_parts()}
+    for n in range(1, 10000):
+        partname = PackURI(f"/ppt/media/dg-vector{n}.svg")
+        if partname not in used:
+            break
+    else:  # pragma: no cover -- 10k vector parts in one deck
+        return False
+
+    try:
+        svg_part = Part(partname, "image/svg+xml", package, svg_path.read_bytes())
+        rId = part.relate_to(svg_part, RT.IMAGE)
+        blip = shape._element.blipFill.blip
+        ext_lst = blip.find(_a("extLst"))
+        if ext_lst is None:
+            ext_lst = etree.SubElement(blip, _a("extLst"))
+        ext = etree.SubElement(ext_lst, _a("ext"))
+        ext.set("uri", _SVG_EXT_URI)
+        svg_blip = etree.SubElement(ext, f"{{{_SVG_NS}}}svgBlip")
+        svg_blip.set(
+            "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed", rId
+        )
+    except Exception:  # noqa: BLE001 -- the raster picture is already valid
+        return False
+    return True
 
 
 def find_background_blip(container_element):
@@ -316,16 +395,17 @@ def _is_dark(hex_value: Optional[str]) -> bool:
 def repair_empty_logo_frames(deck_path) -> int:
     """Give the master template's empty logo frames their image back.
 
-    The KONE master ships 45 `Logo` and 7 `Tagline` picture shapes -- on
-    47 of its 63 layouts -- whose `<a:blip>` carries no relationship at
-    all. PowerPoint draws a picture frame with no picture as a dotted
-    rectangle, so every deck built on that master shows dotted boxes
-    where its logo should be. Reported from a slide.
+    The KONE master ships 47 `Logo` and 7 `Tagline` picture shapes --
+    across 49 of its 63 layouts -- whose `<a:blip>` carries no
+    relationship at all. PowerPoint draws a picture frame with no
+    picture as a dotted rectangle, so every deck built on that master
+    shows dotted boxes where its logo should be. Reported from a slide.
 
-    This is a defect in the template, not in anything deckguard writes;
-    the marks are rasterised and vendored here, so filling them in is a
-    two-line repair rather than something the user has to fix by hand in
-    63 layouts.
+    This is a defect in the template, not in anything deckguard writes,
+    and it survived a full re-export of the master (`All Slides.pptx`
+    has the same 54). The marks are rasterised and vendored here, so
+    filling them in is a two-line repair rather than something the user
+    has to fix by hand in 63 layouts.
 
     Returns how many frames were filled.
     """
@@ -333,25 +413,35 @@ def repair_empty_logo_frames(deck_path) -> int:
 
     prs = Presentation(str(deck_path))
     filled = 0
+    containers = []
     for master in prs.slide_masters:
-        for container in [master, *master.slide_layouts]:
-            background = _page_background_hex(container.element)
-            for shape in container.shapes:
-                if shape._element.tag != _p("pic"):
-                    continue
-                try:
-                    shape.image.blob
-                    continue  # already has its picture
-                except Exception:  # noqa: BLE001 -- the empty frames we're here for
-                    pass
-                path = _brand_asset(shape.name, light=_is_dark(background))
-                if path is None:
-                    continue
-                try:
-                    replace_logo_image(shape, path)
-                    filled += 1
-                except Exception:  # noqa: BLE001 -- cosmetic repair, never fatal
-                    continue
+        containers += [master, *master.slide_layouts]
+    # Slides too: a template that ships one instantiated slide per
+    # layout (the current master does, 67 of them) carries the same
+    # empty frames on the slides themselves, and those are what a user
+    # actually opens.
+    containers += list(prs.slides)
+
+    for container in containers:
+        background = _page_background_hex(container.element)
+        for shape in _walk_shapes(container.shapes):
+            if shape._element.tag != _p("pic"):
+                continue
+            try:
+                shape.image.blob
+                continue  # already has its picture
+            except Exception:  # noqa: BLE001 -- the empty frames we're here for
+                pass
+            path = _brand_asset(shape.name, light=_is_dark(background))
+            if path is None:
+                continue
+            try:
+                replace_logo_image(shape, path)
+                # the marks ship as SVG beside the PNG; prefer vector
+                attach_svg(shape, Path(path).with_suffix(".svg"))
+                filled += 1
+            except Exception:  # noqa: BLE001 -- cosmetic repair, never fatal
+                continue
     if filled:
         prs.save(str(deck_path))
     return filled
