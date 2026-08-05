@@ -471,3 +471,26 @@ def test_plan_says_suggestions_are_off_when_the_server_has_no_key(tmp_path, monk
 
     with_key = plan_transform(str(src), client=_FakeClient(_FakeResponse(_hero_stat_override(2))))
     assert with_key.ai_suggestions_ran is True
+
+
+def test_an_empty_slide_is_kept_not_given_an_archetype(tmp_path):
+    """Found on a real campaign deck: a "Slogan" slide carrying only its
+    date, footer and page number was handed an archetype, which rendered
+    an empty slide. A slide with nothing to say gets nothing proposed."""
+    from tests.helpers import add_slide, new_deck, title_run
+
+    prs = new_deck()
+    c = add_slide(prs)
+    title_run(c).text = "Cover"
+    blank = add_slide(prs)  # a slide with no text and no images at all
+    del blank
+    e = add_slide(prs)
+    title_run(e).text = "Thank you"
+    src = tmp_path / "src.pptx"
+    prs.save(str(src))
+
+    plan = plan_transform(str(src))
+
+    empty = [s for s in plan.slides if s.index == 2][0]
+    assert empty.archetype is None
+    assert empty.default_action == "keep"

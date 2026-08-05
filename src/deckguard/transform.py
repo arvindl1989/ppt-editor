@@ -266,6 +266,13 @@ def plan_transform(
             if idx in suggestions or idx in cover_end:
                 continue
             flat, image_count = pool[idx]
+            # A slide with nothing to say gets nothing proposed. Found on
+            # a real deck: an empty "Slogan" slide carrying only its
+            # date, footer and page number was handed an archetype,
+            # which then rendered an empty slide. Keeping it is the
+            # honest answer.
+            if not any(line.strip() for block in flat for line in block) and not image_count:
+                continue
             candidates = _match(titles.get(idx), flat, image_count=image_count, limit=4,
                                 prefer=reference_archetypes)
             if not candidates:
