@@ -18,6 +18,7 @@ from typing import Optional
 
 import imagehash
 from PIL import Image
+from pptx.enum.dml import MSO_FILL
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 
 DEFAULT_MATCH_THRESHOLD = 10  # max Hamming distance to count as a logo match
@@ -482,15 +483,24 @@ def stamp_logo_chrome(slide) -> int:
     layout = slide.slide_layout
 
     already = {_logo_kind(s.name) for s in slide.shapes if _logo_kind(s.name)}
+    hidden = _occluding_boxes(slide)
     for shape in layout.shapes:
         kind = _logo_kind(shape.name)
         if kind is None or shape.is_placeholder:
             continue
-        try:  # a filled picture on the layout paints through by itself
+        try:
             shape.image.blob
-            already.add(kind)
         except Exception:  # noqa: BLE001 -- an empty frame supplies nothing
-            pass
+            continue
+        # A layout shape paints BEHIND the slide's own, so a full-slide
+        # background rectangle or a full-height photo hides the layout's
+        # mark completely. Both numbered dividers came out logo-less
+        # that way: the layout had the mark, the archetype's sand field
+        # was painted straight over it.
+        box = (shape.left, shape.top, shape.width, shape.height)
+        if any(_covers(cover, box) for cover in hidden):
+            continue
+        already.add(kind)
 
     # Name is not enough. An archetype that draws its own mark names it
     # whatever python-pptx auto-assigns -- `Picture 9` -- so matching on
@@ -605,6 +615,43 @@ def _boxes_overlap(a, b, threshold: float = 0.5) -> bool:
                * max(0, min(ay + ah, by + bh) - max(ay, by)))
     larger = max(aw * ah, bw * bh)
     return bool(larger) and overlap / larger >= threshold
+
+
+def _covers(cover, target, threshold: float = 0.9) -> bool:
+    """Does `cover` hide `target`?
+
+    The mirror of `_boxes_overlap`: that asks "are these the same
+    shape", so it measures against the LARGER box; this asks "is the
+    target buried", so it measures against the TARGET. A full-slide
+    rectangle covers an 81x31 logo completely and scores 1.0 here,
+    which is exactly the answer wanted.
+    """
+    cx, cy, cw, ch = cover
+    tx, ty, tw, th = target
+    overlap = (max(0, min(cx + cw, tx + tw) - max(cx, tx))
+               * max(0, min(cy + ch, ty + th) - max(cy, ty)))
+    area = tw * th
+    return bool(area) and overlap / area >= threshold
+
+
+def _occluding_boxes(slide) -> list:
+    """Boxes on the slide that paint over whatever is behind them --
+    pictures, and shapes with a solid fill. A text box does not count;
+    its background is transparent."""
+    boxes = []
+    for shape in slide.shapes:
+        box = (shape.left, shape.top, shape.width, shape.height)
+        if None in box:
+            continue
+        if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
+            boxes.append(box)
+            continue
+        try:
+            if shape.fill.type is not None and shape.fill.type != MSO_FILL.BACKGROUND:
+                boxes.append(box)
+        except Exception:  # noqa: BLE001 -- shapes with no fill concept
+            continue
+    return boxes
 
 
 def _fit_picture(slide, path, left, top, width, height):

@@ -431,15 +431,31 @@ def _photo_for(content: dict) -> Optional[str]:
     return photos[sum(ord(c) for c in seed) % len(photos)]
 
 
-def draw_chrome(slide, arch: dict, content: dict) -> None:
+# Chrome splits by depth, not by type. A cut banner and a colour fill
+# sit BEHIND the archetype's text; a logo or tagline sits in FRONT of
+# it. Drawing them in one pass put the mark down before the engine
+# painted the agenda's full-height photo over the top of it, so that
+# slide came out with no logo at all.
+BACKGROUND_CHROME = frozenset({"fill", "cut"})
+FOREGROUND_CHROME = frozenset({"asset"})
+
+
+def draw_chrome(slide, arch: dict, content: dict, kinds=None) -> None:
     """Draw the primitives the engine has no role for: colour fills,
-    logo/tagline rasters, and the staggered cut-image banner."""
+    logo/tagline rasters, and the staggered cut-image banner.
+
+    `kinds` restricts the pass to one depth -- see `BACKGROUND_CHROME`
+    and `FOREGROUND_CHROME`. Passing nothing draws everything, which is
+    only correct for an archetype that paints no picture of its own.
+    """
     import importlib
 
     engine = importlib.import_module("kone_engine")
     for item in arch.get("chrome") or []:
         kind = item.get("kind")
         box = item.get("box")
+        if kinds is not None and kind not in kinds:
+            continue
         if kind == "fill":
             engine._rect(slide, box, engine._hex(item["hex"]))
         elif kind == "asset":
@@ -549,12 +565,16 @@ def install(archetypes_module) -> int:
     original_render = archetypes_module.render
 
     def render_with_chrome(slide, name, content):
-        """Paint order is the whole point here: background, then the
-        chrome, then the regions. Drawing chrome before delegating put
-        TITLE_TEXT_SPLIT's white field down first and let the engine's
-        own full-slide background paint straight over it -- the slide
-        came out solid blue. So the background is drawn here and
-        suppressed for the delegated call."""
+        """Paint order is the whole point here, in three layers:
+        background, then the regions, then the foreground chrome.
+
+        Both halves were learned from a broken slide. Drawing chrome
+        before delegating put TITLE_TEXT_SPLIT's white field down first
+        and let the engine's own full-slide background paint over it --
+        solid blue slide. And drawing the logo in that same early pass
+        put it under the agenda's full-height photo -- no logo at all.
+        So the background is drawn here and suppressed for the delegated
+        call, and the marks go on last."""
         arch = archetypes_module.ARCHETYPES.get(name) or {}
         if not arch.get("chrome"):
             return original_render(slide, name, content)
@@ -566,7 +586,7 @@ def install(archetypes_module) -> int:
             )
             if rgb is not None:
                 engine._rect(slide, [0, 0, 1280, 720], rgb)
-        draw_chrome(slide, arch, content)
+        draw_chrome(slide, arch, content, kinds=BACKGROUND_CHROME)
 
         saved = archetypes_module.BG.get(name)
         archetypes_module.BG[name] = None
@@ -577,6 +597,7 @@ def install(archetypes_module) -> int:
         finally:
             archetypes_module.ARCHETYPES[name] = arch
             archetypes_module.BG[name] = saved
+            draw_chrome(slide, arch, content, kinds=FOREGROUND_CHROME)
 
     archetypes_module.render = render_with_chrome
     _installed = True

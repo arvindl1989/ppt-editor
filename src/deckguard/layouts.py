@@ -478,6 +478,19 @@ def render(slide, name: str, content: dict, archetypes_module) -> None:
         for g in spec.get("groups", [])
     ]
 
+    marks = pictograms()
+    slots = _icon_slots(spec)
+    icons = [marks[i % len(marks)] for i in range(slots)] if marks and slots else None
+
+    engine.render_archetype(
+        slide, engine_spec, filled, icons=icons,
+        bg=getattr(archetypes_module, "BG", {}).get(name),
+    )
+
+    # AFTER the engine, never before. `render_archetype` starts by
+    # painting a full-slide background rectangle, so anything drawn
+    # first is buried by it -- both numbered dividers came out as an
+    # empty sand rectangle with the number, title and label underneath.
     for region in spec.get("regions", []):
         if "dg" in region:
             _draw(slide, engine, region, filled.get(region.get("content")))
@@ -490,15 +503,6 @@ def render(slide, name: str, content: dict, archetypes_module) -> None:
                 rx, ry, rw, rh = region["box"]
                 shifted = {**region, "box": [ox + rx, oy + ry, rw, rh]}
                 _draw(slide, engine, shifted, (item or {}).get(region.get("content")))
-
-    marks = pictograms()
-    slots = _icon_slots(spec)
-    icons = [marks[i % len(marks)] for i in range(slots)] if marks and slots else None
-
-    engine.render_archetype(
-        slide, engine_spec, filled, icons=icons,
-        bg=getattr(archetypes_module, "BG", {}).get(name),
-    )
 
 
 def _draw(slide, engine, region: dict, value) -> None:
