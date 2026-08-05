@@ -5,6 +5,19 @@ from deckguard import logo as logo_mod
 from tests.helpers import add_picture, make_pattern_png, make_solid_png, new_deck, set_background_image
 
 
+def _kone_master():
+    """The kone-design master, vendored or installed -- None if neither."""
+    from pathlib import Path
+
+    candidates = [
+        Path(__file__).resolve().parents[1] / "src" / "deckguard" / "assets" / "kone-design"
+        / "uploads" / "master_ppt-1784774200983.pptx",
+        Path.home() / ".claude" / "skills" / "kone-design" / "uploads"
+        / "master_ppt-1784774200983.pptx",
+    ]
+    return next((c for c in candidates if c.is_file()), None)
+
+
 def test_compute_phash_stable_for_identical_image(tmp_path):
     p = make_solid_png(tmp_path / "a.png", rgb=(0, 94, 184))
     h1 = logo_mod.compute_phash(p.read_bytes())
@@ -396,3 +409,59 @@ def test_attaching_a_missing_svg_leaves_the_raster_picture_alone(tmp_path):
     picture = slide.shapes.add_picture(png, Emu(0), Emu(0), Emu(914400), Emu(914400))
     assert attach_svg(picture, tmp_path / "nope.svg") is False
     assert picture.image.blob
+
+
+def test_a_layout_whose_logo_is_a_placeholder_gets_one_stamped():
+    """The master supplies its logo three ways and only one survives
+    `add_slide`. 52 layouts carry a `<p:pic>` that paints through by
+    itself; 15 carry `Logo Placeholder 9`, a BODY placeholder python-pptx
+    never clones, so those slides -- the covers and every
+    text-and-picture layout -- come out with no mark at all."""
+    import posixpath
+
+    from pptx import Presentation
+
+    from deckguard.logo import stamp_logo_chrome
+
+    master = _kone_master()
+    if master is None:
+        pytest.skip("kone-design master template not available")
+
+    prs = Presentation(str(master))
+    by_key = {
+        posixpath.basename(layout.part.partname).replace(".xml", ""): layout
+        for layout in prs.slide_layouts
+    }
+
+    # Cover A's logo is the placeholder kind; Title and content A's is a picture
+    placeholder_layout, picture_layout = by_key["slideLayout1"], by_key["slideLayout16"]
+
+    on_cover = prs.slides.add_slide(placeholder_layout)
+    assert stamp_logo_chrome(on_cover) >= 1, "a cover must not come out logo-less"
+    assert [s for s in on_cover.shapes if s.name == "Logo"]
+
+    on_content = prs.slides.add_slide(picture_layout)
+    assert stamp_logo_chrome(on_content) == 0, (
+        "the layout already paints this one -- stamping again is the double-logo defect"
+    )
+
+
+def test_stamping_is_idempotent():
+    import posixpath
+
+    from pptx import Presentation
+
+    from deckguard.logo import stamp_logo_chrome
+
+    master = _kone_master()
+    if master is None:
+        pytest.skip("kone-design master template not available")
+    prs = Presentation(str(master))
+    layout = next(
+        l for l in prs.slide_layouts
+        if posixpath.basename(l.part.partname) == "slideLayout1.xml"
+    )
+    slide = prs.slides.add_slide(layout)
+    first = stamp_logo_chrome(slide)
+    assert first >= 1
+    assert stamp_logo_chrome(slide) == 0

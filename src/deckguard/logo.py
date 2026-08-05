@@ -447,6 +447,97 @@ def repair_empty_logo_frames(deck_path) -> int:
     return filled
 
 
+def _logo_kind(name: str) -> Optional[str]:
+    """`Logo Placeholder 9` -> "logo", `Tagline` -> "tagline"."""
+    key = (name or "").strip().lower()
+    for kind in ("logo", "tagline"):
+        if key.startswith(kind):
+            return kind
+    return None
+
+
+def stamp_logo_chrome(slide) -> int:
+    """Put the mark on a slide whose layout cannot supply it.
+
+    The master carries its logo three different ways, and they do not
+    behave the same when a slide is built programmatically:
+
+    - 52 are `<p:pic>` shapes on the layout. A layout's non-placeholder
+      shapes paint behind every slide using it, so these just work
+      (once their images are restored -- see `repair_empty_logo_frames`).
+    - 15 are `Logo Placeholder 9` / `Tagline Placeholder 9`, which are
+      BODY placeholders. python-pptx never clones a layout placeholder
+      the slide does not fill, so these render nothing at all -- the
+      same latent-placeholder trap that loses the date and page number.
+      They sit on Cover A, Cover C, Cover F, Fullslide picture and every
+      Text-and-picture layout: the covers, in other words.
+    - 2 are buried in a group and empty.
+
+    So the first kind needs nothing and the other two need the mark
+    stamped onto the slide itself, at the box the layout declares, in
+    the variant the page background calls for. Returns how many marks
+    were added; skips anything the slide or its layout already draws,
+    because two logos on one slide is its own reported defect.
+    """
+    layout = slide.slide_layout
+
+    already = {_logo_kind(s.name) for s in slide.shapes if _logo_kind(s.name)}
+    for shape in layout.shapes:
+        kind = _logo_kind(shape.name)
+        if kind is None or shape.is_placeholder:
+            continue
+        try:  # a filled picture on the layout paints through by itself
+            shape.image.blob
+            already.add(kind)
+        except Exception:  # noqa: BLE001 -- an empty frame supplies nothing
+            pass
+
+    background = _page_background_hex(layout.element) or _page_background_hex(slide.element)
+    added = 0
+    for shape in layout.shapes:
+        kind = _logo_kind(shape.name)
+        if kind is None or kind in already:
+            continue
+        path = _brand_asset(kind, light=_is_dark(background))
+        if path is None or not all(
+            getattr(shape, side, None) for side in ("left", "top", "width", "height")
+        ):
+            continue
+        try:
+            picture = _fit_picture(slide, path, shape.left, shape.top, shape.width, shape.height)
+            attach_svg(picture, Path(path).with_suffix(".svg"))
+            picture.name = shape.name.split(" Placeholder")[0]
+        except Exception:  # noqa: BLE001 -- chrome, never fatal
+            continue
+        already.add(kind)
+        added += 1
+    return added
+
+
+def restore_logo_chrome(deck_path) -> int:
+    """`stamp_logo_chrome` over a finished deck. Returns marks added."""
+    from pptx import Presentation
+
+    prs = Presentation(str(deck_path))
+    added = sum(stamp_logo_chrome(slide) for slide in prs.slides)
+    if added:
+        prs.save(str(deck_path))
+    return added
+
+
+def _fit_picture(slide, path, left, top, width, height):
+    """Place an image inside a box without distorting it -- the marks
+    are wider than they are tall and the declared boxes are not always
+    the same ratio."""
+    with Image.open(path) as im:
+        iw, ih = im.size
+    scale = min(width / iw, height / ih) if iw and ih else 1.0
+    w, h = int(iw * scale), int(ih * scale)
+    return slide.shapes.add_picture(
+        path, int(left + (width - w) / 2), int(top + (height - h) / 2), w, h
+    )
+
+
 def _page_background_hex(element) -> Optional[str]:
     """The solid `<p:bg>` colour of a slide/layout/master, if it has one."""
     import re

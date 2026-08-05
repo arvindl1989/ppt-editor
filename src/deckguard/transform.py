@@ -764,9 +764,12 @@ def execute_transform_from_brief(out_path, plan: TransformPlan, approved_indices
     # built deck came back with blank sand blocks where they were.
     photos_added = fill_empty_photo_slots(spec)
     creator.build_deck(spec, str(out_path))
-    from deckguard.logo import repair_empty_logo_frames
+    from deckguard.logo import repair_empty_logo_frames, restore_logo_chrome
 
     repair_empty_logo_frames(out_path)  # the master's empty logo frames
+    # ...and the 15 layouts whose logo is a placeholder python-pptx never
+    # clones, so the slide inherits nothing to repair. Covers, mostly.
+    restore_logo_chrome(out_path)
     # An author who asked for a cover/closer archetype gets theirs, not
     # theirs plus the master's.
     from deckguard.gallery import drop_redundant_master_slides, stamp_footers
