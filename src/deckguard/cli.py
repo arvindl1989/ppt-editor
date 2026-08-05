@@ -898,5 +898,45 @@ def sync_gallery(as_json: bool):
         table.add_row(name, f"#{arch['background']}", slots, extras)
     console.print(table)
 
+
+@main.command("mine-reference")
+@click.argument("reference", type=click.Path(exists=True, dir_okay=False))
+@click.option("--format", "fmt", type=click.Choice(["json", "md"]), default="md")
+def mine_reference_cmd(reference: str, fmt: str):
+    """Read REFERENCE's own slide designs out as reusable archetypes.
+
+    Everything deckguard did with a reference deck before was a form of
+    patching -- learn its colours, borrow its layouts, copy its shape
+    styles onto old shapes. This reads its DESIGNS instead, so an old
+    deck's content can be re-rendered through them rather than nudged
+    to resemble them.
+    """
+    from deckguard.mine import mine_reference
+
+    mined = mine_reference(reference)
+    if fmt == "json":
+        click.echo(report_mod.to_json({
+            "archetypes": mined["archetypes"], "sources": mined["sources"],
+        }))
+        return
+
+    if not mined["archetypes"]:
+        console.print(
+            f"[bold yellow]nothing to mine:[/] {Path(reference).name} has no slide whose "
+            "design can be reused (tables, charts and embedded objects are skipped, as are "
+            "one-off compositions with no repeating structure)."
+        )
+        return
+
+    console.print(f"[bold]{Path(reference).name}[/] — {len(mined['archetypes'])} reusable design(s)\n")
+    table = Table(show_header=True, header_style="bold")
+    for col in ("Archetype", "From slides", "Content slots", "Repeats"):
+        table.add_column(col)
+    for name, arch in mined["archetypes"].items():
+        slots = ", ".join(r["content"] for r in arch["regions"]) or "—"
+        repeats = ", ".join(f"{len(g['origins'])}x {g['content']}" for g in arch["groups"]) or "—"
+        table.add_row(name, ", ".join(str(n) for n in mined["sources"][name]), slots, repeats)
+    console.print(table)
+
 if __name__ == "__main__":
     main()

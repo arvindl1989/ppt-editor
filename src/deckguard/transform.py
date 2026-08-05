@@ -84,6 +84,9 @@ class TransformPlan:
     # What became of any archetype the brief asked for BY NAME -- see
     # skill_bridge.check_brief_archetypes. Empty for existing-deck plans.
     archetype_requests: dict = field(default_factory=dict)
+    # Archetypes mined from the uploaded reference deck -> the reference
+    # slide numbers each design was read from.
+    reference_designs: dict = field(default_factory=dict)
 
 
 def _readable_text(slide) -> tuple:
@@ -161,8 +164,13 @@ def plan_transform(
     content_by_index: dict = {}
     readable_by_index: dict = {}  # {index: (title, text_blocks)} for reason-bearing slides
     for p in plan.proposals:
-        if p.slide_index in reference_indices:
-            continue
+        # Reference-carryover slides are extracted TOO. Carryover
+        # reparents the old slide onto a layout borrowed from the
+        # reference -- the old shapes, restyled. Now that the
+        # reference's own designs are available as archetypes, the
+        # better answer for these slides is usually to re-render their
+        # content through one, so they need content extracted to be
+        # offered the choice at all.
         title, text_blocks, images, reason = _extract_slide_content(
             prs.slides[p.slide_index - 1], slide_height_in
         )
@@ -180,6 +188,24 @@ def plan_transform(
             # these slides ever had; leaving them with none is what made
             # a third of a real deck un-actionable.
             readable_by_index[p.slide_index] = _readable_text(prs.slides[p.slide_index - 1])
+
+    # A reference deck's own designs, read out as archetypes and
+    # registered alongside the built-in ones. This is what turns "make
+    # it look like that deck" from approximating its colours into
+    # re-rendering this deck's content through its actual layouts.
+    reference_archetypes: set = set()
+    reference_sources: dict = {}
+    if reference_path and suggest_archetypes:
+        try:
+            from deckguard.mine import install_reference
+            from deckguard.skill_bridge import _ensure_skill_on_path, _load_archetypes
+
+            _ensure_skill_on_path()
+            mined = install_reference(_load_archetypes(), reference_path)
+            reference_archetypes = set(mined["archetypes"])
+            reference_sources = mined["sources"]
+        except Exception:  # noqa: BLE001 -- additive; the built-in library still applies
+            reference_archetypes = set()
 
     suggestions: dict = {}
     ai_ran = False
@@ -240,7 +266,8 @@ def plan_transform(
             if idx in suggestions or idx in cover_end:
                 continue
             flat, image_count = pool[idx]
-            candidates = _match(titles.get(idx), flat, image_count=image_count, limit=4)
+            candidates = _match(titles.get(idx), flat, image_count=image_count, limit=4,
+                                prefer=reference_archetypes)
             if not candidates:
                 continue
             fresh = [c for c in candidates if c["archetype"] not in recent]
@@ -270,11 +297,23 @@ def plan_transform(
         source = "model" if archetype else ("structural" if match else None)
         if archetype is None and match:
             archetype = match["content"]
+            from_reference = match["archetype"] in reference_archetypes
+            if from_reference:
+                source = "reference"
             # A structural match that loses nothing is strictly better
             # than leaving an old slide as it was; one that would drop
             # content is offered, never imposed -- that call is the
             # reviewer's, and the card says what it costs.
-            if default_action == "keep" and match["dropped"] == 0:
+            #
+            # A REFERENCE design that loses nothing also beats layout
+            # carryover: carryover reparents the old shapes onto a
+            # borrowed layout, where this re-renders the content through
+            # the design the reference actually uses. That is what "make
+            # it look like that deck" was always asking for.
+            if match["dropped"] == 0 and (
+                default_action == "keep"
+                or (from_reference and default_action == "reference_layout")
+            ):
                 default_action = "archetype"
         slides.append(
             SlidePlan(
@@ -296,7 +335,8 @@ def plan_transform(
                 ],
             )
         )
-    return TransformPlan(slides=slides, ai_suggestions_ran=ai_ran)
+    return TransformPlan(slides=slides, ai_suggestions_ran=ai_ran,
+                         reference_designs=reference_sources)
 
 
 def plan_transform_from_brief(

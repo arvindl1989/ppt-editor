@@ -754,13 +754,32 @@ def _validate_overrides(raw_overrides: list, candidate_indices: set) -> dict:
 # library (see `fill_empty_photo_slots`) and a figure gets the skill's
 # own bundled chart art, so neither disqualifies an archetype.
 _UNFILLABLE_ROLES = {"table"}
-_TEXT_ROLES = {
-    "title", "heading", "eyebrow", "eyebrow_light", "title_light", "body", "body_muted",
-    "caption", "quote", "attribution", "label", "statement", "on_panel_heading",
-    "on_panel_body", "price", "item",
+# Structural roles the engine handles before it ever consults
+# ROLE_STYLE. Everything else that resolves in ROLE_STYLE is, by
+# definition, a text role -- which is what lets archetypes parsed from
+# the HTML gallery or mined from a reference deck (whose roles are
+# derived at runtime, e.g. `ref_i18_141414`) be understood here. A
+# hardcoded list of the engine's own 23 role names reported every mined
+# group as holding no text, so mined designs scored as capacity-0 and
+# never surfaced.
+_STRUCTURAL_ROLES = {
+    "picture", "image_band", "figure", "panel", "panel_sand", "table", "axis", "icon",
 }
 _VALUE_ROLES = {"stat_value", "stat_value_md", "hero_value"}
 _LIST_ROLES = {"bullets"}
+
+
+def _is_text_role(role: Optional[str]) -> bool:
+    if not role or role in _STRUCTURAL_ROLES or role in _LIST_ROLES:
+        return False
+    if role in _VALUE_ROLES:
+        return True
+    try:
+        import importlib
+
+        return role in importlib.import_module("kone_engine").ROLE_STYLE
+    except Exception:  # noqa: BLE001
+        return False
 
 _signature_cache: Optional[list] = None
 
@@ -892,6 +911,20 @@ def _gallery_names() -> set:
 _GALLERY_NAMES = _gallery_names()
 
 
+def invalidate_archetype_caches() -> None:
+    """Drop the derived views of the registry.
+
+    Signatures and picture-slot maps are computed once and cached, which
+    is right for a fixed registry and wrong the moment archetypes are
+    ADDED at runtime -- designs mined from a reference deck were
+    registered and then never seen by the matcher, because the cache
+    predated them.
+    """
+    global _signature_cache, _image_slots_cache
+    _signature_cache = None
+    _image_slots_cache = None
+
+
 def archetype_signatures() -> list:
     """One machine-readable shape per archetype, derived at runtime from
     the skill's own region/group data -- so a skill update changes what
@@ -922,7 +955,7 @@ def archetype_signatures() -> list:
         group = None
         for grp in groups:
             item_roles = [(r.get("role"), r.get("content")) for r in grp.get("regions", [])]
-            if any(role in _TEXT_ROLES | _LIST_ROLES for role, _key in item_roles):
+            if any(_is_text_role(role) or role in _LIST_ROLES for role, _key in item_roles):
                 group = {
                     "key": grp["content"],
                     "capacity": len(grp["origins"]),
@@ -996,7 +1029,7 @@ def _fit_content(signature: dict, title: Optional[str], chunks: list, values: li
             content[key] = values[0] if values else (spare[0]["heading"] if spare else "")
         elif role in ("eyebrow", "eyebrow_light", "label"):
             content[key] = (title or "").split(":")[0][:40] if title else ""
-        elif role in _TEXT_ROLES:
+        elif _is_text_role(role):
             source = spare.pop() if spare else None
             content[key] = source["text"] if source else ""
 
@@ -1013,7 +1046,7 @@ def _fit_content(signature: dict, title: Optional[str], chunks: list, values: li
                     item[key] = chunk["body"] or [chunk["heading"]]
                 elif role in _VALUE_ROLES:
                     item[key] = values[i - 1] if i - 1 < len(values) else chunk["heading"]
-                elif role in _TEXT_ROLES:
+                elif _is_text_role(role):
                     item[key] = chunk["heading"] if key not in item else " ".join(chunk["body"])
             items.append(item)
         content[group["key"]] = items
@@ -1023,6 +1056,7 @@ def _fit_content(signature: dict, title: Optional[str], chunks: list, values: li
 
 def match_archetypes(
     title: Optional[str], text_blocks: list, image_count: int = 0, limit: int = 3,
+    prefer: Optional[set] = None,
 ) -> list:
     """Rank archetypes that could hold this slide, WITHOUT a model.
 
@@ -1070,6 +1104,15 @@ def match_archetypes(
         score += 8.0 * sum(1 for kw in signature["keywords"] if kw in haystack)
         if values and signature["needs_value"]:
             score += 12.0
+        # Designs mined from the user's own reference deck outrank the
+        # built-in library when one was supplied: "make it look like
+        # that deck" means that deck's layouts, not a lookalike. But the
+        # bonus is earned, not flat -- a reference design that would
+        # drop half the slide's content must not beat a built-in one
+        # that holds all of it.
+        if prefer and signature["name"] in prefer:
+            fits = capacity and len(chunks) <= capacity
+            score += 40.0 if fits else 12.0
 
         dropped = max(0, len(chunks) - capacity) if capacity else max(0, len(chunks) - 2)
         scored.append({

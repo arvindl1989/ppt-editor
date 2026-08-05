@@ -537,6 +537,9 @@ def install(archetypes_module) -> int:
     })
 
     archetypes_module.ARCHETYPES.update(built["archetypes"])
+    from deckguard.skill_bridge import invalidate_archetype_caches
+
+    invalidate_archetype_caches()
     if hasattr(archetypes_module, "SAMPLES"):
         archetypes_module.SAMPLES.update(built["samples"])
     if hasattr(archetypes_module, "BG"):
