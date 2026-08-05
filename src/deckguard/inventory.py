@@ -382,6 +382,14 @@ class SlideRecord:
     # same-slide shape to resolve it from either. See
     # `rules_engine._resolve_effective_bg_hex`.
     layout_background_shapes: list = field(default_factory=list)
+    # The slide's own effective background COLOUR (slide -> layout ->
+    # master `<p:bg>`), separate from the decorative shapes above. A
+    # layout can be a solid colour with no shape on it at all: the org
+    # template's "Title and text" is KONE Blue with a white panel over
+    # its right half, so its title placeholder sits on blue and its body
+    # on white. Reading only shapes made that title resolve to "no known
+    # background" and get dark text -- black on KONE Blue.
+    background_hex: Optional[str] = None
     obj: object = field(repr=False, compare=False, default=None)
 
 
@@ -404,6 +412,36 @@ def _aspect_ratio(width_emu: int, height_emu: int) -> str:
     if abs(ratio - 4 / 3) < 0.02:
         return "4:3"
     return f"{ratio:.3f}:1"
+
+
+def _bg_hex_of(element, theme_colors=None) -> Optional[str]:
+    """The solid colour of a `<p:bg>`, as hex. `None` for a gradient, a
+    picture fill, or a theme reference this can't resolve."""
+    import re as _re
+
+    xml = element.xml
+    m = _re.search(r"<p:bg>.*?</p:bg>", xml, _re.S)
+    if not m:
+        return None
+    block = m.group(0)
+    srgb = _re.search(r'<a:srgbClr val="([0-9A-Fa-f]{6})"', block)
+    if srgb:
+        return srgb.group(1).upper()
+    scheme = _re.search(r'<a:schemeClr val="(\w+)"', block)
+    if scheme and theme_colors:
+        return theme_colors.get(scheme.group(1))
+    return None
+
+
+def _slide_background_hex(slide) -> Optional[str]:
+    """Resolved in the order PowerPoint paints it: the slide's own
+    background, else its layout's, else its master's."""
+    for element in (slide.element, slide.slide_layout.element,
+                    slide.slide_layout.slide_master.element):
+        found = _bg_hex_of(element)
+        if found:
+            return found
+    return None
 
 
 def build_inventory(prs: Presentation) -> DeckInventory:
@@ -435,6 +473,7 @@ def build_inventory(prs: Presentation) -> DeckInventory:
                 master_name=master.name or "",
                 shapes=shape_records,
                 layout_background_shapes=layout_bg_by_layout_part[layout_key],
+                background_hex=_slide_background_hex(slide),
                 obj=slide,
             )
         )

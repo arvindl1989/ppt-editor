@@ -128,6 +128,82 @@ def _iter_shapes(shape):
         return
 
 
+_CHROME_PLACEHOLDERS = ("DATE", "FOOTER", "SLIDE_NUMBER")
+
+
+def restore_footer_chrome(out_path, source_path) -> int:
+    """Put the date, footer and page number back on rebuilt slides.
+
+    python-pptx deliberately does NOT clone a layout's date, footer and
+    slide-number placeholders when a slide is added -- OOXML calls them
+    "latent" and PowerPoint materialises them itself. The result here is
+    that every slide the transform REBUILT lost its footer entirely,
+    while kept slides held on to theirs: a deck came back with page
+    numbers on three slides out of thirteen.
+
+    The layout already says where each one goes; this clones them in and
+    fills them with the source deck's own footer text and the slide's
+    new position.
+    """
+    import copy
+
+    from pptx import Presentation as _Presentation
+
+    def _chrome_text(deck):
+        """The date and footer strings the source deck actually used."""
+        date_text = footer_text = None
+        for slide in deck.slides:
+            for shape in slide.placeholders:
+                try:
+                    name = shape.placeholder_format.type.name
+                except Exception:  # noqa: BLE001
+                    continue
+                text = " ".join(shape.text_frame.text.split()) if shape.has_text_frame else ""
+                if not text:
+                    continue
+                if name == "DATE" and date_text is None:
+                    date_text = text
+                elif name == "FOOTER" and footer_text is None:
+                    footer_text = text
+            if date_text and footer_text:
+                break
+        return date_text, footer_text
+
+    try:
+        source = _Presentation(str(source_path))
+        out = _Presentation(str(out_path))
+    except Exception:  # noqa: BLE001
+        return 0
+    date_text, footer_text = _chrome_text(source)
+
+    restored = 0
+    for number, slide in enumerate(out.slides, start=1):
+        present = set()
+        for shape in slide.placeholders:
+            try:
+                present.add(shape.placeholder_format.type.name)
+            except Exception:  # noqa: BLE001
+                continue
+        for layout_ph in slide.slide_layout.placeholders:
+            try:
+                name = layout_ph.placeholder_format.type.name
+            except Exception:  # noqa: BLE001
+                continue
+            if name not in _CHROME_PLACEHOLDERS or name in present:
+                continue
+            element = copy.deepcopy(layout_ph._element)
+            slide.shapes._spTree.append(element)
+            added = slide.shapes[-1]
+            value = {"DATE": date_text, "FOOTER": footer_text,
+                     "SLIDE_NUMBER": str(number)}[name]
+            if value and added.has_text_frame:
+                added.text_frame.text = value
+                restored += 1
+    if restored:
+        out.save(str(out_path))
+    return restored
+
+
 def plan_transform(
     deck_path,
     reference_path: Optional[str] = None,
@@ -645,6 +721,10 @@ def execute_transform(
             ]
         except Exception:  # noqa: BLE001 -- additive polish, never load-bearing
             transplanted = 0
+
+    # Rebuilt slides lose their date/footer/page number, because
+    # python-pptx does not clone those "latent" placeholders.
+    restore_footer_chrome(out_path, deck_path)
 
     duplicate_logos_removed = 0
     if reference_path:

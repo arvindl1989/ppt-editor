@@ -494,3 +494,38 @@ def test_an_empty_slide_is_kept_not_given_an_archetype(tmp_path):
     empty = [s for s in plan.slides if s.index == 2][0]
     assert empty.archetype is None
     assert empty.default_action == "keep"
+
+
+def test_rebuilt_slides_keep_their_date_footer_and_page_number(tmp_path):
+    """python-pptx does not clone a layout's date, footer and
+    slide-number placeholders -- OOXML calls them "latent". So every
+    REBUILT slide lost its footer while kept slides held theirs: a real
+    13-slide deck came back with page numbers on three of them."""
+    from pptx import Presentation
+
+    from deckguard.transform import restore_footer_chrome
+    from tests.helpers import add_slide, new_deck, title_run
+
+    prs = new_deck()
+    for n in range(3):
+        s = add_slide(prs)
+        title_run(s).text = f"Slide {n}"
+    src = tmp_path / "src.pptx"
+    prs.save(str(src))
+
+    plan = plan_transform(str(src), suggest_archetypes=False)
+    out = tmp_path / "out.pptx"
+    execute_transform(str(src), str(out), plan)
+
+    # idempotent: running it again adds nothing further
+    again = restore_footer_chrome(str(out), str(src))
+    numbers = []
+    for slide in Presentation(str(out)).slides:
+        for shape in slide.placeholders:
+            try:
+                if shape.placeholder_format.type.name == "SLIDE_NUMBER":
+                    numbers.append(shape.text_frame.text.strip())
+            except Exception:  # noqa: BLE001
+                continue
+    assert numbers == ["1", "2", "3"], numbers
+    assert again == 0, "already-present chrome must not be duplicated"

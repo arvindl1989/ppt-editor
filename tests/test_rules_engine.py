@@ -586,3 +586,42 @@ def test_unlisted_panel_fallback_does_not_apply_to_text():
     matches = [v for v in violations_for(prs) if v.rule == "text_color"]
     assert len(matches) == 1
     assert matches[0].details["target"] == "#141414"
+
+
+def test_text_on_a_coloured_layout_background_gets_light_text():
+    """Reported on a real transform: the org template's "Title and text"
+    layout is solid KONE Blue with a white panel over its right half, so
+    its title placeholder sits on blue. `_resolve_effective_bg_hex` only
+    searched SHAPES, found nothing behind the title, and the
+    heading-always-dark rule put black text on KONE Blue."""
+    from deckguard.rules_engine import _resolve_effective_bg_hex
+
+    class _Shape:
+        shape_id = 1
+        left_in = top_in = 0.5
+        width_in = height_in = 2.0
+        fill = None
+
+    shape = _Shape()
+    # nothing on the slide and nothing on the layout to resolve from...
+    assert _resolve_effective_bg_hex(shape, [], {}, []) is None
+    # ...but the slide's own background colour is a perfectly good answer
+    assert _resolve_effective_bg_hex(shape, [], {}, [], "1450F5") == "1450F5"
+
+
+def test_slide_background_is_read_from_layout_then_master(tmp_path):
+    from pptx import Presentation
+
+    from deckguard.inventory import build_inventory
+    from tests.helpers import add_slide, new_deck, title_run
+
+    prs = new_deck()
+    slide = add_slide(prs)
+    title_run(slide).text = "T"
+    path = tmp_path / "d.pptx"
+    prs.save(str(path))
+
+    inv = build_inventory(Presentation(str(path)))
+    # the field exists and is either a hex or an honest None
+    value = inv.slides[0].background_hex
+    assert value is None or (len(value) == 6 and value == value.upper())

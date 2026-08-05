@@ -71,11 +71,12 @@ def _bbox_mostly_contained(inner: ShapeRecord, outer: ShapeRecord, tolerance_in:
     )
 
 
-def _resolve_effective_bg_hex(
+def _resolve_effective_bg_hex(  # noqa: PLR0913
     shape: ShapeRecord,
     top_shapes: list,
     top_shape_index: dict[int, int],
     layout_background_shapes: Optional[list] = None,
+    slide_background_hex: Optional[str] = None,
 ) -> Optional[str]:
     """A shape's own resolved fill is always the first choice. Failing
     that -- e.g. a plain textbox/placeholder with no fill of its own --
@@ -113,7 +114,13 @@ def _resolve_effective_bg_hex(
         candidate_hex = _own_fill_hex(candidate)
         if candidate_hex and _bbox_mostly_contained(shape, candidate):
             return candidate_hex
-    return None
+    # 3. Failing all of those, the slide's own background COLOUR. A
+    #    layout can be a solid colour carrying no shape at all -- the org
+    #    template's "Title and text" is KONE Blue behind its left column
+    #    -- and a shape sitting on it has a perfectly well-known
+    #    background that no shape search can find. Missing it put black
+    #    text on KONE Blue on every slide rebuilt onto such a layout.
+    return slide_background_hex
 
 
 def _is_heading(shape: ShapeRecord) -> bool:
@@ -781,7 +788,10 @@ def audit_deck(inventory: DeckInventory, config: dict) -> list[Violation]:
                 )
 
         for shape in all_shapes:
-            bg_hex = _resolve_effective_bg_hex(shape, top_shapes, top_shape_index, slide.layout_background_shapes)
+            bg_hex = _resolve_effective_bg_hex(
+                shape, top_shapes, top_shape_index, slide.layout_background_shapes,
+                getattr(slide, "background_hex", None),
+            )
             violations += _check_shape(
                 shape, slide.index, slide_height_in, config, font_tables, approved_hexes, remap, tolerance, bg_hex
             )
