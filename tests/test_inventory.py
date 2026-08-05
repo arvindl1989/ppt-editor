@@ -130,3 +130,41 @@ def test_build_inventory_reports_run_with_no_explicit_color_as_none():
     shape = next(s for s in inv.slides[0].shapes if s.name == "Panel")
     run = shape.paragraphs[0].runs[0]
     assert run.color.kind == "none"
+
+
+def test_an_image_in_a_picture_placeholder_is_inventoried(tmp_path):
+    """A filled picture placeholder reports its type as PLACEHOLDER, not
+    PICTURE. Keying on the type made those photos invisible to the
+    inventory -- and so to previews, the visual audit, and the logo
+    checks that read it. On a real deck the images were present in the
+    .pptx and absent from every view of it."""
+    from pptx import Presentation
+
+    from deckguard.inventory import build_inventory
+    from deckguard.slide_import import default_template_path
+    from tests.helpers import make_solid_png
+
+    photo = tmp_path / "p.png"
+    make_solid_png(photo)
+
+    prs = Presentation(str(default_template_path()))
+    layout = next(
+        (l for m in prs.slide_masters for l in m.slide_layouts
+         if any(ph.placeholder_format.type and ph.placeholder_format.type.name == "PICTURE"
+                for ph in l.placeholders)),
+        None,
+    )
+    assert layout is not None, "the bundled template has picture layouts"
+
+    slide = prs.slides.add_slide(layout)
+    for ph in slide.placeholders:
+        if ph.placeholder_format.type and ph.placeholder_format.type.name == "PICTURE":
+            ph.insert_picture(str(photo))
+            break
+    path = tmp_path / "d.pptx"
+    prs.save(str(path))
+
+    inv = build_inventory(Presentation(str(path)))
+    with_images = [s for s in inv.slides[0].shapes if s.image is not None]
+    assert len(with_images) == 1
+    assert with_images[0].image.size_bytes > 0

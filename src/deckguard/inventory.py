@@ -264,12 +264,17 @@ class ImageInfo:
 
 
 def _image_info(shape) -> Optional[ImageInfo]:
-    if shape.shape_type != MSO_SHAPE_TYPE.PICTURE:
-        return None
+    # Ask the shape for its image rather than trusting its TYPE: a filled
+    # picture placeholder reports as PLACEHOLDER, not PICTURE, so a
+    # type check made every photo dropped into a template slot invisible
+    # to the inventory -- and so to previews, the visual audit and the
+    # logo checks that read it.
     try:
         image = shape.image
-    except Exception:  # noqa: BLE001 — unreadable/corrupt embedded image
-        return ImageInfo(phash=None, filename=None, ext=None, size_bytes=None)
+    except Exception:  # noqa: BLE001 — not a picture, or unreadable
+        if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
+            return ImageInfo(phash=None, filename=None, ext=None, size_bytes=None)
+        return None
     try:
         phash = logo_mod.compute_phash(image.blob)
     except Exception:  # noqa: BLE001
