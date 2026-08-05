@@ -171,6 +171,12 @@ typography_rules:
     # Heuristic for exception detection: small text near slide edges,
     # numeric-only content for pagination. Prefer false positives with
     # low severity over silent misses.
+  # Weight is chosen by FONT FAMILY, not by a bold toggle: "Inter" is
+  # the regular cut and "Inter SemiBold" is its own family. Switching an
+  # old deck's font to Inter carried the source's bold attribute across
+  # with it, so a rebranded deck came back with 67 bold Inter runs --
+  # a weight the typeface is never set in.
+  never_bold_fonts: ["Inter"]
   all_caps:
     forbidden_fonts: ["Inter", "Inter SemiBold"]   # never all-caps...
     allowed_words: ["KONE"]                          # ...except the word KONE

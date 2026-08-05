@@ -663,6 +663,19 @@ def _apply_violation(v: Violation, config: dict) -> Optional[Change]:
             shape_name=v.shape_name,
         )
 
+    if v.rule == "font_weight":
+        target.obj.font.bold = False
+        return Change(
+            scope="slide",
+            rule=v.rule,
+            field="font weight",
+            old="bold",
+            new="regular",
+            slide_index=v.slide_index,
+            shape_id=v.shape_id,
+            shape_name=v.shape_name,
+        )
+
     if v.rule in ("text_color", "text_contrast"):
         new_hex = v.details["target"].lstrip("#")
         target.obj.font.color.rgb = RGBColor.from_string(new_hex)

@@ -625,3 +625,73 @@ def test_slide_background_is_read_from_layout_then_master(tmp_path):
     # the field exists and is either a hex or an honest None
     value = inv.slides[0].background_hex
     assert value is None or (len(value) == 6 and value == value.upper())
+
+
+def _bold_inter_deck(path):
+    from tests.helpers import add_slide, new_deck, set_run, title_run
+
+    prs = new_deck()
+    slide = add_slide(prs)
+    run = title_run(slide)
+    set_run(run, text="A heading", font="Inter", color_hex="141414")
+    run.font.bold = True
+    return prs.save(str(path)) or path
+
+
+def test_inter_is_never_bold(tmp_path):
+    """Weight in this brand comes from choosing the "Inter SemiBold"
+    FAMILY, never from bolding the regular cut. Switching an old deck's
+    font to Inter carried the source's bold attribute across with it, so
+    a rebranded deck came back with 67 bold Inter runs."""
+    from pptx import Presentation
+
+    from deckguard.config import default_config_path, load_config
+    from deckguard.inventory import build_inventory
+    from deckguard.rules_engine import audit_deck
+
+    deck = _bold_inter_deck(tmp_path / "d.pptx")
+    violations = audit_deck(build_inventory(Presentation(str(deck))), load_config(default_config_path()))
+
+    weight = [v for v in violations if v.rule == "font_weight"]
+    assert len(weight) == 1
+    assert weight[0].auto_fixable
+    assert "never used bold" in weight[0].message
+
+
+def test_the_bold_rule_keys_on_the_family_not_the_approved_match(tmp_path):
+    """`match_approved` folds a bold "Inter" into "Inter SemiBold" and
+    reports it approved -- which is precisely the equivalence this rule
+    rejects. Keying on that match made the rule silently never fire."""
+    from deckguard.fonts import FontTables
+    from deckguard.config import default_config_path, load_config
+
+    config = load_config(default_config_path())
+    tables = FontTables.from_config(config.get("fonts", {}))
+    # the fold that hid the problem
+    assert tables.match_approved("Inter", bold=True) == "Inter SemiBold"
+    # and the family name the rule actually keys on
+    assert "Inter" in set(config["typography_rules"]["never_bold_fonts"])
+
+
+def test_bolded_inter_is_un_bolded_by_the_fixer(tmp_path):
+    from pptx import Presentation
+
+    from deckguard.fixer import fix_deck
+
+    from deckguard.config import default_config_path, load_config
+
+    deck = _bold_inter_deck(tmp_path / "d.pptx")
+    out = tmp_path / "out.pptx"
+    fix_deck(Presentation(str(deck)), load_config(default_config_path()),
+             str(deck), str(out), False)
+
+    bolds = [
+        r.font.bold
+        for slide in Presentation(str(out)).slides
+        for shape in slide.shapes
+        if shape.has_text_frame
+        for para in shape.text_frame.paragraphs
+        for r in para.runs
+        if r.text.strip()
+    ]
+    assert not any(bolds), "no Inter run may remain bold"

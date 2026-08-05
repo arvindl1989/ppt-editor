@@ -378,6 +378,7 @@ def _check_shape(
     # since it's not about legibility per background, it's a fixed
     # editorial choice for that role.
     heading_always_dark = bool(contrast_cfg.get("heading_always_dark", False))
+    never_bold_fonts = set(typo.get("never_bold_fonts") or [])
     # `bg_hex` is resolved by the caller (`audit_deck`) via
     # `_resolve_effective_bg_hex` -- the shape's own fill first, falling
     # back to the nearest same-slide shape behind it in z-order for a
@@ -458,6 +459,27 @@ def _check_shape(
                         )
                     )
                     matched_approved = None
+                elif run.font_effective in never_bold_fonts and run.bold:
+                    # Keyed on the run's actual FAMILY, not on
+                    # `matched_approved`: that folds a bold "Inter" into
+                    # "Inter SemiBold" and reports it as approved, which
+                    # is exactly the equivalence this rule rejects.
+                    # Weight comes from choosing the SemiBold family,
+                    # never from bolding the regular cut.
+                    violations.append(
+                        Violation(
+                            slide_index=slide_idx,
+                            shape_id=shape.shape_id,
+                            shape_name=shape.name,
+                            element="run",
+                            rule="font_weight",
+                            message=f"'{matched_approved}' is never used bold",
+                            severity="major",
+                            auto_fixable=True,
+                            details={"current": "bold", "target": "regular"},
+                            target=run,
+                        )
+                    )
                 elif (
                     is_heading
                     and heading_always_dark
