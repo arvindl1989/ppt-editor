@@ -725,6 +725,11 @@ def execute_transform(
     # Rebuilt slides lose their date/footer/page number, because
     # python-pptx does not clone those "latent" placeholders.
     restore_footer_chrome(out_path, deck_path)
+    # ...and the KONE master's own logo frames ship with no image in
+    # them, which PowerPoint draws as dotted boxes.
+    from deckguard.logo import repair_empty_logo_frames
+
+    repair_empty_logo_frames(out_path)
 
     duplicate_logos_removed = 0
     if reference_path:
@@ -759,6 +764,9 @@ def execute_transform_from_brief(out_path, plan: TransformPlan, approved_indices
     # built deck came back with blank sand blocks where they were.
     photos_added = fill_empty_photo_slots(spec)
     creator.build_deck(spec, str(out_path))
+    from deckguard.logo import repair_empty_logo_frames
+
+    repair_empty_logo_frames(out_path)  # the master's empty logo frames
     # An author who asked for a cover/closer archetype gets theirs, not
     # theirs plus the master's.
     from deckguard.gallery import drop_redundant_master_slides, stamp_footers

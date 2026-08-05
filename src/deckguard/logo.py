@@ -272,3 +272,97 @@ def replace_shapes_in_region_with_logo(
     id_ = _next_shape_id_in_tree(spTree)
     name = "Picture %d" % id_
     spTree.add_pic(id_, name, image_part.desc, rId, left, top, cx, cy)
+
+
+# --------------------------------------------------------------------------
+# Repairing the master template's own empty logo frames
+# --------------------------------------------------------------------------
+
+_LOGO_ASSET_BY_NAME = {
+    "logo": ("kone-logo.png", "kone-logo-white.png"),
+    "tagline": ("kone-tagline.png", "kone-tagline-white.png"),
+}
+
+
+def _brand_asset(name: str, light: bool) -> Optional[str]:
+    """Path to a vendored KONE mark: (standard, white) by shape name."""
+    from pathlib import Path
+
+    key = (name or "").strip().lower()
+    pair = _LOGO_ASSET_BY_NAME.get(key)
+    if pair is None:
+        return None
+    filename = pair[1] if light else pair[0]
+    for base in (
+        Path(__file__).parent / "assets" / "kone-design" / "logo",
+        Path.home() / ".claude" / "skills" / "kone-design" / "assets" / "logo",
+    ):
+        candidate = base / filename
+        if candidate.is_file():
+            return str(candidate)
+    return None
+
+
+def _is_dark(hex_value: Optional[str]) -> bool:
+    if not hex_value or len(hex_value) != 6:
+        return False
+    try:
+        rgb = tuple(int(hex_value[i: i + 2], 16) for i in (0, 2, 4))
+    except ValueError:
+        return False
+    return (0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]) < 140
+
+
+def repair_empty_logo_frames(deck_path) -> int:
+    """Give the master template's empty logo frames their image back.
+
+    The KONE master ships 45 `Logo` and 7 `Tagline` picture shapes -- on
+    47 of its 63 layouts -- whose `<a:blip>` carries no relationship at
+    all. PowerPoint draws a picture frame with no picture as a dotted
+    rectangle, so every deck built on that master shows dotted boxes
+    where its logo should be. Reported from a slide.
+
+    This is a defect in the template, not in anything deckguard writes;
+    the marks are rasterised and vendored here, so filling them in is a
+    two-line repair rather than something the user has to fix by hand in
+    63 layouts.
+
+    Returns how many frames were filled.
+    """
+    from pptx import Presentation
+
+    prs = Presentation(str(deck_path))
+    filled = 0
+    for master in prs.slide_masters:
+        for container in [master, *master.slide_layouts]:
+            background = _page_background_hex(container.element)
+            for shape in container.shapes:
+                if shape._element.tag != _p("pic"):
+                    continue
+                try:
+                    shape.image.blob
+                    continue  # already has its picture
+                except Exception:  # noqa: BLE001 -- the empty frames we're here for
+                    pass
+                path = _brand_asset(shape.name, light=_is_dark(background))
+                if path is None:
+                    continue
+                try:
+                    replace_logo_image(shape, path)
+                    filled += 1
+                except Exception:  # noqa: BLE001 -- cosmetic repair, never fatal
+                    continue
+    if filled:
+        prs.save(str(deck_path))
+    return filled
+
+
+def _page_background_hex(element) -> Optional[str]:
+    """The solid `<p:bg>` colour of a slide/layout/master, if it has one."""
+    import re
+
+    match = re.search(r"<p:bg>.*?</p:bg>", element.xml, re.S)
+    if not match:
+        return None
+    colour = re.search(r'<a:srgbClr val="([0-9A-Fa-f]{6})"', match.group(0))
+    return colour.group(1).upper() if colour else None

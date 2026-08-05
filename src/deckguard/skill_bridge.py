@@ -427,6 +427,9 @@ def build_deck_via_skill(
     # slot would otherwise render as a blank sand block.
     fill_empty_photo_slots(spec)
     creator.build_deck(spec, str(out_path))
+    from deckguard.logo import repair_empty_logo_frames
+
+    repair_empty_logo_frames(out_path)
 
     layouts_used = ["Cover F"] + [s["archetype"] for s in spec["slides"]] + ["Outro"]
     compose_result = ComposeResult(slide_count=len(layouts_used), layouts_used=layouts_used, manual_review=[])

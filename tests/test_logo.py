@@ -1,3 +1,4 @@
+import pytest
 from pptx.util import Emu, Inches
 
 from deckguard import logo as logo_mod
@@ -249,3 +250,59 @@ def test_replace_background_image_swaps_the_blob(tmp_path):
 
     rid = blip.get(f"{{{logo_mod.R_NS}}}embed")
     assert slide.part.related_part(rid).blob == new_logo.read_bytes()
+
+
+def test_the_masters_empty_logo_frames_are_repaired(tmp_path):
+    """The KONE master ships 45 `Logo` and 7 `Tagline` picture shapes --
+    across 47 of its 63 layouts -- whose `<a:blip>` carries no
+    relationship at all. PowerPoint draws a picture frame with no
+    picture as a dotted rectangle, so every deck built on that master
+    shows dotted boxes where its logo should be."""
+    import shutil
+
+    from pptx import Presentation
+
+    from pathlib import Path
+
+    from deckguard.logo import repair_empty_logo_frames
+
+    # The defect is in the kone-design MASTER the archetype engine builds
+    # from, not in the org template.
+    candidates = [
+        Path(__file__).resolve().parents[1] / "src" / "deckguard" / "assets" / "kone-design"
+        / "uploads" / "master_ppt-1784774200983.pptx",
+        Path.home() / ".claude" / "skills" / "kone-design" / "uploads"
+        / "master_ppt-1784774200983.pptx",
+    ]
+    master = next((c for c in candidates if c.is_file()), None)
+    if master is None:
+        pytest.skip("kone-design master template not available")
+
+    deck = tmp_path / "d.pptx"
+    shutil.copy(str(master), str(deck))
+
+    def empty_frames(path):
+        count = 0
+        prs = Presentation(str(path))
+        for master in prs.slide_masters:
+            for container in [master, *master.slide_layouts]:
+                for shape in container.shapes:
+                    if shape._element.tag.split("}")[-1] != "pic":
+                        continue
+                    try:
+                        shape.image.blob
+                    except Exception:  # noqa: BLE001
+                        count += 1
+        return count
+
+    before = empty_frames(deck)
+    filled = repair_empty_logo_frames(deck)
+    after = empty_frames(deck)
+
+    if before == 0:
+        pytest.skip("this template has no empty logo frames")
+    assert filled == before
+    assert after == 0
+
+    # idempotent -- a second pass finds nothing left to do
+    assert repair_empty_logo_frames(deck) == 0
