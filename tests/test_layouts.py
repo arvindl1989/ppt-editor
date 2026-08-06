@@ -841,3 +841,34 @@ def test_content_the_archetype_cannot_hold_is_reported_rather_than_dropped(tmp_p
          "text1": "one", "text2": "two"},
     ]}, str(tmp_path / "d.pptx"), archetypes, report=report)
     assert report["dropped"] == {1: ("agenda_a_table", ["text1", "text2"])}
+
+
+def test_the_photo_divider_gets_a_scrim_like_every_other_full_bleed_layout():
+    """`image_section_divider` calls its full-bleed picture `image_band`
+    rather than `picture`, and matching on one role name meant the ONE
+    archetype whose entire design is white type over a photograph was
+    the one that never got protected. A Q2 review came back with its
+    section titles lost in a sunlit stairwell."""
+    archetypes = _skill_modules()
+    spec = archetypes.ARCHETYPES["image_section_divider"]
+
+    roles = [r.get("role") for r in spec["regions"]]
+    assert "image_band" in roles, "guard is about this role name"
+    assert L._implied_scrims(spec["regions"]) == [{"box": [0, 0, 1280, 720], "content": "image"}]
+
+    # both names count, and a role that is not a picture still does not
+    assert L._PICTURE_REGION_ROLES == frozenset({"picture", "image_band"})
+    assert L._implied_scrims([
+        {"role": "body", "box": [0, 0, 1280, 720], "content": "image"},
+        {"role": "title_light", "box": [60, 545, 1050, 130], "content": "title"}]) == []
+
+
+def test_a_repeating_group_tells_the_planner_it_can_name_the_icons():
+    """The icon region carries no content key of its own, so the guide
+    never mentioned it and every deck came back with the default
+    cloud/people/clock cycle regardless of what the text said."""
+    _skill_modules()
+    from deckguard.skill_bridge import _derived_content_keys
+
+    (items,) = [k for k in _derived_content_keys("icon_columns_5") if k.startswith("items ")]
+    assert "icon" in items and "text" in items and "up to 5" in items

@@ -407,6 +407,13 @@ def _bind_roles(layout: Layout) -> dict:
 # photograph has reversed type out of a photograph, whatever else it does.
 _LIGHT_ROLES = frozenset({"title_light", "on_panel_body", "eyebrow_light"})
 
+# Every role the engine renders as a photograph. `image_band` is not a
+# synonym nobody uses -- it is what `image_section_divider` calls its
+# full-bleed picture, and matching only on "picture" meant that
+# archetype, whose whole design is white type over a photograph, was the
+# one full-bleed layout that never got a scrim.
+_PICTURE_REGION_ROLES = frozenset({"picture", "image_band"})
+
 
 def _is_light_role(role) -> bool:
     """Whether a region's ink is white, whichever path produced it.
@@ -427,7 +434,7 @@ def _implied_scrims(regions: list[dict]) -> list[dict]:
     full-bleed cover put a white headline straight onto a sunlit
     treeline. Any picture region a light-ink box sits on gets one.
     """
-    pictures = [r for r in regions if r.get("role") == "picture"]
+    pictures = [r for r in regions if r.get("role") in _PICTURE_REGION_ROLES]
     if not pictures:
         return []
     light = [r for r in regions if _is_light_role(r.get("role"))]
@@ -1637,7 +1644,7 @@ def content_keys(spec: dict) -> list[str]:
 
 def _shape_of(region: dict) -> str:
     role = str(region.get("role") or "")
-    if role in ("picture", "image"):
+    if role in _PICTURE_REGION_ROLES or role == "image":
         return "filled automatically -- do not supply"
     if role == "icon":
         return "icon name"
