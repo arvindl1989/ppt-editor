@@ -1044,3 +1044,36 @@ def test_the_milestone_slide_renders_its_own_worked_example(tmp_path):
                     inks[run.text.strip()] = str(run.font.color.rgb)
     assert inks.get("0") == "141414", inks
     assert inks.get("6") == "1450F5" and inks.get("100+") == "1450F5", inks
+
+
+def test_three_completion_ticks_clear_the_sand_band():
+    """Three is the published ceiling, and the tick column has 186->276
+    to do it in before the band starts. A roomier pitch fits two and
+    puts the third INSIDE the band -- which is what shipped, and what a
+    real deck came back with."""
+    spec = L._EXTRAS["milestone_slide"]
+    band_top = spec["panels"][0]["box"][1]
+    ticks = next(g for g in spec["groups"] if g["content"] == "done")
+    row = ticks["regions"][0]["box"][3]
+
+    assert len(ticks["origins"]) == 3
+    assert max(o[1] for o in ticks["origins"]) + row <= band_top
+    # evenly pitched, so the column reads as one list
+    ys = sorted(o[1] for o in ticks["origins"])
+    assert len({b - a for a, b in zip(ys, ys[1:])}) == 1
+
+
+def test_the_guide_teaches_the_rules_a_planner_has_to_act_on():
+    """They live in the skill's SKILL.md, which the planner never sees.
+    A deck came back with `6 weeks` as a stat value against an
+    `End-to-end migration` label -- the unit said twice -- and a scope
+    line restating counts already in the band."""
+    from deckguard import skill_bridge
+
+    entry = [b for b in skill_bridge._kone_archetype_guide().split("\n\n")
+             if b.startswith("### milestone_slide")][0]
+    rules = " ".join(l for l in entry.splitlines() if l.startswith("Rule:"))
+    assert "BARE number" in rules
+    assert "55 characters" in rules
+    assert "one line" in rules and "done" in rules
+    assert "saying nothing twice" in rules

@@ -1851,6 +1851,29 @@ _EXTRA_META: dict[str, dict] = {
         "keywords": ["milestone", "announcement", "launch", "now live",
                      "migration complete", "programme win", "recognition",
                      "thank you", "transformation", "results", "one slide"],
+        # The brand's rules for this slide, in the terms a planner has to
+        # act on. They are in the skill's own SKILL.md, which the planner
+        # never sees -- it sees this guide.
+        "notes": [
+            "`title` must be under about 55 characters -- it is set at 42px and "
+            "longer wraps onto a second line, closing the gap above `lede`.",
+            "Each `stats` value is a BARE number: {\"value\": \"6\", \"label\": "
+            "\"Weeks end to end\"}, never {\"value\": \"6 weeks\", \"label\": "
+            "\"End-to-end migration\"} -- the unit belongs in the label, and a "
+            "value carrying its own unit is both wider and says it twice.",
+            "Include one stat that is deliberately zero -- no disruption, no "
+            "downtime, no escalations -- written as the digit \"0\". It renders "
+            "black against the others' blue because it is a different kind of "
+            "claim. Four strong numbers beat five where one is filler.",
+            "`done` text must fit one line (about 45 characters). Three is the "
+            "ceiling and the column is sized for exactly three single-line "
+            "items.",
+            "`scope` must name something the numbers cannot. If it restates a "
+            "count already in `stats` -- the 12 frontlines, the 100+ users -- "
+            "it is saying nothing twice; cut it or name the units instead.",
+            "A completion fact (\"100% transitioned\") is a `done` tick, not a "
+            "stat. Do not put it in both.",
+        ],
         "sample": {
             "eyebrow": "Marketing Hub · Request Management",
             "title": "From Monday.com to ServiceNow in six weeks",
@@ -1924,10 +1947,15 @@ _EXTRAS: dict[str, dict] = {
                 ],
             },
             {
+                # Three is the published ceiling, and the column has
+                # 186->276 to do it in before the sand band starts: 90px,
+                # which is exactly three 20px badges on a 14px gap. A
+                # roomier pitch fits two and puts the third INSIDE the
+                # band, which is what shipped before this was measured.
                 "content": "done",
-                "origins": [[880, 186], [880, 230], [880, 274]],
+                "origins": [[880, 186], [880, 220], [880, 254]],
                 "regions": [
-                    {"role": "dg_tick", "box": [0, 0, 355, 30], "content": "text",
+                    {"role": "dg_tick", "box": [0, 0, 355, 20], "content": "text",
                      "dg": {"kind": "tick", "px": 16, "font": "Inter",
                             "color": "141414", "caps": False, "align": "l"}},
                 ],

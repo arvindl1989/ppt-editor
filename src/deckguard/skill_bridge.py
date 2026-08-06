@@ -268,6 +268,7 @@ def _kone_archetype_guide() -> str:
             entry = dict(catalog.get(key) or {})
             entry.setdefault("purpose", meta.get("purpose", ""))
             entry.setdefault("keywords", meta.get("keywords", []))
+            entry.setdefault("notes", meta.get("notes", []))
             catalog[key] = entry
     parts = []
     for name in sorted(archetypes.ARCHETYPES.keys()):
@@ -298,6 +299,8 @@ def _kone_archetype_guide() -> str:
                 "Pictures: this archetype has picture slot(s), filled automatically from the slide's own "
                 "images -- do NOT emit an image path or filename yourself."
             )
+        for note in (catalog.get(name, {}) or {}).get("notes", []):
+            lines.append(f"Rule: {note}")
         sample = archetypes.SAMPLES.get(name)
         if sample is not None and _sample_agrees(name, sample):
             lines.append(f"Example content: {json.dumps(_sample_without_image_paths(name, sample), ensure_ascii=False)}")
