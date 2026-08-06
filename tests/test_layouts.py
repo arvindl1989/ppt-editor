@@ -773,3 +773,71 @@ def test_build_deck_takes_the_registry_from_the_loader_not_a_bare_import(tmp_pat
     assert str(field.fill.fore_color.rgb) == "D2F5FF"
     assert any("2" == s.text_frame.text.strip()
                for s in body.shapes if getattr(s, "has_text_frame", False))
+
+
+def test_the_planner_is_told_the_keys_the_renderer_actually_reads():
+    """`catalog.json` describes 22 of 80 archetypes and `SAMPLES` 41, so
+    most were named and nothing more. The keys come off the live
+    registry instead, and cannot drift from it."""
+    _skill_modules()
+    from deckguard.skill_bridge import _derived_content_keys, _load_archetypes
+
+    registry = _load_archetypes().ARCHETYPES
+    described = [n for n in registry if _derived_content_keys(n)]
+    assert len(described) >= len(registry) - 2, "nearly every archetype must describe itself"
+
+    agenda = dict(k.split(" (")[0:1] + [k] for k in
+                  L.content_keys(registry["agenda_a_table"]))
+    assert set(agenda) == {"photo", "eyebrow", "title", "items"}
+    assert "list of strings" in agenda["items"]
+    assert "do not supply" in agenda["photo"]
+
+    # a repeating group states its capacity and its per-item fields,
+    # including the icon, which carries no content key of its own
+    (items,) = [k for k in L.content_keys(registry["text_picture_g"])
+                if k.startswith("items ")]
+    assert "up to 6" in items and "icon" in items and "text" in items
+
+
+def test_a_worked_example_that_no_longer_matches_is_not_shown():
+    """The model follows a concrete example over an abstract slot list.
+    `agenda_a_table`'s advertised `text1..text4` long after the renderer
+    was rebuilt to read `items` -- so a planner emitted four keys nothing
+    reads and the agenda came back as a title on an empty half."""
+    _skill_modules()
+    from deckguard.skill_bridge import _kone_archetype_guide, _load_archetypes, _sample_agrees
+
+    archetypes = _load_archetypes()
+    stale = {"title": "x", "text1": "a", "text2": "b"}
+    assert not _sample_agrees("agenda_a_table", stale)
+    assert _sample_agrees("agenda_a_table", {"title": "x", "items": ["a"]})
+    # an archetype we cannot describe keeps its example rather than losing both
+    assert _sample_agrees("nothing_we_know_about", {"anything": 1})
+
+    guide = _kone_archetype_guide()
+    section = guide[guide.index("### agenda_a_table"):]
+    section = section[:section.index("\n\n")]
+    assert "Content keys (authoritative" in section
+    assert "text1" not in section
+    assert archetypes.SAMPLES["agenda_a_table"].get("text1"), "guard is about this sample"
+
+
+def test_content_the_archetype_cannot_hold_is_reported_rather_than_dropped(tmp_path):
+    """Silent loss is the failure this catches. The deck came back with
+    less in it than the brief had, and nothing said so -- not the build,
+    not the review page, not the audit."""
+    archetypes = _skill_modules()
+    agenda = archetypes.ARCHETYPES["agenda_a_table"]
+
+    assert L.unread_keys(agenda, {"title": "x", "text1": "a", "text2": "b"}) == ["text1", "text2"]
+    assert L.unread_keys(agenda, {"title": "x", "items": ["a"]}) == []
+    # an empty field was never content, and `colour` is read by the
+    # renderer rather than by the archetype's regions
+    assert L.unread_keys(agenda, {"title": "x", "text1": "", "colour": "blue"}) == []
+
+    report: dict = {}
+    L.build_deck({"title": "T", "slides": [
+        {"archetype": "agenda_a_table", "title": "Agenda",
+         "text1": "one", "text2": "two"},
+    ]}, str(tmp_path / "d.pptx"), archetypes, report=report)
+    assert report["dropped"] == {1: ("agenda_a_table", ["text1", "text2"])}

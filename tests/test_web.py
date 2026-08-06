@@ -334,3 +334,28 @@ def test_a_slide_locked_to_one_action_is_not_reported_as_refusing_it():
     assert 'name="action_2" value="rebuild"' not in html
     # the script counts a hidden input already carrying the wanted value
     assert "i.type === 'hidden'" in html
+
+
+def test_the_result_page_says_what_had_nowhere_to_go():
+    """A slide came back as a title on an empty half because the brief's
+    other four points were planned under keys the archetype does not
+    read. Nothing anywhere said so."""
+    from deckguard import webtemplates as templates
+
+    outcome = {
+        "rebuilt": [], "archetype_swapped": [1], "reference_carryover": [], "kept": [],
+        "dropped_content": {2: ("agenda_a_table", ["text1", "text2", "text3", "text4"])},
+    }
+    audit = {"summary": {"critical": 0, "major": 0, "minor": 0}, "violations": []}
+    html = templates.transform_result_page("d.pptx", outcome, audit, None,
+                                           {"pptx": "/x.pptx", "json": "/x.json"})
+
+    assert "nowhere to go" in html
+    assert "Slide 2" in html and "agenda_a_table" in html
+    for key in ("text1", "text2", "text3", "text4"):
+        assert f"<code>{key}</code>" in html
+
+    # and stays quiet when nothing was dropped
+    outcome["dropped_content"] = {}
+    assert "nowhere to go" not in templates.transform_result_page(
+        "d.pptx", outcome, audit, None, {"pptx": "/x.pptx", "json": "/x.json"})

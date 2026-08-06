@@ -268,6 +268,19 @@ def _kone_archetype_guide() -> str:
             lines.append(f"Use when: {', '.join(info['keywords'])}")
         if info.get("slots"):
             lines.append(f"Slots: {info['slots']}")
+        # The authority, derived from the registry the renderer will
+        # actually use. `catalog.json` covers 22 of 80 archetypes and
+        # `SAMPLES` 41, so most were described by name alone -- and a
+        # stale sample is worse than none: `agenda_a_table`'s advertised
+        # `text1..text4` long after the renderer was rebuilt to read
+        # `items`, so a planner emitted four keys nothing reads and the
+        # agenda came out as a title on an empty slide.
+        keys = _derived_content_keys(name)
+        if keys:
+            lines.append(
+                "Content keys (authoritative -- anything else is discarded): "
+                + "; ".join(keys)
+            )
         slot = _archetype_image_slots().get(name)
         if slot is not None:
             lines.append(
@@ -275,10 +288,36 @@ def _kone_archetype_guide() -> str:
                 "images -- do NOT emit an image path or filename yourself."
             )
         sample = archetypes.SAMPLES.get(name)
-        if sample is not None:
+        if sample is not None and _sample_agrees(name, sample):
             lines.append(f"Example content: {json.dumps(_sample_without_image_paths(name, sample), ensure_ascii=False)}")
         parts.append("\n".join(lines))
     return "\n\n".join(parts)
+
+
+def _derived_content_keys(name: str) -> list:
+    """What the archetype's spec says it reads, or nothing if unknown."""
+    try:
+        from deckguard.layouts import content_keys
+
+        return content_keys(_load_archetypes().ARCHETYPES.get(name) or {})
+    except Exception:  # noqa: BLE001 -- the guide degrades, it never fails
+        return []
+
+
+def _sample_agrees(name: str, sample) -> bool:
+    """Does the worked example still match what the renderer reads?
+
+    A sample that predates a rebuilt archetype teaches the wrong keys,
+    and the model follows the concrete example over the abstract slot
+    list every time. Shown only while it agrees.
+    """
+    if not isinstance(sample, dict):
+        return True
+    keys = _derived_content_keys(name)
+    if not keys:
+        return True
+    known = {k.split(" (")[0] for k in keys}
+    return not (set(sample) - known)
 
 
 def _sample_without_image_paths(name: str, sample: dict) -> dict:

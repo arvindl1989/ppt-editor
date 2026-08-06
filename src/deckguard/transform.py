@@ -487,6 +487,11 @@ class TransformOutcome:
     duplicate_logos_removed: int = 0  # see _dedupe_reference_master_logos
     needs_manual_redraw: list = field(default_factory=list)  # 1-based indices; see below
     photos_added: int = 0  # picture slots filled from the KONE photo library
+    # {slide number: (archetype, [keys])} the archetype had nowhere to put.
+    # Silent loss was the complaint this exists to answer: a brief's
+    # content arrived under keys the renderer does not read, and the deck
+    # simply came back with less in it than the brief had.
+    dropped_content: dict = field(default_factory=dict)
 
 
 def _dedupe_reference_master_logos(out_path, reference_path) -> int:
@@ -768,7 +773,8 @@ def execute_transform_from_brief(out_path, plan: TransformPlan, approved_indices
     # first deck a user built here showed all four.
     from deckguard import layouts
 
-    layouts.build_deck(spec, str(out_path))
+    report: dict = {}
+    layouts.build_deck(spec, str(out_path), report=report)
     from deckguard.logo import repair_empty_logo_frames, restore_logo_chrome
 
     repair_empty_logo_frames(out_path)  # the master's empty logo frames
@@ -788,6 +794,7 @@ def execute_transform_from_brief(out_path, plan: TransformPlan, approved_indices
         kept=sorted(s.index for s in plan.slides if s.index not in approved),
         layouts_used={s.index: s.archetype["archetype"] for s in plan.slides if s.index in approved and s.archetype},
         photos_added=photos_added,
+        dropped_content=report.get("dropped", {}),
     )
 
 

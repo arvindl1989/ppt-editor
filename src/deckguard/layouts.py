@@ -1498,7 +1498,7 @@ def _strip_empty_placeholders(slide) -> None:
             shape._element.getparent().remove(shape._element)
 
 
-def build_deck(spec: dict, out_path, archetypes_module=None) -> str:
+def build_deck(spec: dict, out_path, archetypes_module=None, report=None) -> str:
     """Assemble a deck from a spec, each archetype on its OWN layout.
 
     The skill's own `kone_deck_creator.build_deck` puts every archetype
@@ -1553,12 +1553,16 @@ def build_deck(spec: dict, out_path, archetypes_module=None) -> str:
     }
     blank = next(l for l in prs.slide_layouts if l.name.strip().lower() == "blank")
 
-    for entry in spec.get("slides") or []:
+    for position, entry in enumerate(spec.get("slides") or [], start=1):
         name = entry.get("archetype")
         content = {k: v for k, v in entry.items() if k != "archetype"}
         archetype = by_engine_key.get(str(name).lower())
         slide = prs.slides.add_slide(_layout_for(archetype, by_partname, blank))
         _strip_empty_placeholders(slide)
+        if report is not None:
+            dropped = unread_keys(archetypes_module.ARCHETYPES.get(name) or {}, content)
+            if dropped:
+                report.setdefault("dropped", {})[position] = (name, dropped)
         render(slide, name, content, archetypes_module)
 
     body = [el for el in list(slide_ids) if el not in originals]
@@ -1584,3 +1588,79 @@ def _load_creator():
     from deckguard.skill_bridge import _load_creator as load
 
     return load()
+
+
+# --------------------------------------------------------------------------
+# what an archetype actually reads
+# --------------------------------------------------------------------------
+
+
+def content_keys(spec: dict) -> list[str]:
+    """The content keys a spec reads, annotated with their shape.
+
+    The planning prompt described archetypes from `catalog.json` slots
+    and the skill's `SAMPLES`, and 39 of the 80 registered archetypes
+    have neither -- the model was told a name and left to guess. Worse,
+    a stale sample is an active lie: `agenda_a_table`'s said
+    `text1..text4` while the renderer had been rebuilt to read `items`,
+    so a planner did as it was told, emitted four keys nothing reads,
+    and the agenda came out as a title on an empty slide.
+
+    Derived from the live registry, so it cannot drift.
+    """
+    out: list[str] = []
+    for region in spec.get("regions", []):
+        key = region.get("content")
+        if not key:
+            continue
+        out.append(f"{key} ({_shape_of(region)})")
+    for group in spec.get("groups", []):
+        key = group.get("content")
+        if not key:
+            continue
+        fields = [
+            # an icon region carries no content key of its own, but the
+            # caller names its pictogram per item -- omitting it from the
+            # guide is why decks came back with default icons
+            "icon" if r.get("role") == "icon" else r.get("content")
+            for r in group.get("regions", [])
+            if r.get("content") or r.get("role") == "icon"
+        ]
+        n = len(group.get("origins") or [])
+        if fields:
+            shape = "{" + ", ".join(fields) + "}"
+            out.append(f"{key} (list of up to {n} × {shape})")
+        else:
+            out.append(f"{key} (list of up to {n})")
+    return out
+
+
+def _shape_of(region: dict) -> str:
+    role = str(region.get("role") or "")
+    if role in ("picture", "image"):
+        return "filled automatically -- do not supply"
+    if role == "icon":
+        return "icon name"
+    style = region.get("dg") or {}
+    if style.get("kind") == "bullets":
+        return "list of strings, or {text, sub:[...]}"
+    if "stat" in role or "value" in role:
+        return "short figure, e.g. 70%"
+    return "text"
+
+
+def unread_keys(spec: dict, content: dict) -> list[str]:
+    """Content the archetype has nowhere to put.
+
+    Silent loss is the failure mode this catches: a planner emitted
+    `text1..text4` for an agenda whose renderer reads `items`, and the
+    slide came out as a title on an empty half. Nothing said so -- not
+    the build, not the review page, not the audit. The deck simply had
+    less in it than the brief did.
+    """
+    known = {k.split(" (")[0] for k in content_keys(spec)}
+    ignore = {"archetype", "colour", "color", "notes"}
+    return sorted(
+        key for key, value in (content or {}).items()
+        if key not in known and key not in ignore and value not in (None, "", [], {})
+    )

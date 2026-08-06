@@ -726,6 +726,27 @@ def transform_result_page(
             "screen and let the generator draw them fresh.</p></div>"
         )
 
+    # Content the brief carried that its archetype had nowhere to put.
+    # Reported because the alternative is what shipped: a slide came back
+    # as a title on an empty half, and nothing anywhere said the other
+    # four points had been dropped on the floor.
+    dropped = outcome.get("dropped_content") or {}
+    dropped_note = ""
+    if dropped:
+        rows = "".join(
+            f"<li>Slide {_esc(index)} (<code>{_esc(name)}</code>) — "
+            f"{', '.join('<code>' + _esc(k) + '</code>' for k in keys)}</li>"
+            for index, (name, keys) in sorted(dropped.items())
+        )
+        dropped_note = (
+            '<div class="notice"><b>Some planned content had nowhere to go</b>'
+            "These slides were planned with fields their archetype does not read, so that text is "
+            "not in the deck. Everything else on those slides is."
+            f'<ul style="margin:0.5rem 0 0;padding-left:1.1rem;">{rows}</ul>'
+            "<p>Re-run the brief, or add the missing points by hand — the slides themselves are "
+            "correct, they are just carrying less than you asked for.</p></div>"
+        )
+
     suppressed = audit.get("suppressed_archetype_findings", 0)
     suppressed_note = (
         f'<p class="field-hint" style="margin:0.5rem 0 0;">{suppressed} finding(s) on archetype-rendered slides '
@@ -764,6 +785,7 @@ def transform_result_page(
 {reference_note}
 {dl}
 </div>
+{dropped_note}
 {redraw_note}
 {similarity_card}
 <div class="card"><h3 style="font-size:0.95rem;">Remaining findings ({len(violations)})</h3>
