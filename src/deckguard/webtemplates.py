@@ -5,6 +5,7 @@ keeps the web extra's dependency footprint to just FastAPI/uvicorn.
 from __future__ import annotations
 
 import html
+from html import escape
 
 SEVERITY_COLOR = {"critical": "#FF5F28", "major": "#FFA023", "minor": "#8C8C8C"}
 
@@ -381,6 +382,14 @@ def transform_card(ai_enabled: bool = True, error: str | None = None) -> str:
     <textarea name="brief" rows="2" placeholder="e.g. a Marketing Hub Q2 review: volume up ~2x, 91% resolution, 2025–2027 roadmap"
       style="width:100%;font-size:0.85rem;padding:0.6rem;"></textarea>
   </div>
+  <div class="field">
+    <label class="field-label" for="shape">Shape</label>
+    <select name="shape" id="shape" style="width:100%;font-size:0.85rem;padding:0.6rem;"
+      onchange="document.getElementById('shape-hint').textContent=this.selectedOptions[0].dataset.hint">
+{_shape_options()}
+    </select>
+    <p class="field-hint" id="shape-hint">{_shape_hint()}</p>
+  </div>
   <p class="field-hint" style="margin:0 0 1.1rem;">{ai_hint}</p>
   <div class="btn-row">
     <button type="submit" class="primary">Plan transform</button>
@@ -388,6 +397,25 @@ def transform_card(ai_enabled: bool = True, error: str | None = None) -> str:
   </div>
 </form>
 </div>"""
+
+
+def _shape_options(selected: str = "auto") -> str:
+    """The starting shapes, straight from the registry that defines
+    them -- a hand-kept copy here would be a second place to update
+    every time an arc changes."""
+    from deckguard.layouts import DECK_SHAPES
+
+    return "\n".join(
+        f'      <option value="{key}" data-hint="{escape(entry["hint"], quote=True)}"'
+        f'{" selected" if key == selected else ""}>{escape(entry["label"])}</option>'
+        for key, entry in DECK_SHAPES.items()
+    )
+
+
+def _shape_hint(selected: str = "auto") -> str:
+    from deckguard.layouts import DECK_SHAPES
+
+    return escape(DECK_SHAPES.get(selected, DECK_SHAPES["auto"])["hint"])
 
 
 _ACTION_LABELS = {

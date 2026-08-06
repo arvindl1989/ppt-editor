@@ -1077,3 +1077,123 @@ def test_the_guide_teaches_the_rules_a_planner_has_to_act_on():
     assert "55 characters" in rules
     assert "one line" in rules and "done" in rules
     assert "saying nothing twice" in rules
+
+
+# --------------------------------------------------------------------------
+# the recognition deck (kone-recognition-deck)
+# --------------------------------------------------------------------------
+
+
+MILESTONE = {
+    "eyebrow": "Marketing Hub", "footer": "Marketing Hub · April 2026",
+    "title": "From Monday.com to ServiceNow in six weeks",
+    "context": "The Hub moved its entire Request Management framework across.",
+    "stats": [{"value": "6", "label": "Weeks"}, {"value": "0", "label": "Disruption"}],
+    "scope_label": "The frontlines", "scope": "KSEA · KMTA · KANZ",
+    "done": [{"text": "Pilot-tested and live"}, {"text": "100% transitioned"}],
+    "groups": [{"heading": "Frontlines", "text": "12 frontlines."}],
+    "quote": "A benchmark in easy to work with.",
+    "next": ["Hypercare ongoing", "Power BI integration targeted for Q2"],
+    "credit_names": ["Arvind", "Suresh Kumar", "Rupesh", "Golda"],
+    "credits_note": "And the Hub specialists.",
+}
+
+
+def test_the_arc_does_not_emit_a_cover_or_a_closing_slide():
+    """`build_deck` retains the master's Cover F and Thank you. The
+    first build of this arc emitted its own too, so the deck opened on
+    two covers and closed on three thank-yous."""
+    slides = L.recognition_deck(MILESTONE)["slides"]
+    used = [s["archetype"] for s in slides]
+    assert "cover_a_cut4" not in used and "outro" not in used
+    assert used[0] == "agenda_contents"
+    assert used[-1] == "credits"
+
+
+def test_a_section_divider_precedes_every_section_that_has_material():
+    slides = L.recognition_deck(MILESTONE)["slides"]
+    used = [s["archetype"] for s in slides]
+    assert used.count("divider_numbering") == 4
+    numbers = [s["number"] for s in slides if s["archetype"] == "divider_numbering"]
+    assert numbers == ["01", "02", "03", "04"]
+
+
+def test_sections_without_material_are_dropped_rather_than_padded():
+    """The skill is explicit: nine slides that carry weight beat twelve
+    with three filler ones."""
+    thin = {"title": "A thing shipped", "stats": [{"value": "1", "label": "Thing"}]}
+    used = [s["archetype"] for s in L.recognition_deck(thin)["slides"]]
+    assert "three_content" not in used   # no groups given
+    assert "quote_b" not in used         # no quote given
+    assert "credits" not in used         # no names given
+    assert used.count("divider_numbering") == 1
+    assert "kone_numbers" in used
+
+
+def test_a_period_in_the_sentence_becomes_the_timeline_period():
+    items = L._as_timeline(["Hypercare ongoing",
+                            "Power BI integration targeted for Q2",
+                            "Demo at the Hub call in April 2026"])
+    assert [i["period"] for i in items] == ["Now", "Q2", "April 2026"]
+
+
+def test_the_numbers_slide_and_the_milestone_band_are_the_same_geometry():
+    """A number that moved between the one-slide and the deck-length
+    form would read as a different number."""
+    band = L._EXTRAS["kone_numbers"]
+    slide = L._EXTRAS["milestone_slide"]
+    assert band["panels"] == slide["panels"]
+    for spec in (band, slide):
+        stats = next(g for g in spec["groups"] if g["content"] == "stats")
+        assert [o[0] for o in stats["origins"]] == [45, 291, 537, 783, 1029]
+
+
+def test_credit_rows_rule_only_where_there_are_names():
+    """Eight names fill two rows of four; a third row of rules drawn
+    statically would hang under them ruling nothing. The rule belongs to
+    the cell, so it appears only where content does."""
+    names = next(g for g in L._EXTRAS["credits"]["groups"] if g["content"] == "names")
+    assert len(names["origins"]) == 12
+    assert names["regions"][0]["dg"]["kind"] == "ruled"
+    # three rows of four, and the last row clears the closing line
+    assert sorted({o[1] for o in names["origins"]}) == [240, 321, 402]
+    note = next(r for r in L._EXTRAS["credits"]["regions"] if r["content"] == "note")
+    assert 402 + 81 <= note["box"][1]
+
+
+def test_the_recognition_deck_renders(tmp_path):
+    archetypes = _skill_modules()
+    out = tmp_path / "recognition.pptx"
+    L.build_deck(L.recognition_deck(MILESTONE), str(out), archetypes)
+
+    from pptx import Presentation
+
+    prs = Presentation(str(out))
+    text = " ".join(
+        sh.text_frame.text for slide in prs.slides for sh in slide.shapes
+        if getattr(sh, "has_text_frame", False)
+    )
+    for fragment in ("What we'll cover", "Suresh Kumar", "Hub specialists",
+                     "benchmark", "KSEA"):
+        assert fragment in text, fragment
+
+
+def test_a_chosen_shape_is_planner_guidance_and_an_unknown_one_changes_nothing():
+    notes, target = L.shape_notes("recognition")
+    assert target == 12
+    assert "kone_numbers" in notes and "agenda_contents" in notes
+    assert "do not emit" in notes.lower()
+
+    notes, target = L.shape_notes("milestone")
+    assert target == 1 and "milestone_slide" in notes
+
+    assert L.shape_notes("auto") == (None, None)
+    assert L.shape_notes("") == (None, None)
+    assert L.shape_notes("something-else") == (None, None)
+
+
+def test_the_arc_notes_are_built_from_the_arc_itself():
+    """A hand-written copy would be a second place to update."""
+    notes = L._arc_notes()
+    for name, _why in L.RECOGNITION_ARC:
+        assert name in notes

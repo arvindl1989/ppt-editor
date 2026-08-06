@@ -1026,6 +1026,8 @@ def _draw(slide, engine, region: dict, value, ink: Optional[str] = None) -> None
         style = {**style, "color": ink}
     if style["kind"] == "bullets":
         _draw_bullets(slide, engine, region["box"], value, style, ink)
+    elif style["kind"] == "ruled":
+        _draw_ruled(slide, engine, region["box"], value, style)
     elif style["kind"] == "tick":
         _draw_tick(slide, engine, region["box"], value, style)
     else:
@@ -1040,6 +1042,28 @@ def _draw(slide, engine, region: dict, value, ink: Optional[str] = None) -> None
 
 def _reads_as_zero(value) -> bool:
     return str(value).strip().strip("+%") in ("0", "0.0", "zero", "Zero", "none", "None")
+
+
+def _draw_ruled(slide, engine, box, value, style) -> None:
+    """Text under its own hairline.
+
+    The rule belongs to the cell rather than to the slide because the
+    grid is content-length: eight names fill two rows of four, and a
+    third row of rules drawn statically would hang under them as a line
+    ruling nothing.
+    """
+    from pptx.enum.shapes import MSO_SHAPE
+
+    x, y, w, h = box
+    rule = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, engine.X(x), engine.X(y), engine.X(w), engine.X(1))
+    rule.name = "Hairline"
+    rule.fill.solid()
+    rule.fill.fore_color.rgb = engine._hex(style.get("rule", "D0D0D0"))
+    rule.line.fill.background()
+    rule.shadow.inherit = False
+
+    pad = style.get("pad", 26)
+    _draw_text(slide, engine, [x, y + pad, w, h - pad], value, {**style, "kind": "text"})
 
 
 def _draw_tick(slide, engine, box, value, style) -> None:
@@ -1902,7 +1926,75 @@ _EXTRA_META: dict[str, dict] = {
 # has no recognition slide: a finished thing, its proof, and who did it.
 # Transcribed from kone-milestone-slide's published geometry rather than
 # eyeballed, so it stays comparable with the reference.
+# The band as a slide of its own -- same geometry, because a number
+# that moved between the two forms would read as a different number.
+_MILESTONE_BAND: dict = {
+    "panels": [{"box": [0, 276, 1280, 196], "fill": "F3EEEA"}],
+    "rules": [{"box": [45, 424, 1190, 1], "fill": "141414"}],
+}
+
+# Four columns across 1190, so 297 wide on a 297.5 pitch. Rows are
+# 26px padding + a 24px name + 26px, which is 81 -- three rows of four
+# reach 483 and still clear the closing line at 512.
+_CREDIT_X = [45, 342, 640, 937]
+_CREDIT_Y = [240, 321, 402]
+
 _EXTRAS: dict[str, dict] = {
+    "kone_numbers": {
+        "background": "FFFFFF",
+        "panels": list(_MILESTONE_BAND["panels"]),
+        "rules": list(_MILESTONE_BAND["rules"]),
+        "regions": [
+            _text(45, 47, 790, 20, "eyebrow", 12,
+                  font="KONE Information", color="1450F5", caps=True),
+            _text(45, 91, 1189, 44, "title", 34),
+            _text(45, 438, 150, 18, "scope_label", 11,
+                  font="KONE Information", color="1450F5", caps=True),
+            _text(205, 438, 1030, 18, "scope", 13, font="KONE Information"),
+            _text(45, 664, 500, 16, "footer", 11,
+                  font="KONE Information", caps=True),
+        ],
+        "groups": [
+            {
+                "content": "stats",
+                "origins": [[x, 307] for x in _MILESTONE_STAT_X],
+                "regions": [
+                    {"role": "dg_text", "box": [0, 0, 206, 66], "content": "value",
+                     "dg": {"kind": "text", "px": 62, "font": "KONE Information",
+                            "color": "1450F5", "caps": False, "align": "l",
+                            "zero_is_black": True}},
+                    {"role": "dg_text", "box": [0, 74, 206, 32], "content": "label",
+                     "dg": {"kind": "text", "px": 12, "font": "KONE Information",
+                            "color": "141414", "caps": True, "align": "l"}},
+                ],
+            },
+        ],
+    },
+    "credits": {
+        "background": "FFFFFF",
+        "regions": [
+            _text(45, 47, 790, 20, "eyebrow", 12,
+                  font="KONE Information", color="1450F5", caps=True),
+            _text(45, 91, 1189, 44, "title", 34),
+            {"role": "dg_text", "box": [45, 512, 1190, 60], "content": "note",
+             "dg": {"kind": "ruled", "px": 20, "font": "Inter", "color": "141414",
+                    "caps": False, "align": "l", "pad": 24, "rule": "D0D0D0"}},
+            _text(45, 664, 500, 16, "footer", 11,
+                  font="KONE Information", caps=True),
+        ],
+        "groups": [
+            {
+                "content": "names",
+                "origins": [[x, y] for y in _CREDIT_Y for x in _CREDIT_X],
+                "regions": [
+                    {"role": "dg_text", "box": [0, 0, 297, 81], "content": "name",
+                     "dg": {"kind": "ruled", "px": 24, "font": "Inter",
+                            "color": "141414", "caps": False, "align": "l",
+                            "pad": 26, "rule": "D0D0D0"}},
+                ],
+            },
+        ],
+    },
     "milestone_slide": {
         "background": "FFFFFF",
         "panels": [{"box": [0, 276, 1280, 196], "fill": "F3EEEA"}],
@@ -1963,3 +2055,216 @@ _EXTRAS: dict[str, dict] = {
         ],
     },
 }
+
+
+# --------------------------------------------------------------------------
+# the recognition deck
+# --------------------------------------------------------------------------
+
+# `kone-recognition-deck`'s arc: the same announcement as the milestone
+# slide, paced across four sections so it can be presented rather than
+# forwarded. Built here rather than left to the planner because the
+# skill is explicit about the order, and because a deterministic arc can
+# be tested -- and built at all on a server with no API key.
+#
+# Two substitutions from the published arc, both because the registry's
+# archetype of that name cannot hold the content: AGENDA_B_NUMBERED
+# reads title/body/body2 and cannot carry four numbered sections, so the
+# agenda goes to `agenda_contents`, which does. Everything else is the
+# archetype the skill names.
+# The cover and the outro are the deck's retained master slides, not
+# ours to emit: `build_deck` keeps Cover F and the Thank you already.
+# Emitting our own put two covers and three closing slides in the first
+# build of this arc.
+RECOGNITION_ARC = [
+    ("agenda_contents", "agenda"),
+    ("divider_numbering", "section 1"),
+    ("text_picture_a", "what changed"),
+    ("kone_numbers", "the numbers"),
+    ("two_content", "delivered / continuity"),
+    ("divider_numbering", "section 2"),
+    ("three_content", "the scope groups"),
+    ("divider_numbering", "section 3"),
+    ("quote_b", "the benchmark line"),
+    ("timeline", "what's next"),
+    ("divider_numbering", "section 4"),
+    ("credits", "thank you"),
+]
+
+_SECTIONS = ["What changed", "How it was delivered", "What's next", "Thank you"]
+
+
+def recognition_deck(content: dict) -> dict:
+    """Expand one announcement into the recognition deck's arc.
+
+    Takes the milestone slide's own content plus what the longer form
+    allows -- the context paragraph, the quotable line, the timeline --
+    and drops any slide whose material is missing rather than padding
+    it. The skill is explicit about that: nine slides that all carry
+    weight beat twelve with three filler ones.
+    """
+    footer = content.get("footer") or content.get("eyebrow") or ""
+    sections = content.get("sections") or _SECTIONS
+    slides: list[dict] = []
+
+    agenda = [{"number": f"{i:02d}", "item": name} for i, name in enumerate(sections, 1)]
+    slides.append({"archetype": "agenda_contents", "title": "What we'll cover",
+                   "items": agenda})
+
+    def divider(index: int) -> dict:
+        return {"archetype": "divider_numbering", "number": f"{index:02d}",
+                "eyebrow": f"Section {index:02d}", "title": sections[index - 1]}
+
+    # 01 -- what changed
+    slides.append(divider(1))
+    if content.get("context"):
+        slides.append({"archetype": "text_picture_a", "eyebrow": sections[0],
+                       "title": content.get("context_title") or "What moved",
+                       "body": content["context"]})
+    if content.get("stats"):
+        slides.append({"archetype": "kone_numbers", "eyebrow": sections[0],
+                       "title": content.get("stats_title") or "The migration in numbers",
+                       "stats": content["stats"],
+                       "scope_label": content.get("scope_label", ""),
+                       "scope": content.get("scope", ""), "footer": footer})
+    if content.get("done"):
+        slides.append({"archetype": "two_content", "title": "What was delivered",
+                       "items": _two_columns(content["done"])})
+
+    # 02 -- how it was delivered
+    if content.get("groups"):
+        slides.append(divider(2))
+        slides.append({"archetype": "three_content", "title": "Who delivered it",
+                       "items": content["groups"][:3]})
+
+    # 03 -- what's next
+    third = []
+    if content.get("quote"):
+        third.append({"archetype": "quote_b", "title": "In their words",
+                      "body": f"“{content['quote']}”",
+                      "body2": content.get("quote_attribution", "")})
+    if content.get("next"):
+        third.append({"archetype": "timeline", "title": sections[2],
+                      "items": _as_timeline(content["next"])})
+    if third:
+        slides.append(divider(3))
+        slides.extend(third)
+
+    # 04 -- thank you
+    if content.get("credit_names"):
+        slides.append(divider(4))
+        slides.append({"archetype": "credits", "eyebrow": "Section 04",
+                       "title": content.get("credits_title") or "Thank you to everyone involved",
+                       "names": [{"name": n} for n in content["credit_names"][:12]],
+                       "note": content.get("credits_note", ""), "footer": footer})
+
+    spec = {"title": content.get("title", "Recognition"), "slides": slides}
+    # `text_picture_a` carries a picture slot the arc never supplies by
+    # hand; unfilled it renders as a white half-slide.
+    try:
+        from deckguard.skill_bridge import fill_empty_photo_slots
+
+        fill_empty_photo_slots(spec)
+    except Exception:  # noqa: BLE001 -- no photo library is not an error
+        pass
+    return spec
+
+
+def _two_columns(done: list) -> list:
+    """The completion states as two bulleted columns rather than ticks --
+    the deck has room to let them breathe, and `two_content` reads
+    {label, bullets}."""
+    items = [d.get("text", d) if isinstance(d, dict) else d for d in done]
+    half = (len(items) + 1) // 2
+    columns = [items[:half], items[half:]]
+    labels = ["Delivered", "Data continuity"]
+    return [{"label": label, "bullets": bullets}
+            for label, bullets in zip(labels, columns) if bullets]
+
+
+def _as_timeline(items: list) -> list:
+    """`next` is written as sentences; the timeline wants a period and a
+    line. Where the sentence names its own period -- a quarter, a month,
+    a date -- lift it into the period column."""
+    out = []
+    for i, item in enumerate(items[:4]):
+        text = item.get("text", "") if isinstance(item, dict) else str(item)
+        period = _period_in(text) or ("Now" if i == 0 else f"Then {i}")
+        out.append({"period": period, "text": text})
+    return out
+
+
+_PERIOD = re.compile(
+    r"\b(Q[1-4](?:\s+\d{4})?|H[12]|"
+    r"(?:January|February|March|April|May|June|July|August|September|October|November|December)"
+    r"(?:\s+\d{4})?)\b", re.I)
+
+
+def _period_in(text: str) -> Optional[str]:
+    found = _PERIOD.search(text)
+    return found.group(1) if found else None
+
+
+# --------------------------------------------------------------------------
+# deck shapes, offered in the UI
+# --------------------------------------------------------------------------
+
+
+def _arc_notes() -> str:
+    """The recognition arc written out for the planner, built from
+    `RECOGNITION_ARC` so the instruction cannot drift from the recipe."""
+    steps = "\n".join(f"  {i:02d}. {name} -- {why}"
+                      for i, (name, why) in enumerate(RECOGNITION_ARC, 1))
+    return (
+        "Build the KONE recognition deck: one announcement paced across four "
+        "sections so it can be presented rather than forwarded. Use exactly "
+        "this arc, in this order, for the BODY slides (the cover and the "
+        "closing Thank you are retained from the master -- do not emit "
+        "them):\n" + steps + "\n"
+        "Sections are: " + ", ".join(_SECTIONS) + ". Every fact from the source "
+        "lands in exactly one section. The numbers appear ONCE, on the "
+        "kone_numbers slide; if a number repeats on a later slide that slide "
+        "is restating rather than adding, so cut it. Drop any slide whose "
+        "material is missing rather than padding it -- nine slides that carry "
+        "weight beat twelve with three filler ones. Keep every divider on the "
+        "same treatment."
+    )
+
+
+# What the tool offers as a starting shape. `notes` and `target` are
+# passed straight to the planner; `auto` leaves it free, which is what
+# every brief did before this existed.
+DECK_SHAPES: dict[str, dict] = {
+    "auto": {
+        "label": "Let the planner choose",
+        "hint": "Picks archetypes to fit the brief. The default, and right for most decks.",
+        "notes": None,
+        "target": None,
+    },
+    "recognition": {
+        "label": "Recognition deck — a milestone across ~12 slides",
+        "hint": "For an announcement that needs a walkthrough on a call or at a town hall: "
+                "four sections, a divider each, the numbers once, credits in a ruled grid.",
+        "notes": _arc_notes,
+        "target": 12,
+    },
+    "milestone": {
+        "label": "Milestone — one shareable slide",
+        "hint": "For an announcement that gets posted and read rather than presented: "
+                "the claim, its proof numbers, what's next and who did it, on one slide.",
+        "notes": "Build exactly ONE body slide, using the `milestone_slide` archetype. "
+                 "Do not add any other slide. Follow that archetype's rules exactly.",
+        "target": 1,
+    },
+}
+
+
+def shape_notes(shape: str) -> tuple[Optional[str], Optional[int]]:
+    """Planner guidance and slide target for a chosen shape, or
+    (None, None) for anything unrecognised -- an unknown shape must
+    leave the brief exactly as it would have been."""
+    entry = DECK_SHAPES.get(shape or "auto")
+    if not entry:
+        return None, None
+    notes = entry["notes"]
+    return (notes() if callable(notes) else notes), entry["target"]

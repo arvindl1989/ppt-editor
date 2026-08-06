@@ -41,6 +41,7 @@ from deckguard import report as report_mod
 from deckguard import webtemplates as tpl
 from deckguard.config import default_config_path, load_config, validate_config
 from deckguard.inventory import build_inventory
+from deckguard.layouts import shape_notes
 from deckguard.preview import archetype_preview_html, org_layout_preview_html, slide_preview_html
 from deckguard.redesign import RedesignError
 from deckguard.rules_engine import audit_deck, sort_violations, summarize
@@ -276,6 +277,7 @@ async def plan_route(request: Request, _auth: None = Depends(_require_auth)):
     reference = form.get("reference")
     has_reference = isinstance(reference, _FormUploadFile) and bool(reference.filename)
     brief = str(form.get("brief") or "").strip() or None
+    shape = str(form.get("shape") or "auto").strip()
 
     if has_file and not file.filename.lower().endswith(".pptx"):
         return _home("The deck must be a .pptx file.", status_code=400)
@@ -313,7 +315,13 @@ async def plan_route(request: Request, _auth: None = Depends(_require_auth)):
             mode, deck_name = "deck", file.filename
         else:
             source_path = None
-            plan = plan_transform_from_brief(brief)
+            # A chosen shape is planner guidance, not a second code
+            # path: an unknown value leaves the brief exactly as it
+            # would have been.
+            shape_note, shape_target = shape_notes(shape)
+            plan = plan_transform_from_brief(
+                brief, target_slides=shape_target, notes=shape_note,
+            )
             mode, deck_name = "brief", (plan.deck_title or "new deck")
     except (HTTPException, RedesignError) as exc:
         shutil.rmtree(work_dir, ignore_errors=True)
