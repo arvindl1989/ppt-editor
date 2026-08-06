@@ -342,3 +342,39 @@ def test_the_six_up_row_stays_inside_the_right_margin():
     last_x = max(x for x, _ in group["origins"])
     widest = max(r["box"][2] for r in group["regions"])
     assert last_x + widest <= 1280 - 45
+
+
+def test_a_theme_referenced_background_resolves_to_a_colour():
+    """Four KONE layouts set their background by reference --
+    `<p:bgRef><a:schemeClr val="bg2"/>` -- which names a theme slot, not
+    a colour. Reading only a literal srgbClr reported them as having no
+    background, so archetypes drew onto them blind."""
+    import posixpath
+
+    from pptx import Presentation
+
+    from deckguard.logo import _page_background_hex
+
+    master = (L._VENDORED_SKILL_DIR / "uploads" / "master_ppt-1784774200983.pptx")
+    if not master.is_file():
+        pytest.skip("master template not available")
+    prs = Presentation(str(master))
+    by_key = {posixpath.basename(l.part.partname).replace(".xml", ""): l
+              for l in prs.slide_layouts}
+
+    divider = by_key["slideLayout10"]
+    assert _page_background_hex(divider.element) is None      # no literal colour
+    assert _page_background_hex(divider.element, divider) == "F3EEEA"   # resolved
+
+    # a layout stating a literal colour still reads directly
+    assert _page_background_hex(by_key["slideLayout39"].element) == "1450F5"
+
+
+def test_the_divider_puts_the_number_left_and_the_title_right():
+    """Corrected against a real deck that uses this layout five times.
+    The gallery port and the HTML reference both had it the other way;
+    the master's own boxes agree with the real slides."""
+    regions = {r["content"]: r["box"] for r in L._REFINEMENTS["divider_numbering"]["regions"]}
+    assert regions["number"][0] == 45
+    assert regions["title"][0] == 453
+    assert regions["number"][0] < regions["title"][0]

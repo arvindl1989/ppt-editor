@@ -564,6 +564,7 @@ def render(slide, name: str, content: dict, archetypes_module) -> None:
     # painting a full-slide background rectangle, so anything drawn
     # first is buried by it -- both numbered dividers came out as an
     # empty sand rectangle with the number, title and label underneath.
+    _paint_layout_background(slide, engine, spec)
     for scrim in spec.get("scrims", []):
         if scrim.get("content") in (None, "") or filled.get(scrim.get("content")):
             _draw_scrim(slide, engine, scrim["box"], scrim.get("opacity", 62))
@@ -579,6 +580,48 @@ def render(slide, name: str, content: dict, archetypes_module) -> None:
                 rx, ry, rw, rh = region["box"]
                 shifted = {**region, "box": [ox + rx, oy + ry, rw, rh]}
                 _draw(slide, engine, shifted, (item or {}).get(region.get("content")))
+
+
+def _paint_layout_background(slide, engine, spec: dict) -> None:
+    """Make the layout's background explicit on the slide.
+
+    Four KONE layouts set their background by THEME REFERENCE rather
+    than by colour -- `<p:bgRef><a:schemeClr val="bg2"/>` -- and
+    renderers disagree about what that resolves to. PowerPoint follows
+    the master's clrMap to sand; LibreOffice produces KONE Blue. Same
+    file, two different decks.
+
+    Writing the resolved colour onto the slide removes the question. It
+    is a no-op where the archetype paints its own background, and where
+    the layout states a literal colour it simply restates it.
+    """
+    if spec.get("background") or spec.get("panels"):
+        return
+    from pptx.enum.shapes import MSO_SHAPE
+
+    from deckguard.logo import _page_background_hex
+
+    layout = slide.slide_layout
+    if _page_background_hex(layout.element) is not None:
+        return                      # already a literal colour, unambiguous
+    resolved = _page_background_hex(layout.element, layout)
+    if not resolved:
+        return
+    shape = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, engine.X(0), engine.X(0),
+                                   engine.X(1280), engine.X(720))
+    shape.name = "Layout background"
+    shape.fill.solid()
+    shape.fill.fore_color.rgb = engine._hex(resolved)
+    shape.line.fill.background()
+    shape.shadow.inherit = False
+    style = shape._element.find(
+        "{http://schemas.openxmlformats.org/presentationml/2006/main}style")
+    if style is not None:
+        shape._element.remove(style)
+    # behind everything the engine just drew
+    spTree = shape._element.getparent()
+    spTree.remove(shape._element)
+    spTree.insert(2, shape._element)
 
 
 def _draw_scrim(slide, engine, box, opacity: int = 62) -> None:
@@ -785,10 +828,15 @@ _REFINEMENTS: dict[str, dict] = {
     # the RIGHT-hand box and emitted no number at all -- which is the
     # one thing a numbered divider is for. The reference puts the
     # section label and title left, and a 420px numeral right.
+    # Corrected against a real deck, which uses this layout five times.
+    # The gallery port and the HTML reference both put the title left
+    # and the numeral right; the master's own boxes -- and every real
+    # slide -- do the opposite. `Text/body` at 45 carries the number,
+    # `Title` at 453 carries the words.
     "divider_numbering": {"regions": [
-        _text(45, 300, 374, 26, "eyebrow", 13),
-        _text(45, 332, 374, 240, "title", 46),
-        _text(700, 150, 490, 400, "number", 300, align="r"),
+        _text(45, 91, 374, 300, "number", 190),
+        _text(453, 91, 578, 120, "eyebrow", 13),
+        _text(453, 130, 578, 400, "title", 46),
     ]},
 
     # The next two come from REAL decks rather than the HTML reference,

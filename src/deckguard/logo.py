@@ -667,12 +667,60 @@ def _fit_picture(slide, path, left, top, width, height):
     )
 
 
-def _page_background_hex(element) -> Optional[str]:
-    """The solid `<p:bg>` colour of a slide/layout/master, if it has one."""
+def _page_background_hex(element, part=None) -> Optional[str]:
+    """The solid `<p:bg>` colour of a slide/layout/master, if it has one.
+
+    A literal `<a:srgbClr>` is the easy case. The KONE master uses the
+    other one on four layouts -- Statement A and B and both numbered
+    dividers -- writing `<p:bgRef idx="1001"><a:schemeClr val="bg2"/>`,
+    which names a THEME slot rather than a colour. Reading only the
+    literal form reported those layouts as having no background at all,
+    so an archetype drew black text onto them blind.
+
+    Resolving it needs two hops: the master's `<p:clrMap>` translates
+    `bg2` to a theme slot (here `lt2`), and the theme gives that slot a
+    value (here `#F3EEEA`, sand). Worth doing properly -- LibreOffice
+    resolves this pair differently from PowerPoint and renders those
+    four layouts KONE Blue, which had me chasing a contrast defect that
+    only exists in my own renderer.
+    """
     import re
 
     match = re.search(r"<p:bg>.*?</p:bg>", element.xml, re.S)
     if not match:
         return None
-    colour = re.search(r'<a:srgbClr val="([0-9A-Fa-f]{6})"', match.group(0))
-    return colour.group(1).upper() if colour else None
+    block = match.group(0)
+
+    colour = re.search(r'<a:srgbClr val="([0-9A-Fa-f]{6})"', block)
+    if colour:
+        return colour.group(1).upper()
+
+    slot = re.search(r'<a:schemeClr val="(\w+)"', block)
+    if not slot or part is None:
+        return None
+    return _theme_colour(part, slot.group(1))
+
+
+def _theme_colour(part, token: str) -> Optional[str]:
+    """A `<a:schemeClr>` token resolved through clrMap and the theme."""
+    import re
+
+    try:
+        master = getattr(part, "slide_master", None) or getattr(part, "slide_layout", None)
+        if master is not None and hasattr(master, "slide_master"):
+            master = master.slide_master
+        if master is None:
+            return None
+        mapping = re.search(rf'<p:clrMap[^>]*\b{token}="(\w+)"', master.element.xml)
+        slot = mapping.group(1) if mapping else token
+
+        theme = master.part.part_related_by(
+            "http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme")
+        scheme = re.search(r"<a:clrScheme.*?</a:clrScheme>", theme.blob.decode(), re.S)
+        if not scheme:
+            return None
+        value = re.search(rf"<a:{slot}>\s*<a:(?:srgbClr|sysClr)[^>]*?val=\"([0-9A-Fa-f]{{6}})\"",
+                          scheme.group(0))
+        return value.group(1).upper() if value else None
+    except Exception:  # noqa: BLE001 -- background detection is advisory
+        return None
