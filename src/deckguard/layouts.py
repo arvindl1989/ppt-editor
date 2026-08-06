@@ -51,6 +51,7 @@ group of three.
 
 from __future__ import annotations
 
+import copy
 import os
 import re
 from dataclasses import dataclass
@@ -567,6 +568,20 @@ def render(slide, name: str, content: dict, archetypes_module) -> None:
         shape.line.fill.background()
         shape.shadow.inherit = False
 
+    # Hairlines. Thin enough that a stroked line renders differently
+    # across viewers, so they are 1px filled rectangles like every other
+    # rule the master draws.
+    for rule in spec.get("rules", []):
+        x, y, w, h = rule["box"]
+        line = slide.shapes.add_shape(
+            MSO_SHAPE.RECTANGLE, engine.X(x), engine.X(y), engine.X(w), engine.X(max(h, 1))
+        )
+        line.name = "Hairline"
+        line.fill.solid()
+        line.fill.fore_color.rgb = engine._hex(rule.get("fill", "D0D0D0"))
+        line.line.fill.background()
+        line.shadow.inherit = False
+
     filled = dict(content)
 
     # Regions the reference describes more precisely than ROLE_STYLE can
@@ -1011,8 +1026,54 @@ def _draw(slide, engine, region: dict, value, ink: Optional[str] = None) -> None
         style = {**style, "color": ink}
     if style["kind"] == "bullets":
         _draw_bullets(slide, engine, region["box"], value, style, ink)
+    elif style["kind"] == "tick":
+        _draw_tick(slide, engine, region["box"], value, style)
     else:
+        if style.get("zero_is_black") and _reads_as_zero(value):
+            # The brand's own instruction: the number that is deliberately
+            # zero -- no disruption, no downtime, no escalations -- is the
+            # strongest claim on the slide, and reads as a different KIND
+            # of claim when it is not in the same blue as the rest.
+            style = {**style, "color": "141414"}
         _draw_text(slide, engine, region["box"], value, style)
+
+
+def _reads_as_zero(value) -> bool:
+    return str(value).strip().strip("+%") in ("0", "0.0", "zero", "Zero", "none", "None")
+
+
+def _draw_tick(slide, engine, box, value, style) -> None:
+    """A blue disc with a white check, and its label beside it.
+
+    The only symbol the milestone slide allows, and a glyph rather than
+    an emoji -- the brand forbids emoji outright and a coloured emoji
+    tick would also ignore the palette.
+    """
+    from pptx.enum.shapes import MSO_SHAPE
+    from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
+
+    x, y, w, h = box
+    size = style.get("badge", 20)
+    disc = slide.shapes.add_shape(
+        MSO_SHAPE.OVAL, engine.X(x), engine.X(y), engine.X(size), engine.X(size)
+    )
+    disc.name = "Tick"
+    disc.fill.solid()
+    disc.fill.fore_color.rgb = engine._hex(style.get("badge_fill", "1450F5"))
+    disc.line.fill.background()
+    disc.shadow.inherit = False
+
+    frame = disc.text_frame
+    for margin in ("margin_left", "margin_right", "margin_top", "margin_bottom"):
+        setattr(frame, margin, 0)
+    frame.vertical_anchor = MSO_ANCHOR.MIDDLE
+    paragraph = frame.paragraphs[0]
+    paragraph.alignment = PP_ALIGN.CENTER
+    engine._run(paragraph, "\u2713", "Inter", size * 0.6, engine._hex("FFFFFF"))
+
+    gap = style.get("gap", 12)
+    _draw_text(slide, engine, [x + size + gap, y, w - size - gap, h], value,
+               {**style, "kind": "text"})
 
 
 def _draw_text(slide, engine, box, value, style) -> None:
@@ -1379,6 +1440,14 @@ def install(archetypes_module, grades: Iterable[str] = ("A", "B", "C", "D")) -> 
             lift_low_rows(existing)
 
     added: list[str] = []
+    # Archetypes with no master layout behind them, so `build_archetypes`
+    # cannot derive them. Registered like any other, and equally never
+    # allowed to overwrite an incumbent.
+    for key, spec in _EXTRAS.items():
+        if key not in registry:
+            registry[key] = copy.deepcopy(spec)
+            added.append(key)
+
     for key, spec in build_archetypes(grades).items():
         arch = by_key.get(key)
         if key in _OVERRIDE and key in registry:
@@ -1753,3 +1822,75 @@ def _is_full_bleed(box) -> bool:
     """A background photograph is not a block the row has to clear."""
     _, _, w, h = box
     return w >= 1200 and h >= 680
+
+
+# --------------------------------------------------------------------------
+# archetypes with no master layout behind them
+# --------------------------------------------------------------------------
+
+# The stat band is five cells across 1190 with a 40px gap, so each cell
+# is 206 wide and they start every 246px. The row is 152 tall and
+# vertically centred on content 90 tall, which puts the number at 307
+# and its label at 381.
+_MILESTONE_STAT_X = [45 + i * 246 for i in range(5)]
+
+# One slide, from one announcement email. It exists because the master
+# has no recognition slide: a finished thing, its proof, and who did it.
+# Transcribed from kone-milestone-slide's published geometry rather than
+# eyeballed, so it stays comparable with the reference.
+_EXTRAS: dict[str, dict] = {
+    "milestone_slide": {
+        "background": "FFFFFF",
+        "panels": [{"box": [0, 276, 1280, 196], "fill": "F3EEEA"}],
+        "rules": [
+            {"box": [45, 424, 1190, 1], "fill": "141414"},     # over the scope strip
+            {"box": [45, 544, 700, 1], "fill": "D0D0D0"},      # under "What's next"
+            {"box": [880, 544, 355, 1], "fill": "D0D0D0"},     # under "Thank you"
+        ],
+        "regions": [
+            _text(45, 47, 790, 20, "eyebrow", 12,
+                  font="KONE Information", color="1450F5", caps=True),
+            _text(45, 82, 790, 104, "title", 42),
+            _text(45, 186, 700, 76, "lede", 17),
+
+            _text(45, 438, 150, 18, "scope_label", 11,
+                  font="KONE Information", color="1450F5", caps=True),
+            _text(205, 438, 1030, 18, "scope", 13, font="KONE Information"),
+
+            _text(45, 520, 700, 18, "next_label", 12,
+                  font="KONE Information", color="1450F5", caps=True),
+            _bullets(45, 560, 700, 110, "next", 16, lead=0.5),
+
+            _text(880, 520, 355, 18, "credits_label", 12,
+                  font="KONE Information", color="1450F5", caps=True),
+            _text(880, 560, 355, 100, "credits", 16),
+
+            _text(45, 664, 400, 16, "classification", 11,
+                  font="KONE Information", caps=True),
+        ],
+        "groups": [
+            {
+                "content": "stats",
+                "origins": [[x, 307] for x in _MILESTONE_STAT_X],
+                "regions": [
+                    {"role": "dg_text", "box": [0, 0, 206, 66], "content": "value",
+                     "dg": {"kind": "text", "px": 62, "font": "KONE Information",
+                            "color": "1450F5", "caps": False, "align": "l",
+                            "zero_is_black": True}},
+                    {"role": "dg_text", "box": [0, 74, 206, 32], "content": "label",
+                     "dg": {"kind": "text", "px": 12, "font": "KONE Information",
+                            "color": "141414", "caps": True, "align": "l"}},
+                ],
+            },
+            {
+                "content": "done",
+                "origins": [[880, 186], [880, 230], [880, 274]],
+                "regions": [
+                    {"role": "dg_tick", "box": [0, 0, 355, 30], "content": "text",
+                     "dg": {"kind": "tick", "px": 16, "font": "Inter",
+                            "color": "141414", "caps": False, "align": "l"}},
+                ],
+            },
+        ],
+    },
+}

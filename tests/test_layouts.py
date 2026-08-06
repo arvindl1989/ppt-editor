@@ -940,3 +940,107 @@ def test_installing_closes_the_dead_bands_in_the_shipped_registry():
     for name in ("four_point_value", "quarterly_plan_4col"):
         spec = archetypes.ARCHETYPES[name]
         assert len(spec.get("groups") or []) >= 2 or L.lift_low_rows(dict(spec)) == 0
+
+
+# --------------------------------------------------------------------------
+# milestone slide (kone-milestone-slide)
+# --------------------------------------------------------------------------
+
+
+def test_the_milestone_slide_matches_its_published_geometry():
+    """One slide from one announcement email -- the recognition slide
+    the master does not have. Transcribed from kone-milestone-slide's
+    own spec rather than eyeballed, so it stays comparable with the
+    reference it came from."""
+    spec = L._EXTRAS["milestone_slide"]
+    boxes = {r["content"]: r["box"] for r in spec["regions"]}
+
+    assert boxes["eyebrow"][:2] == [45, 47]
+    assert boxes["title"][:3] == [45, 82, 790]
+    assert boxes["lede"][:3] == [45, 186, 700]
+    assert boxes["classification"][0] == 45
+    # the sand band is the only secondary colour on the slide
+    assert spec["panels"] == [{"box": [0, 276, 1280, 196], "fill": "F3EEEA"}]
+    assert {p["fill"] for p in spec["panels"]} == {"F3EEEA"}
+
+    # five stat cells, 206 wide on a 246 pitch across 1190 with a 40 gap
+    stats = next(g for g in spec["groups"] if g["content"] == "stats")
+    assert [o[0] for o in stats["origins"]] == [45, 291, 537, 783, 1029]
+    assert all(o[1] == 307 for o in stats["origins"])
+    value = next(r for r in stats["regions"] if r["content"] == "value")
+    assert value["dg"]["px"] == 62 and value["dg"]["font"] == "KONE Information"
+
+    # Inter is never blue; KONE Information is the only blue text
+    for region in spec["regions"]:
+        style = region["dg"]
+        if style.get("color") == "1450F5":
+            assert style.get("font") == "KONE Information", region["content"]
+    # and never grey, anywhere
+    # `_text` leaves the colour unset where black is the default
+    inks = {r["dg"].get("color") or "141414" for r in spec["regions"]}
+    assert inks <= {"141414", "FFFFFF", "1450F5"}
+
+
+def test_the_zero_stat_is_black_because_it_is_a_different_kind_of_claim():
+    """The brand's own instruction: the number that is deliberately zero
+    -- no disruption, no downtime -- is the strongest claim on the slide
+    and must not sit in the same blue as the counts."""
+    assert L._reads_as_zero("0") and L._reads_as_zero(" 0 ") and L._reads_as_zero("zero")
+    assert not L._reads_as_zero("6") and not L._reads_as_zero("100+")
+    assert not L._reads_as_zero("3+3")
+
+    stats = next(g for g in L._EXTRAS["milestone_slide"]["groups"]
+                 if g["content"] == "stats")
+    value = next(r for r in stats["regions"] if r["content"] == "value")
+    assert value["dg"]["zero_is_black"] is True
+
+
+def test_the_milestone_slide_renders_its_own_worked_example(tmp_path):
+    archetypes = _skill_modules()
+    out = tmp_path / "milestone.pptx"
+    L.build_deck({"title": "Milestone", "slides": [{
+        "archetype": "milestone_slide",
+        "eyebrow": "Marketing Hub · Request Management",
+        "title": "From Monday.com to ServiceNow in six weeks",
+        "lede": "Delivered with full data continuity.",
+        "done": [{"text": "MVP pilot-tested and now live"},
+                 {"text": "100% transition completed"}],
+        "stats": [{"value": "6", "label": "Weeks end to end"},
+                  {"value": "100+", "label": "Users migrated"},
+                  {"value": "12", "label": "Frontlines"},
+                  {"value": "3+3", "label": "Regions + global teams"},
+                  {"value": "0", "label": "Business disruption"}],
+        "scope_label": "The frontlines", "scope": "KSEA · KMTA · KANZ",
+        "next_label": "What's next", "next": ["Hypercare ongoing"],
+        "credits_label": "Thank you", "credits": "Arvind and the Hub specialists",
+        "classification": "KONE Internal",
+    }]}, str(out), archetypes)
+
+    from pptx import Presentation
+
+    slide = Presentation(str(out)).slides[1]
+    text = " ".join(s.text_frame.text for s in slide.shapes
+                    if getattr(s, "has_text_frame", False))
+    # stat labels are set in caps by the brand, so match that form
+    for fragment in ("ServiceNow", "100+", "3+3", "BUSINESS DISRUPTION",
+                     "KSEA", "Hypercare", "Hub specialists"):
+        assert fragment in text, fragment
+
+    # the sand band, the three hairlines and two tick discs are all shapes
+    assert len([s for s in slide.shapes if s.name == "Hairline"]) == 3
+    assert len([s for s in slide.shapes if s.name == "Tick"]) == 2
+    ticks = [s for s in slide.shapes if s.name == "Tick"]
+    assert all(str(t.fill.fore_color.rgb) == "1450F5" for t in ticks)
+    assert all("✓" in t.text_frame.text for t in ticks)
+
+    # the zero renders black while the counts stay blue
+    inks = {}
+    for shape in slide.shapes:
+        if not getattr(shape, "has_text_frame", False):
+            continue
+        for para in shape.text_frame.paragraphs:
+            for run in para.runs:
+                if run.text.strip() in ("6", "100+", "12", "3+3", "0") and run.font.color.type:
+                    inks[run.text.strip()] = str(run.font.color.rgb)
+    assert inks.get("0") == "141414", inks
+    assert inks.get("6") == "1450F5" and inks.get("100+") == "1450F5", inks
