@@ -117,14 +117,20 @@ def _tokens(data: str) -> Iterator[tuple[Optional[str], Optional[float]]]:
         yield (command, None) if command else (None, float(number))
 
 
-def path_to_drawingml(data: str, scale: int = VIEWBOX) -> list[tuple]:
+def path_to_drawingml(data: str, scale: float = 1.0) -> list[tuple]:
     """SVG path data -> a flat list of DrawingML path operations.
 
     Each operation is `("moveTo"|"lnTo"|"cubicBezTo"|"close", points)`,
-    points being absolute integer (x, y) pairs in the icon's own
-    coordinate space. Everything is resolved here -- relative commands,
-    the horizontal/vertical shorthands, and the reflected control point
-    of a smooth curve -- because DrawingML has none of those forms.
+    points being absolute (x, y) pairs in the SOURCE's own coordinate
+    space. Everything is resolved here -- relative commands, the
+    horizontal/vertical shorthands, and the reflected control point of
+    a smooth curve -- because DrawingML has none of those forms.
+
+    `scale` is a plain multiplier and defaults to none. It was once
+    "the viewBox you want, relative to the icon sprite's 1024", which
+    silently multiplied the illustrations by 1.22 when they passed
+    their own 1250 -- paths oversized, circles and rects untouched,
+    every drawing scattered. Only a side-by-side render caught it.
     """
     numbers: list[float] = []
     command: Optional[str] = None
@@ -210,9 +216,8 @@ def path_to_drawingml(data: str, scale: int = VIEWBOX) -> list[tuple]:
             numbers.append(number)
     flush()
 
-    if scale != VIEWBOX:
-        factor = scale / VIEWBOX
-        ops = [(op, [(px * factor, py * factor) for px, py in pts]) for op, pts in ops]
+    if scale != 1.0:
+        ops = [(op, [(px * scale, py * scale) for px, py in pts]) for op, pts in ops]
     return ops
 
 
