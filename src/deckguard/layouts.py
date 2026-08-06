@@ -561,13 +561,14 @@ def render(slide, name: str, content: dict, archetypes_module) -> None:
         shape.shadow.inherit = False
 
     filled = dict(content)
-    for key, filename in getattr(archetypes_module, "FIGURES", {}).get(name, {}).items():
-        filled.setdefault(key, os.path.join(archetypes_module._icondir, filename))
 
     # Regions the reference describes more precisely than ROLE_STYLE can
     # express are drawn here and withheld from the engine.
     engine_spec = {k: v for k, v in spec.items() if k not in ("regions", "groups")}
-    engine_spec["regions"] = [r for r in spec.get("regions", []) if "dg" not in r]
+    engine_spec["regions"] = [
+        r for r in spec.get("regions", [])
+        if "dg" not in r and not _is_unsupplied_figure(r, filled, name, archetypes_module)
+    ]
     engine_spec["groups"] = [
         {**g, "regions": [r for r in g["regions"] if "dg" not in r]}
         for g in spec.get("groups", [])
@@ -670,6 +671,27 @@ def _field_for(spec: dict, content: dict):
         return None
     name = str(content.get("colour") or content.get("color") or DEFAULT_FIELD).lower()
     return BRAND_FIELDS.get(name, BRAND_FIELDS[DEFAULT_FIELD])
+
+
+def _is_unsupplied_figure(region: dict, content: dict, name: str, archetypes_module) -> bool:
+    """A chart or diagram slot the author gave nothing for.
+
+    The engine keeps a `FIGURES` map of sample artwork and stamps it onto
+    every slide of certain archetypes whether or not anyone asked --
+    `segment_breakdown` gets a donut reading 53% against satisfaction
+    bands of 9-10, 7-8, 5-6 and "Don't know". On a deck built from a
+    brief that is not decoration, it is INVENTED DATA wearing the
+    company's own chart styling, and it went out in a half-year business
+    review.
+
+    A slot with nothing in it is dropped instead. An empty column is
+    obvious and harmless; a fabricated statistic is neither.
+    """
+    figures = getattr(archetypes_module, "FIGURES", {}).get(name) or {}
+    key = region.get("content")
+    if key not in figures:
+        return False
+    return not content.get(key)
 
 
 def _paint_layout_background(slide, engine, spec: dict) -> None:
@@ -867,11 +889,11 @@ def _draw_scrim(slide, engine, box, opacity: int = 78, protect=()) -> None:
     # `render_archetype`, so an appended scrim greyed out the headline it
     # was meant to protect. Seating it immediately above the picture is
     # right for both paths.
-    _seat_above_picture(shape, box)
+    _seat_above_picture(shape, box, slide)
     return shape
 
 
-def _seat_above_picture(shape, box) -> None:
+def _seat_above_picture(shape, box, slide=None) -> None:
     """Move `shape` to just after the picture it is protecting.
 
     The FIRST substantial one, not the last: a cover carries the logo
@@ -879,24 +901,38 @@ def _seat_above_picture(shape, box) -> None:
     Seating the scrim above those put it over the headline and dimmed
     the very words it exists to make readable.
     """
-    P = "{http://schemas.openxmlformats.org/presentationml/2006/main}"
+    from lxml import etree
+
     tree = shape._element.getparent()
-    if tree is None:
+    if tree is None or slide is None:
         return
     left, top, width, height = box
     area = max(1.0, width * height)
-    for index, element in enumerate(tree):
-        if element.tag != f"{P}pic":
+
+    for candidate in slide.shapes:
+        if etree.QName(candidate._element).localname != "pic":
             continue
+        # Resolved geometry, not the raw `xfrm`: a picture PLACEHOLDER
+        # inherits its position from the layout and carries no `xfrm` of
+        # its own, so reading the element directly found nothing and the
+        # scrim stayed appended -- on top of the headline.
         try:
-            offset = element.spPr.xfrm
-            px, py = offset.off.x / 9525.0, offset.off.y / 9525.0
-            pw, ph = offset.ext.cx / 9525.0, offset.ext.cy / 9525.0
+            px, py = candidate.left / 9525.0, candidate.top / 9525.0
+            pw, ph = candidate.width / 9525.0, candidate.height / 9525.0
         except Exception:  # noqa: BLE001 -- a picture without geometry
             continue
         if pw * ph < area * 0.5:      # chrome, not the photograph
             continue
         if px < left + width and px + pw > left and py < top + height and py + ph > top:
+            # lxml's own index, never a dict keyed on `id()`: lxml builds
+            # a fresh Python proxy on each element access and lets the
+            # old one be collected, so those ids are neither stable nor
+            # unique. A recycled id matched the wrong element and seated
+            # the scrim one shape too late -- over the type.
+            try:
+                index = tree.index(candidate._element)
+            except ValueError:  # pragma: no cover -- not in this tree
+                continue
             tree.remove(shape._element)
             tree.insert(index + 1, shape._element)
             return
@@ -1373,3 +1409,178 @@ def coverage(archetypes_module) -> dict[str, tuple[int, int]]:
         slot[0] += bool(got)
         slot[1] += 1
     return {g: (v[0], v[1]) for g, v in sorted(tally.items())}
+
+
+# --------------------------------------------------------------------------
+# whole-deck assembly
+# --------------------------------------------------------------------------
+
+
+def protect_photo_cover(slide, engine=None) -> bool:
+    """Scrim the master's own cover, which arrives without one.
+
+    The retained Cover F is a full-bleed photograph with the title
+    reversed out of it, and the brand asks for a gradient there. The
+    master ships none -- the layout assumes a designer will choose a
+    photograph with a quiet corner. A deck built from a brief picks its
+    photograph automatically, so the assumption does not hold, and a
+    half-year review came back with a white headline lost in a sunlit
+    atrium.
+
+    Protects the type that is actually written, sized to the type, so
+    the photograph keeps the rest of the frame.
+    """
+    import importlib
+
+    if engine is None:
+        engine = importlib.import_module("kone_engine")
+
+    P = "{http://schemas.openxmlformats.org/presentationml/2006/main}"
+    picture = None
+    for shape in slide.shapes:
+        if shape._element.tag != f"{P}pic":
+            continue
+        if shape.width >= engine.X(1200) and shape.height >= engine.X(680):
+            picture = shape
+            break
+    if picture is None:
+        return False
+
+    bands = []
+    for shape in slide.shapes:
+        if shape is picture or not getattr(shape, "has_text_frame", False):
+            continue
+        text = shape.text_frame.text.strip()
+        if not text:
+            continue
+        top = shape.top / 9525.0
+        width = shape.width / 9525.0
+        height = shape.height / 9525.0
+        px = _run_px(shape) or (64.0 if height > 200 else 16.0)
+        region = {"box": [0, top, width, height], "dg": {"px": px}}
+        bands.append((top, top + _typeset_height(region, text)))
+    if not bands:
+        return False
+
+    _draw_scrim(slide, engine, [0, 0, 1280, 720], protect=bands)
+    return True
+
+
+def _run_px(shape) -> Optional[float]:
+    """The first run's size in px, when the shape states one."""
+    try:
+        for paragraph in shape.text_frame.paragraphs:
+            for run in paragraph.runs:
+                if run.font.size is not None:
+                    return run.font.size.pt / 0.75
+    except Exception:  # noqa: BLE001 -- inherited sizing is normal
+        return None
+    return None
+
+
+def _layout_for(archetype, by_partname, blank):
+    """The master layout an archetype belongs on, or blank."""
+    if archetype is None or not archetype.master:
+        return blank
+    return by_partname.get(archetype.master) or blank
+
+
+def _strip_empty_placeholders(slide) -> None:
+    """Take the layout's prompt text off a slide we are drawing over.
+
+    Cloned placeholders arrive carrying "Click to add title". The
+    archetype draws its own text boxes on top, so the prompts sit
+    underneath as live text -- invisible in most renders, and there in
+    the outline view and in search.
+    """
+    for shape in list(slide.shapes):
+        if shape.is_placeholder:
+            shape._element.getparent().remove(shape._element)
+
+
+def build_deck(spec: dict, out_path, archetypes_module=None) -> str:
+    """Assemble a deck from a spec, each archetype on its OWN layout.
+
+    The skill's own `kone_deck_creator.build_deck` puts every archetype
+    on the BLANK layout and calls `archetypes.render` directly. That
+    bypasses everything this module adds, and it showed on the first
+    deck a user built through the web tool: icons came out as the
+    engine's rasterised PNGs and its blue placeholder chips instead of
+    the real KONE pictograms as editable shapes, covers had no scrim so
+    white headlines sat on sunlit photographs, dividers came out sand,
+    photographs were stretched rather than cropped, and a slide acquired
+    a donut chart nobody asked for.
+
+    Same shape as the skill's builder -- master cover, generated body,
+    master "Thank you" -- but each body slide is added on the layout its
+    archetype actually belongs to, its prompt placeholders are stripped,
+    and it renders through `render` above.
+    """
+    import posixpath
+
+    from pptx import Presentation
+    from pptx.oxml.ns import qn
+
+    if archetypes_module is None:
+        # Through the loader, never a bare `import archetypes`: the
+        # registry is only correct once the gallery's ports and then
+        # THIS module's refinements have been merged, in that order.
+        # `gallery.install` overwrites what it finds, so installing it
+        # second silently reverted the refined agenda to a port with no
+        # bullets and the divider to one with no number and no colour.
+        from deckguard.skill_bridge import _load_archetypes
+
+        archetypes_module = _load_archetypes()
+
+    creator = _load_creator()
+    prs = Presentation(creator.MASTER)
+    slide_ids = prs.slides._sldIdLst
+    originals = list(slide_ids)
+    intro, outro = originals[creator.INTRO_IDX], originals[creator.OUTRO_IDX]
+    if spec.get("title"):
+        creator._set_title(list(prs.slides)[creator.INTRO_IDX], spec["title"])
+
+    _, meta = load_spec()
+    by_engine_key: dict[str, object] = {}
+    for archetype in meta.values():
+        by_engine_key.setdefault(archetype.engine_key, archetype)
+        for alias in archetype.aliases:
+            by_engine_key.setdefault(alias, archetype)
+
+    by_partname = {
+        posixpath.basename(layout.part.partname).replace(".xml", ""): layout
+        for layout in prs.slide_layouts
+    }
+    blank = next(l for l in prs.slide_layouts if l.name.strip().lower() == "blank")
+
+    for entry in spec.get("slides") or []:
+        name = entry.get("archetype")
+        content = {k: v for k, v in entry.items() if k != "archetype"}
+        archetype = by_engine_key.get(str(name).lower())
+        slide = prs.slides.add_slide(_layout_for(archetype, by_partname, blank))
+        _strip_empty_placeholders(slide)
+        render(slide, name, content, archetypes_module)
+
+    body = [el for el in list(slide_ids) if el not in originals]
+    keep = {id(intro), id(outro), *(id(b) for b in body)}
+    for element in originals:
+        if id(element) not in keep:
+            prs.part.drop_rel(element.get(qn("r:id")))
+            slide_ids.remove(element)
+    for element in list(slide_ids):
+        slide_ids.remove(element)
+    slide_ids.append(intro)
+    for element in body:
+        slide_ids.append(element)
+    slide_ids.append(outro)
+
+    protect_photo_cover(list(prs.slides)[0])
+
+    prs.save(str(out_path))
+    return str(out_path)
+
+
+def _load_creator():
+    from deckguard.skill_bridge import _load_creator as load
+
+    return load()

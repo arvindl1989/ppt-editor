@@ -754,16 +754,21 @@ def execute_transform_from_brief(out_path, plan: TransformPlan, approved_indices
     """Render the approved subset of a brief-only plan through the
     skill's own whole-deck builder (retained master cover + outro, same
     as the brief-only path always produced)."""
-    from deckguard.skill_bridge import _load_creator, fill_empty_photo_slots
+    from deckguard.skill_bridge import fill_empty_photo_slots
 
-    creator = _load_creator()
     approved = approved_indices if approved_indices is not None else {s.index for s in plan.slides}
     spec_slides = [dict(s.archetype) for s in plan.slides if s.index in approved and s.archetype]
     spec = {"title": plan.deck_title or "Untitled deck", "slides": spec_slides}
     # The review previews draw picture slots as PHOTO; without this the
     # built deck came back with blank sand blocks where they were.
     photos_added = fill_empty_photo_slots(spec)
-    creator.build_deck(spec, str(out_path))
+    # NOT the skill's own `build_deck`, which puts every archetype on the
+    # BLANK layout and calls `archetypes.render` directly -- that bypasses
+    # native icons, scrims, colour fields and photo cropping, and the
+    # first deck a user built here showed all four.
+    from deckguard import layouts
+
+    layouts.build_deck(spec, str(out_path))
     from deckguard.logo import repair_empty_logo_frames, restore_logo_chrome
 
     repair_empty_logo_frames(out_path)  # the master's empty logo frames

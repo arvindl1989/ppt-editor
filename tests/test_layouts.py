@@ -630,3 +630,146 @@ def test_the_engines_caption_grey_is_corrected_to_black_at_install():
         after = engine.ROLE_STYLE[role]
         assert [v for i, v in enumerate(after) if i != 2] \
             == [v for i, v in enumerate(before) if i != 2]
+
+
+def _skill_modules():
+    import sys
+
+    sys.path.insert(0, "/root/.claude/skills/kone-deck-generator")
+    try:
+        import archetypes
+        import kone_engine  # noqa: F401
+    except Exception:  # pragma: no cover
+        pytest.skip("archetype engine not available")
+    from deckguard import gallery
+
+    L.install(archetypes)
+    gallery.install(archetypes)
+    return archetypes
+
+
+def test_a_deck_built_from_a_brief_puts_each_archetype_on_its_own_layout(tmp_path):
+    """The skill's own `build_deck` puts every archetype on BLANK and
+    calls `archetypes.render` directly, which bypasses this module
+    entirely. The first deck a user built through the web tool came back
+    with the engine's rasterised PNGs and blue placeholder chips instead
+    of KONE pictograms, and no scrim on the cover."""
+    archetypes = _skill_modules()
+    out = tmp_path / "brief.pptx"
+
+    L.build_deck({"title": "Service review", "slides": [
+        {"archetype": "icon_columns_5", "title": "What we need", "items": [
+            {"icon": "clock", "text": "Confirm the forecast"},
+            {"icon": "people", "text": "Name an owner"},
+            {"icon": "wrench", "text": "Apply the pricing"},
+        ]},
+    ]}, str(out), archetypes)
+
+    from pptx import Presentation
+
+    prs = Presentation(str(out))
+    assert len(prs.slides._sldIdLst) == 3      # master cover, body, master outro
+
+    body = prs.slides[1]
+    kinds = [str(s.shape_type).split(" ")[0] for s in body.shapes]
+    # native editable pictograms, not rasters and not the engine's chips
+    assert kinds.count("FREEFORM") >= 3
+    assert "PICTURE" not in kinds
+    assert not [s for s in body.shapes if "Rounded Rectangle" in s.name]
+
+
+def test_the_retained_master_cover_gets_the_scrim_the_master_never_had(tmp_path):
+    """Cover F reverses its title out of a full-bleed photograph and
+    ships no gradient -- the layout assumes a designer picks a
+    photograph with a quiet corner. A deck built from a brief picks one
+    automatically, and a half-year review came back with a white
+    headline lost in a sunlit atrium."""
+    archetypes = _skill_modules()
+    out = tmp_path / "cover.pptx"
+    L.build_deck({"title": "Service business review — first half of the year",
+                  "slides": []}, str(out), archetypes)
+
+    from pptx import Presentation
+
+    cover = Presentation(str(out)).slides[0]
+    names = [s.name for s in cover.shapes]
+    assert "Photo protection" in names
+    # directly above the photograph and below every piece of type
+    assert names.index("Photo protection") == 1
+    title = next(i for i, s in enumerate(cover.shapes)
+                 if getattr(s, "has_text_frame", False) and "Service business" in s.text_frame.text)
+    assert names.index("Photo protection") < title
+
+
+def test_a_chart_slot_nobody_filled_is_dropped_not_invented(tmp_path):
+    """The engine keeps sample artwork and stamps it onto every slide of
+    certain archetypes whether or not anyone asked. `segment_breakdown`
+    gets a donut reading 53% against satisfaction bands -- invented data
+    in the company's own chart styling, and it went out in a business
+    review."""
+    archetypes = _skill_modules()
+    assert "chart" in archetypes.FIGURES["segment_breakdown"], "guard is about this map"
+
+    region = {"content": "chart", "role": "figure"}
+    assert L._is_unsupplied_figure(region, {}, "segment_breakdown", archetypes)
+    # supplied by the author, it is theirs and must be drawn
+    assert not L._is_unsupplied_figure(
+        region, {"chart": "/tmp/mine.png"}, "segment_breakdown", archetypes)
+    # a slot that is not a figure is never touched by this rule
+    assert not L._is_unsupplied_figure(
+        {"content": "title"}, {}, "segment_breakdown", archetypes)
+
+    out = tmp_path / "nochart.pptx"
+    L.build_deck({"title": "Review", "slides": [
+        {"archetype": "segment_breakdown", "title": "Where we stand",
+         "highlight_value": "88%", "highlight_caption": "first-time fix"},
+    ]}, str(out), archetypes)
+
+    from pptx import Presentation
+
+    body = Presentation(str(out)).slides[1]
+    assert not [s for s in body.shapes if str(s.shape_type).startswith("PICTURE")]
+    assert any("88%" in s.text_frame.text
+               for s in body.shapes if getattr(s, "has_text_frame", False))
+
+
+def test_build_deck_takes_the_registry_from_the_loader_not_a_bare_import(tmp_path):
+    """`gallery.install` OVERWRITES what it finds; `layouts.install`
+    defers to it except for a short override list. So the gallery has to
+    be installed first and this module second, and only
+    `skill_bridge._load_archetypes` guarantees that order.
+
+    Getting it backwards is silent and expensive: the refined agenda
+    reverted to a port with no bullets, and the divider to one with no
+    number and no colour field. Both looked like rendering bugs."""
+    _skill_modules()
+    from deckguard.skill_bridge import _load_archetypes
+
+    registry = _load_archetypes().ARCHETYPES
+
+    agenda = registry["agenda_a_table"]
+    assert [r.get("content") for r in agenda["regions"]] == [
+        "photo", "eyebrow", "title", "items"]
+    assert any(r.get("role") == "dg_bullets" for r in agenda["regions"])
+
+    divider = registry["divider_numbering"]
+    assert divider.get("field") is True
+    assert {r.get("content") for r in divider["regions"]} == {"number", "eyebrow", "title"}
+    # the number sits left of the title, as five real KONE slides do
+    boxes = {r["content"]: r["box"] for r in divider["regions"]}
+    assert boxes["number"][0] < boxes["title"][0]
+
+    # and a deck built without naming a module picks up exactly that
+    out = tmp_path / "ordered.pptx"
+    L.build_deck({"title": "T", "slides": [
+        {"archetype": "divider_numbering", "number": "2", "eyebrow": "Section 02",
+         "title": "What's working", "colour": "light-blue"},
+    ]}, str(out))
+
+    from pptx import Presentation
+
+    body = Presentation(str(out)).slides[1]
+    field = next(s for s in body.shapes if s.name == "Colour field")
+    assert str(field.fill.fore_color.rgb) == "D2F5FF"
+    assert any("2" == s.text_frame.text.strip()
+               for s in body.shapes if getattr(s, "has_text_frame", False))
