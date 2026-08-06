@@ -187,6 +187,14 @@ BASE_CSS = """
   }
 
   /* -- transform review cards -- */
+  .bulkbar { display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem; }
+  .bulkbar .bulk-label {
+    font-family: 'KONE Information', 'Inter', sans-serif;
+    font-size: 0.65rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.07em;
+    color: var(--ink-faint); margin-right: 0.3rem;
+  }
+  .bulkbar button { font-size: 0.8rem; padding: 0.35rem 0.7rem; }
+  .bulkbar .bulk-note { font-size: 0.8rem; color: var(--ink-muted); flex-basis: 100%; margin: 0; }
   .review-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 0.9rem; }
   @media (max-width: 620px) { .review-cols { grid-template-columns: 1fr; } }
   .prev-label {
@@ -522,6 +530,91 @@ def archetype_request_notice(requests: dict) -> str:
     )
 
 
+def _bulk_bar(mode: str) -> str:
+    """One row of buttons that sets every slide at once.
+
+    A twenty-slide deck meant twenty individual decisions before the
+    reviewer could press Transform, and in practice most of those
+    decisions are the same one. These set the whole plan in a click; the
+    per-slide controls stay exactly as they were, so overriding two of
+    twenty is still two clicks rather than eighteen.
+
+    A bulk choice can only apply where that choice is actually offered --
+    a slide no template layout fits has nothing to rebuild onto -- so
+    each button reports how many slides it set and how many it left
+    alone, rather than silently doing less than it says.
+    """
+    if mode == "brief":
+        buttons = (
+            '<button type="button" class="secondary" data-bulk-check="1">Include all</button>'
+            '<button type="button" class="secondary" data-bulk-check="0">Include none</button>'
+        )
+    else:
+        buttons = (
+            '<button type="button" class="secondary" data-bulk="archetype">Use the archetype</button>'
+            '<button type="button" class="secondary" data-bulk="rebuild">Rebuild on a layout</button>'
+            '<button type="button" class="secondary" data-bulk="keep">Keep as-is</button>'
+        )
+    return (
+        '<div class="card bulkbar">'
+        '<span class="bulk-label">All slides</span>'
+        f"{buttons}"
+        '<p class="bulk-note" id="bulk-note" role="status" aria-live="polite"></p>'
+        "</div>"
+    )
+
+
+_BULK_SCRIPT = """<script>
+(function () {
+  var note = document.getElementById('bulk-note');
+  function say(text) { if (note) { note.textContent = text; } }
+  function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
+
+  document.querySelectorAll('[data-bulk]').forEach(function (button) {
+    button.addEventListener('click', function () {
+      var want = button.getAttribute('data-bulk');
+      var slides = {};
+      document.querySelectorAll('input[name^="action_"]').forEach(function (input) {
+        (slides[input.name] = slides[input.name] || []).push(input);
+      });
+
+      var names = Object.keys(slides), on = 0;
+      names.forEach(function (name) {
+        var inputs = slides[name];
+        var radio = inputs.filter(function (i) {
+          return i.type === 'radio' && i.value === want && !i.disabled;
+        })[0];
+        if (radio) { radio.checked = true; on += 1; return; }
+        // A slide with no radios is locked to a single action -- count it
+        // as already there rather than reporting it as refused.
+        var fixed = inputs.filter(function (i) { return i.type === 'hidden'; })[0];
+        if (fixed && fixed.value === want) { on += 1; }
+      });
+
+      var short = names.length - on;
+      say(short
+        ? 'Set ' + on + ' of ' + plural(names.length, 'slide', 'slides') + '. ' +
+          plural(short, 'slide does', 'slides do') + ' not offer that and ' +
+          (short === 1 ? 'was left as it is.' : 'were left as they are.')
+        : 'Set all ' + plural(names.length, 'slide', 'slides') + '.');
+    });
+  });
+
+  document.querySelectorAll('[data-bulk-check]').forEach(function (button) {
+    button.addEventListener('click', function () {
+      var on = button.getAttribute('data-bulk-check') === '1';
+      var boxes = document.querySelectorAll('input[type="checkbox"][name^="include_"]');
+      boxes.forEach(function (box) { box.checked = on; });
+      say(on
+        ? 'Including all ' + plural(boxes.length, 'slide', 'slides') + '.'
+        : 'Excluded all ' + plural(boxes.length, 'slide', 'slides') +
+          ' — tick the ones you want, or the build will have nothing to make.');
+    });
+  });
+})();
+</script>"""
+
+
 def transform_review_page(
     deck_name: str, token: str, entries: list[dict], mode: str, ai_ran: bool,
     archetype_requests: dict | None = None,
@@ -550,12 +643,14 @@ def transform_review_page(
 </div>
 {ai_note}
 <form method="post" action="/transform/{_esc(token)}">
+{_bulk_bar("brief")}
 {cards_html}
 <div class="card" style="text-align:center;">
   <button type="submit" class="primary">Transform deck</button>
   <a class="dl secondary" href="/" style="margin-left:0.6rem;">Start over</a>
 </div>
-</form>"""
+</form>
+{_BULK_SCRIPT}"""
     else:
         cards_html = "".join(_review_card(e) for e in entries)
         ai_note = "" if ai_ran else (
@@ -572,23 +667,14 @@ def transform_review_page(
 </div>
 {ai_note}
 <form method="post" action="/transform/{_esc(token)}">
+{_bulk_bar("deck")}
 {cards_html}
 <div class="card" style="text-align:center;">
   <button type="submit" class="primary">Transform deck</button>
   <a class="dl secondary" href="/" style="margin-left:0.6rem;">Start over</a>
 </div>
-</form>"""
-
-    return f"""<div class="card"><div class="result-head"><h2 style="font-size:1.05rem;">Review plan — {_esc(deck_name)}</h2></div>
-<p class="muted" style="margin:0;">{intro}</p>
-</div>
-<form method="post" action="/transform/{_esc(token)}">
-{cards_html}
-<div class="card" style="text-align:center;">
-  <button type="submit" class="primary">Transform deck</button>
-  <a class="dl secondary" href="/" style="margin-left:0.6rem;">Start over</a>
-</div>
-</form>"""
+</form>
+{_BULK_SCRIPT}"""
 
 
 def transform_result_page(

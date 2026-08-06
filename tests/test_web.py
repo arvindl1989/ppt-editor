@@ -275,3 +275,62 @@ def test_a_keyless_server_still_offers_every_readable_slide_an_archetype(tmp_pat
     assert resp.status_code == 200
     assert 'value="archetype"' in resp.text
     assert "Archetype suggestions are switched off" in resp.text  # honest about why
+
+
+def test_the_plan_page_can_set_every_slide_at_once(tmp_path, monkeypatch):
+    """A twenty-slide deck meant twenty individual decisions before the
+    reviewer could press Transform, and most of them are the same one."""
+    client, _ = _client(tmp_path, monkeypatch)
+    deck = tmp_path / "d.pptx"
+    _write_three_slide_deck(deck)
+
+    resp = _post_plan(client, deck)
+
+    assert resp.status_code == 200
+    for action in ("archetype", "rebuild", "keep"):
+        assert f'data-bulk="{action}"' in resp.text
+    # the bar has to be INSIDE the form, or it scrolls with nothing to act on
+    form = resp.text.index('action="/transform/')
+    assert form < resp.text.index('class="card bulkbar"') < resp.text.index("</form>")
+    # and the buttons must not submit the form on the way past
+    bar = resp.text[resp.text.index('class="card bulkbar"'):]
+    assert 'type="submit"' not in bar[:bar.index("</div>")]
+    assert 'id="bulk-note"' in resp.text
+
+
+def test_the_brief_plan_page_can_include_or_exclude_every_slide_at_once(tmp_path, monkeypatch):
+    client, _ = _client(tmp_path, monkeypatch, password=None)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-not-used")
+    import deckguard.web as web
+
+    importlib.reload(web)
+    from deckguard import webtemplates as templates
+
+    entries = [{"index": i, "archetype_name": f"a{i}", "proposed_html": "<i>x</i>"}
+               for i in (1, 2, 3)]
+    html = templates.transform_review_page("b", "tok", entries, "brief", True)
+
+    assert 'data-bulk-check="1"' in html and 'data-bulk-check="0"' in html
+    assert html.count('name="include_') == 3
+    assert html.index('class="card bulkbar"') < html.index('name="include_1"')
+
+
+def test_a_slide_locked_to_one_action_is_not_reported_as_refusing_it():
+    """A slide no template layout fits carries a hidden `keep` rather
+    than radios. Counting only radios made "Keep as-is" report it as a
+    slide that does not offer keeping -- the one thing it does offer."""
+    from deckguard import webtemplates as templates
+
+    entries = [
+        {"index": 1, "default_action": "rebuild", "layout_name": "Two Content",
+         "current_html": "<i>a</i>", "proposed_html": "<i>b</i>"},
+        {"index": 2, "default_action": "keep", "reason": "dense copy",
+         "current_html": "<i>a</i>"},
+    ]
+    html = templates.transform_review_page("d", "tok", entries, "deck", True)
+
+    # slide 2 is locked: a hidden input, no radios
+    assert '<input type="hidden" name="action_2" value="keep">' in html
+    assert 'name="action_2" value="rebuild"' not in html
+    # the script counts a hidden input already carrying the wanted value
+    assert "i.type === 'hidden'" in html
