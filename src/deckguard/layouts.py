@@ -1443,10 +1443,14 @@ def install(archetypes_module, grades: Iterable[str] = ("A", "B", "C", "D")) -> 
     # Archetypes with no master layout behind them, so `build_archetypes`
     # cannot derive them. Registered like any other, and equally never
     # allowed to overwrite an incumbent.
+    samples = getattr(archetypes_module, "SAMPLES", None)
     for key, spec in _EXTRAS.items():
         if key not in registry:
             registry[key] = copy.deepcopy(spec)
             added.append(key)
+        meta = _EXTRA_META.get(key, {})
+        if isinstance(samples, dict) and meta.get("sample") and key not in samples:
+            samples[key] = copy.deepcopy(meta["sample"])
 
     for key, spec in build_archetypes(grades).items():
         arch = by_key.get(key)
@@ -1833,6 +1837,43 @@ def _is_full_bleed(box) -> bool:
 # vertically centred on content 90 tall, which puts the number at 307
 # and its label at 381.
 _MILESTONE_STAT_X = [45 + i * 246 for i in range(5)]
+
+# Routing and a worked example for the extras. `catalog.json` and
+# `SAMPLES` describe the archetypes the skill shipped with; an extra
+# registered from here is invisible to both, so a planner would see the
+# key list and no reason to ever choose it.
+_EXTRA_META: dict[str, dict] = {
+    "milestone_slide": {
+        "purpose": "A finished thing, its proof, and who did it -- one shareable "
+                   "slide built from an announcement. Not for a proposal, a "
+                   "decision request, or anything needing an argument across "
+                   "several beats; those are decks.",
+        "keywords": ["milestone", "announcement", "launch", "now live",
+                     "migration complete", "programme win", "recognition",
+                     "thank you", "transformation", "results", "one slide"],
+        "sample": {
+            "eyebrow": "Marketing Hub · Request Management",
+            "title": "From Monday.com to ServiceNow in six weeks",
+            "lede": "Delivered by KBS, Global Marketing, Frontlines and Business "
+                    "Partner — with full data continuity.",
+            "done": [{"text": "MVP pilot-tested and now live"},
+                     {"text": "100% transition completed"}],
+            "stats": [{"value": "6", "label": "Weeks end to end"},
+                      {"value": "100+", "label": "Users migrated"},
+                      {"value": "12", "label": "Frontlines"},
+                      {"value": "3+3", "label": "Regions + global teams"},
+                      {"value": "0", "label": "Business disruption"}],
+            "scope_label": "The frontlines",
+            "scope": "KSEA · KMTA · KANZ · KEI · EEM · DACH · GIN · Nordics",
+            "next_label": "What's next",
+            "next": ["Hypercare and small fixes ongoing",
+                     "Power BI reporting integration underway, targeted for Q2"],
+            "credits_label": "Thank you",
+            "credits": "Arvind, Suresh Kumar, Rupesh and the Hub specialists",
+            "classification": "KONE Internal",
+        },
+    },
+}
 
 # One slide, from one announcement email. It exists because the master
 # has no recognition slide: a finished thing, its proof, and who did it.

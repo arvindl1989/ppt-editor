@@ -257,7 +257,18 @@ def _kone_archetype_guide() -> str:
     data so it can never drift out of sync with whatever archetypes the
     skill actually ships."""
     archetypes = _load_archetypes()
-    catalog = _kone_catalog()
+    catalog = dict(_kone_catalog())
+    # Extras carry their own routing: they are not in `catalog.json`,
+    # and an archetype the planner has no reason to choose is one that
+    # never gets chosen.
+    from deckguard.layouts import _EXTRA_META
+
+    for key, meta in _EXTRA_META.items():
+        if key in archetypes.ARCHETYPES:
+            entry = dict(catalog.get(key) or {})
+            entry.setdefault("purpose", meta.get("purpose", ""))
+            entry.setdefault("keywords", meta.get("keywords", []))
+            catalog[key] = entry
     parts = []
     for name in sorted(archetypes.ARCHETYPES.keys()):
         info = catalog.get(name, {})
