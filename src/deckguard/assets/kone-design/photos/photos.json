@@ -1,0 +1,125 @@
+{
+  "_comment": "Descriptions written by looking at each image, not inferred from its filename. `people` is a count (0 means no visible people), `tags` drive matching, `note` is what the picture is actually of. Filenames are the key.",
+  "photos": {
+    "city-life-busy-road.jpeg": {
+      "note": "Crowded pedestrian crossing in a dense city, seen head-on, many commuters walking toward camera",
+      "people": 12, "setting": "street", "tags": ["city", "crowd", "commuters", "urban", "people-flow", "daytime"]
+    },
+    "city-life-family.jpeg": {
+      "note": "Family walking a tree-lined path in warm low sun, child on a bicycle",
+      "people": 3, "setting": "outdoor", "tags": ["family", "green", "residential", "warm", "leisure", "child"]
+    },
+    "city-life-skyscrapper.jpeg": {
+      "note": "Close crop of a lit office tower facade at dusk, no people, strong grid of windows",
+      "people": 0, "setting": "architecture", "tags": ["building", "office", "facade", "dusk", "abstract", "no-people"]
+    },
+    "city-life-stadium.jpeg": {
+      "note": "Stadium crowd with raised hands cheering, seen from behind",
+      "people": 20, "setting": "venue", "tags": ["crowd", "stadium", "event", "energy", "public-space"]
+    },
+    "colleagues-talking-2.jpeg": {
+      "note": "Two women walking through a warm orange-toned lift lobby, mid-conversation",
+      "people": 2, "setting": "interior", "tags": ["colleagues", "lobby", "conversation", "warm", "office"]
+    },
+    "colleagues-walking.jpeg": {
+      "note": "Two senior professionals shaking hands walking through a glass business district",
+      "people": 2, "setting": "street", "tags": ["colleagues", "business", "handshake", "senior", "office", "partnership"]
+    },
+    "colleagues-working-2.jpeg": {
+      "note": "Two colleagues smiling with folders in a bright modern office atrium",
+      "people": 2, "setting": "office", "tags": ["colleagues", "office", "bright", "positive", "teamwork"]
+    },
+    "colleagues-working.jpeg": {
+      "note": "Two women collaborating at a monitor in a dark office, screen-lit",
+      "people": 2, "setting": "office", "tags": ["colleagues", "office", "screen", "dark", "focus", "teamwork"]
+    },
+    "family-getting-in-elevator.jpeg": {
+      "note": "Multigenerational family greeting by a lift with a floor directory visible",
+      "people": 4, "setting": "lobby", "tags": ["family", "elevator", "residential", "multigenerational", "arrival", "directory"]
+    },
+    "family-with-kone-employee.jpeg": {
+      "note": "KONE technician crouching to greet a family beside a lift",
+      "people": 4, "setting": "lobby", "tags": ["technician", "kone-branded", "family", "elevator", "service", "customer"]
+    },
+    "father-and-child.jpeg": {
+      "note": "Wheelchair user and a companion in a modern lobby beside a lift",
+      "people": 2, "setting": "lobby", "tags": ["accessibility", "wheelchair", "elevator", "lobby", "inclusion"]
+    },
+    "friends-near-escalator.jpeg": {
+      "note": "Two people walking away from a bank of escalators in a transit-like interior",
+      "people": 2, "setting": "interior", "tags": ["escalator", "transit", "casual", "people-flow"]
+    },
+    "girl-in-elevator.jpeg": {
+      "note": "Young woman with headphones leaning against the wall of a pink-lit lift car",
+      "people": 1, "setting": "elevator", "tags": ["elevator", "young", "contemporary", "colour", "solo", "residential"]
+    },
+    "girl-viewing-skyline.jpeg": {
+      "note": "Woman in a hat at a harbour railing looking at a dusk skyline, back to camera",
+      "people": 1, "setting": "outdoor", "tags": ["skyline", "dusk", "aspiration", "harbour", "solo", "back-to-camera"]
+    },
+    "kone-employees-talking.jpeg": {
+      "note": "Group in a lift lobby talking, one wearing a KONE cap",
+      "people": 4, "setting": "lobby", "tags": ["kone-branded", "colleagues", "lobby", "elevator", "conversation"]
+    },
+    "kone-worker-using-phone.jpeg": {
+      "note": "KONE technician in branded uniform and cap using a phone beside a service van",
+      "people": 2, "setting": "field", "tags": ["technician", "kone-branded", "van", "mobile", "service", "field-work"]
+    },
+    "kone-worker-working.jpeg": {
+      "note": "Technician in hard hat and safety glasses working on machinery in a dark machine room",
+      "people": 1, "setting": "machine-room", "tags": ["technician", "maintenance", "machinery", "safety", "dark", "field-work"]
+    },
+    "kone-workers-talking.jpeg": {
+      "note": "Two KONE technicians conferring beside a service van, one holding a phone",
+      "people": 2, "setting": "field", "tags": ["technician", "kone-branded", "van", "service", "teamwork", "field-work"]
+    },
+    "lady-in-escalator.jpeg": {
+      "note": "Businesswoman on a phone call riding an escalator in a bright interior",
+      "people": 1, "setting": "escalator", "tags": ["escalator", "business", "phone", "solo", "people-flow"]
+    },
+    "lady-running-in-city.jpeg": {
+      "note": "Woman laughing mid-stride in a green residential development",
+      "people": 1, "setting": "outdoor", "tags": ["residential", "green", "movement", "solo", "positive"]
+    },
+    "lady-sitting-in-city.jpeg": {
+      "note": "Woman sitting outside a modern glass building with a drink",
+      "people": 1, "setting": "outdoor", "tags": ["office", "break", "solo", "modern", "daytime"]
+    },
+    "lady-talking-on-phone.jpeg": {
+      "note": "Woman on a phone call outside a city building at dusk",
+      "people": 1, "setting": "street", "tags": ["business", "phone", "dusk", "solo", "urban"]
+    },
+    "lady-using-phone.jpeg": {
+      "note": "Woman with a phone standing in an open city plaza in daylight",
+      "people": 1, "setting": "street", "tags": ["business", "phone", "plaza", "solo", "daytime", "urban"]
+    },
+    "man-in-elevator.jpeg": {
+      "note": "Businessman with a bag checking his phone inside a lift car",
+      "people": 1, "setting": "elevator", "tags": ["elevator", "business", "phone", "solo", "commute"]
+    },
+    "man-with-cycle-waiting-for-elevator.jpeg": {
+      "note": "Man with a bicycle waiting at an open lift, residential interior",
+      "people": 1, "setting": "lobby", "tags": ["elevator", "bicycle", "residential", "solo", "accessibility", "sustainability"]
+    },
+    "mother-kid-residential-area.jpeg": {
+      "note": "Two people walking a path through a green low-rise residential development",
+      "people": 2, "setting": "outdoor", "tags": ["residential", "green", "family", "walking", "sustainability"]
+    },
+    "people-in-meeting.jpeg": {
+      "note": "Close warm crop of three people around a laptop in a meeting",
+      "people": 3, "setting": "office", "tags": ["meeting", "office", "laptop", "warm", "teamwork", "discussion"]
+    },
+    "skyline-city-2.jpeg": {
+      "note": "City skyline over a green tree canopy in daylight, no people",
+      "people": 0, "setting": "skyline", "tags": ["skyline", "city", "green", "daytime", "no-people"]
+    },
+    "skyline-city-3.jpeg": {
+      "note": "Aerial London skyline at dusk with the Gherkin prominent, no people",
+      "people": 0, "setting": "skyline", "tags": ["skyline", "aerial", "london", "dusk", "no-people", "dense"]
+    },
+    "skyline-city.jpeg": {
+      "note": "Aerial view of a river city with autumn parkland in the foreground, no people",
+      "people": 0, "setting": "skyline", "tags": ["skyline", "aerial", "green", "river", "autumn", "no-people"]
+    }
+  }
+}

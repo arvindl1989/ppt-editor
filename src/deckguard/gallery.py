@@ -419,11 +419,33 @@ def _asset_path(name: str) -> Optional[str]:
 
 
 def _photo_for(content: dict) -> Optional[str]:
+    """The photo for a slide: the caller's, one matched to its words, or
+    -- failing both -- any photo at all.
+
+    The middle step is new. Selection used to hash the title and index
+    into a sorted list, which is stable but arbitrary: a slide about
+    maintenance got an escalator because it happened to sort third. Now
+    the library carries a written description of each picture, so the
+    slide's own words can choose one.
+    """
     from deckguard.skill_bridge import _photo_library
 
     supplied = content.get("photo")
     if supplied and Path(str(supplied)).is_file():
         return str(supplied)
+
+    words = " ".join(
+        str(content.get(key) or "") for key in ("title", "eyebrow", "context", "subtitle")
+    )
+    try:
+        from deckguard.photos import choose
+
+        chosen = choose(words, exclude=content.get("_photos_used") or ())
+        if chosen is not None:
+            return str(chosen.path)
+    except Exception:  # noqa: BLE001 -- selection is never load-bearing
+        pass
+
     photos = _photo_library()
     if not photos:
         return None
