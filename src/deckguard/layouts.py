@@ -400,17 +400,47 @@ def _bind_roles(layout: Layout) -> dict:
     return spec
 
 
-def pictograms() -> list[str]:
-    """The real KONE pictograms, as raster paths.
+# Sensible generic pictograms for an archetype whose caller named none.
+# Checked against the sprite at use time, so a renamed icon degrades to
+# the ones that do exist rather than drawing nothing.
+_DEFAULT_ICONS = ("cloud", "people", "clock", "wrench", "calendar", "elevator")
 
-    Only three exist (`arrow`, `cloud`, `connect`) against archetypes
-    that want up to five, so callers cycle them -- which is what the
-    HTML reference does too. They are rasterised beside their SVGs
-    because a .pptx cannot take an SVG directly; `logo.attach_svg` puts
-    the vector back on afterwards.
+
+def pictograms() -> list[str]:
+    """The rasterised marks, kept only as a fallback.
+
+    Superseded by `deckguard.icons`, which draws the real KONE
+    pictograms as native editable shapes. This survives for the case
+    where the icon sprite is not installed.
     """
     base = spec_dir().parent.parent / "icons"
     return [str(p) for p in sorted(base.glob("*.png"))]
+
+
+def _icon_names_for(spec: dict, content: dict, slots: int) -> list[str]:
+    """Which pictogram goes in each icon slot.
+
+    A caller names one per item (`{"icon": "elevator", ...}`) and gets
+    it; anything unnamed falls back to the generic rotation. With 609
+    icons in the sprite an author can finally be specific, but nothing
+    breaks if they are not.
+    """
+    from deckguard import icons as icon_mod
+
+    available = icon_mod.load_icons()
+    named: list[str] = []
+    for group in spec.get("groups", []):
+        if not any(r.get("role") == "icon" for r in group["regions"]):
+            continue
+        for item in (content.get(group["content"]) or [])[:len(group["origins"])]:
+            named.append((item or {}).get("icon") if isinstance(item, dict) else None)
+
+    fallback = [n for n in _DEFAULT_ICONS if n in available] or sorted(available)[:1]
+    chosen: list[str] = []
+    for index in range(slots):
+        want = named[index] if index < len(named) else None
+        chosen.append(want if want in available else fallback[index % len(fallback)])
+    return chosen
 
 
 def _icon_slots(spec: dict) -> int:
@@ -478,14 +508,44 @@ def render(slide, name: str, content: dict, archetypes_module) -> None:
         for g in spec.get("groups", [])
     ]
 
-    marks = pictograms()
+    # Icons are drawn here as native shapes, so they are withheld from
+    # the engine along with the `dg` regions -- otherwise it draws its
+    # blue placeholder chip in the same box.
+    from deckguard import icons as icon_mod
+
     slots = _icon_slots(spec)
-    icons = [marks[i % len(marks)] for i in range(slots)] if marks and slots else None
+    native = bool(icon_mod.load_icons()) and slots
+    if native:
+        engine_spec["regions"] = [r for r in engine_spec["regions"] if r.get("role") != "icon"]
+        engine_spec["groups"] = [
+            {**g, "regions": [r for r in g["regions"] if r.get("role") != "icon"]}
+            for g in engine_spec["groups"]
+        ]
+        icons = None
+    else:
+        marks = pictograms()
+        icons = [marks[i % len(marks)] for i in range(slots)] if marks and slots else None
 
     engine.render_archetype(
         slide, engine_spec, filled, icons=icons,
         bg=getattr(archetypes_module, "BG", {}).get(name),
     )
+
+    if native:
+        chosen = _icon_names_for(spec, filled, slots)
+        index = 0
+        for region in spec.get("regions", []):
+            if region.get("role") == "icon":
+                icon_mod.add_icon(slide, chosen[index], region["box"])
+                index += 1
+        for group in spec.get("groups", []):
+            for (ox, oy) in group["origins"]:
+                for region in group["regions"]:
+                    if region.get("role") != "icon":
+                        continue
+                    rx, ry, rw, rh = region["box"]
+                    icon_mod.add_icon(slide, chosen[index], [ox + rx, oy + ry, rw, rh])
+                    index += 1
 
     # AFTER the engine, never before. `render_archetype` starts by
     # painting a full-slide background rectangle, so anything drawn
