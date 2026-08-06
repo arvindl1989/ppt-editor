@@ -194,3 +194,59 @@ def test_no_sprite_means_no_icons_rather_than_a_crash(monkeypatch):
         assert icons.icon_names() == []
     finally:
         icons.load_icons.cache_clear()
+
+
+@needs_sprite
+def test_most_of_the_set_escapes_its_own_viewbox():
+    """Not a defect to fix in the assets -- a fact to design around.
+    452 of the 609 overflow by 5-15%, which is ordinary glyph overshoot;
+    six overflow by more than half and are genuinely broken."""
+    overflows = [icons.viewbox_overflow(n) for n in icons.icon_names()]
+    assert sum(1 for o in overflows if o > 0) > 400
+    badly = [n for n in icons.icon_names() if icons.viewbox_overflow(n) > 0.5]
+    assert "onbattery" in badly and len(badly) < 20
+
+
+def test_clamping_holds_geometry_inside_the_viewbox():
+    ops = [("moveTo", [(-40.0, 500.0)]), ("lnTo", [(2302.0, 1500.0)])]
+    assert icons.clamp_to_viewbox(ops) == [
+        ("moveTo", [(0.0, 500.0)]), ("lnTo", [(float(icons.VIEWBOX), float(icons.VIEWBOX))])
+    ]
+
+
+def test_clamping_leaves_a_well_behaved_icon_untouched():
+    ops = [("moveTo", [(10.0, 20.0)]), ("cubicBezTo", [(1.0, 2.0), (3.0, 4.0), (5.0, 6.0)])]
+    assert icons.clamp_to_viewbox(ops) == ops
+
+
+@needs_sprite
+def test_a_badly_overflowing_icon_stays_inside_the_box_it_was_given():
+    """`onbattery` reaches y=2302 against a 1024 viewBox. A browser
+    clips that away; DrawingML draws the lot, and it spilled down four
+    rows of an icon grid before this."""
+    from pptx import Presentation
+    from pptx.util import Emu
+
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = Emu(12192000), Emu(6858000)
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    shape = icons.add_icon(slide, "onbattery", (100, 100, 96, 96))
+
+    path = shape._element.spPr.find(f"{{{icons.A_NS}}}custGeom").find(
+        f".//{{{icons.A_NS}}}path")
+    coords = [int(p.get("x")) for p in path.iter(f"{{{icons.A_NS}}}pt")]
+    coords += [int(p.get("y")) for p in path.iter(f"{{{icons.A_NS}}}pt")]
+    assert min(coords) >= 0 and max(coords) <= icons.VIEWBOX
+
+
+@needs_sprite
+def test_clipping_can_be_turned_off():
+    from pptx import Presentation
+    from pptx.util import Emu
+
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    shape = icons.add_icon(slide, "onbattery", (0, 0, 96, 96), clip=False)
+    path = shape._element.spPr.find(f"{{{icons.A_NS}}}custGeom").find(
+        f".//{{{icons.A_NS}}}path")
+    assert max(int(p.get("y")) for p in path.iter(f"{{{icons.A_NS}}}pt")) > icons.VIEWBOX

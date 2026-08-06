@@ -227,3 +227,37 @@ def test_stroke_width_scales_with_the_drawing():
         return max((s.line.width or 0) for s in group.shapes)
 
     assert widest(600) > widest(150)
+
+
+@needs_art
+def test_common_bounds_gives_a_row_one_shared_scale():
+    """Neither default suits a row: trimming each drawing to its own box
+    makes a runner tower over a walking figure, and the full viewBox
+    holds them consistent but tiny."""
+    from pptx import Presentation
+    from pptx.util import Emu
+
+    names = ["walkway-female", "wheelchair-female", "people-runner-man"]
+    shared = I.common_bounds(names)
+    assert shared is not None
+
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = Emu(12192000), Emu(6858000)
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+
+    def spread(**kw):
+        sizes = [I.add_illustration(slide, n, (0, 0, 200, 200), **kw).height for n in names]
+        return max(sizes) / min(sizes)
+
+    # a shared box makes the set consistent; trimming each does not
+    assert spread(bounds=shared) < spread(trim=True)
+
+
+@needs_art
+def test_common_bounds_covers_every_drawing_in_the_set():
+    names = ["cloud", "transport-bus"]
+    shared = I.common_bounds(names)
+    for name in names:
+        own = I.artwork_bounds(name)
+        assert shared[0] <= own[0] and shared[1] <= own[1]
+        assert shared[2] >= own[2] and shared[3] >= own[3]

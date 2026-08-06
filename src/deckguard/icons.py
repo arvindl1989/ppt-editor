@@ -221,6 +221,50 @@ def path_to_drawingml(data: str, scale: float = 1.0) -> list[tuple]:
     return ops
 
 
+def viewbox_overflow(name: str) -> float:
+    """How far an icon's geometry escapes its own viewBox, as a
+    fraction of it. 0 means it fits.
+
+    Worth knowing because most of the set escapes a little: 452 of the
+    609 overflow by 5-15%, which is ordinary glyph overshoot and
+    invisible. Six overflow by more than half -- `onbattery`,
+    `eco-energy`, `battery-warning`, `car`, `piechart-4`, `target` --
+    and those are broken source assets, drawn well outside the frame
+    that is supposed to contain them.
+    """
+    data = load_icons().get(name)
+    if not data:
+        return 0.0
+    ops = path_to_drawingml(data)
+    xs = [x for _, points in ops for x, _ in points]
+    ys = [y for _, points in ops for _, y in points]
+    if not xs:
+        return 0.0
+    return max(0.0, max(xs) - VIEWBOX, max(ys) - VIEWBOX, -min(xs), -min(ys)) / VIEWBOX
+
+
+def clamp_to_viewbox(ops: list[tuple]) -> list[tuple]:
+    """Hold every coordinate inside the viewBox.
+
+    A browser CLIPS an SVG to its viewBox, so whatever spills is simply
+    not drawn -- `onbattery` renders as a battery with a flat bottom
+    edge, and the tail below it is invisible. DrawingML has no
+    equivalent: a `custGeom` draws its whole path regardless of the
+    shape's bounds, so that tail escaped down four rows of a grid.
+
+    True path clipping against a rectangle means splitting beziers,
+    which is a lot of machinery for six broken assets. Clamping the
+    points to the boundary produces the same flat edge for shapes that
+    cross it roughly perpendicular -- which is what these do -- and is a
+    no-op for the 46 icons that already fit. Verified against the
+    browser's own rendering rather than assumed.
+    """
+    def hold(value):
+        return min(max(value, 0.0), float(VIEWBOX))
+
+    return [(op, [(hold(x), hold(y)) for x, y in points]) for op, points in ops]
+
+
 def custgeom_xml(ops: list[tuple], scale: int = VIEWBOX) -> etree._Element:
     """DrawingML `<a:custGeom>` for a converted path.
 
@@ -258,13 +302,17 @@ def custgeom_xml(ops: list[tuple], scale: int = VIEWBOX) -> etree._Element:
 KONE_BLUE = "1450F5"
 
 
-def add_icon(slide, name: str, box, colour: str = KONE_BLUE):
+def add_icon(slide, name: str, box, colour: str = KONE_BLUE, clip: bool = True):
     """Draw a KONE pictogram as an editable shape. Returns it, or None
     if the icon does not exist.
 
     `box` is (x, y, w, h) in px on the 1280x720 grid, matching every
     other geometry in this project. The icon keeps its aspect ratio --
     they are square, so it is centred in a non-square box.
+
+    `clip` holds the geometry inside the viewBox, as a browser does.
+    Without it the six badly overflowing icons draw far outside the box
+    they were given -- `onbattery` spilled down four rows of a grid.
     """
     from pptx.dml.color import RGBColor
     from pptx.enum.shapes import MSO_SHAPE
@@ -303,7 +351,8 @@ def add_icon(slide, name: str, box, colour: str = KONE_BLUE):
     # swap the preset rectangle for the icon's own outline
     spPr = shape._element.spPr
     prst = spPr.find(f"{{{A_NS}}}prstGeom")
-    geom = custgeom_xml(path_to_drawingml(data))
+    ops = path_to_drawingml(data)
+    geom = custgeom_xml(clamp_to_viewbox(ops) if clip else ops)
     if prst is not None:
         spPr.replace(prst, geom)
     else:  # pragma: no cover -- every autoshape has one

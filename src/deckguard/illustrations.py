@@ -275,7 +275,32 @@ def _bounds(ops, pad: float):
     return (min(xs) - pad, min(ys) - pad, max(xs) + pad, max(ys) + pad)
 
 
-def add_illustration(slide, name: str, box, group: bool = True, trim: bool = True):
+def artwork_bounds(name: str):
+    """Where the drawing actually sits inside the 1250 canvas."""
+    pieces = load_illustration(name)
+    return _bounds([op for piece in pieces for op in piece.ops], pad=0) if pieces else None
+
+
+def common_bounds(names) -> Optional[tuple]:
+    """One box covering the artwork of several illustrations.
+
+    Pass it to `add_illustration` and a row of drawings shares a single
+    scale. Neither default does this: trimming each to its own box makes
+    a runner tower over a walking figure, because one drawing happens to
+    fill more of the canvas than the other; keeping the full viewBox
+    holds them consistent but renders everything tiny, since the art
+    uses a fraction of the 1250 square. The union of the set is both
+    consistent and close-cropped.
+    """
+    boxes = [b for b in (artwork_bounds(name) for name in names) if b]
+    if not boxes:
+        return None
+    return (min(b[0] for b in boxes), min(b[1] for b in boxes),
+            max(b[2] for b in boxes), max(b[3] for b in boxes))
+
+
+def add_illustration(slide, name: str, box, group: bool = True, trim: bool = True,
+                     bounds: Optional[tuple] = None):
     """Draw a KONE illustration as editable shapes. Returns the group
     (or the list of shapes when `group` is False), or None if unknown.
 
@@ -289,8 +314,12 @@ def add_illustration(slide, name: str, box, group: bool = True, trim: bool = Tru
     uses a fraction of it -- the cloud is 146x64 units in the middle of
     it -- so honouring the viewBox puts a postage stamp in the middle of
     whatever box you asked for. Pass `trim=False` to keep the original
-    framing, which is what you want if several illustrations have to
-    line up with each other.
+    framing.
+
+    For a ROW of illustrations, neither default is right: trimming each
+    to its own box makes a runner tower over a walking figure, and the
+    full viewBox holds them consistent but tiny. Pass `bounds` from
+    `common_bounds(names)` and the whole set shares one scale.
     """
     from pptx.dml.color import RGBColor
     from pptx.enum.shapes import MSO_SHAPE
@@ -301,7 +330,9 @@ def add_illustration(slide, name: str, box, group: bool = True, trim: bool = Tru
         return None
 
     x, y, w, h = box
-    art = _bounds([op for piece in pieces for op in piece.ops], pad=0) if trim else None
+    art = bounds or (
+        _bounds([op for piece in pieces for op in piece.ops], pad=0) if trim else None
+    )
     if art:
         art_x, art_y, art_right, art_bottom = art
         art_w, art_h = max(art_right - art_x, 1e-6), max(art_bottom - art_y, 1e-6)
