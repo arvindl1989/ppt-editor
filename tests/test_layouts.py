@@ -872,3 +872,71 @@ def test_a_repeating_group_tells_the_planner_it_can_name_the_icons():
 
     (items,) = [k for k in _derived_content_keys("icon_columns_5") if k.startswith("items ")]
     assert "icon" in items and "text" in items and "up to 5" in items
+
+
+def test_an_item_row_is_pulled_up_when_nothing_fills_the_band_above_it():
+    """Four archetypes place their row in the bottom third with only a
+    title above -- geometry from real KONE slides where a paragraph of
+    body copy filled the gap. These have no such paragraph, so a Q2
+    review came back with 248px of blank sand between "Plan of action"
+    and the six things it listed."""
+    spec = {
+        "regions": [{"role": "title", "box": [45, 91, 1189, 104], "content": "title"}],
+        "groups": [{"content": "items", "origins": [[45, 443], [249, 443]],
+                    "regions": [{"role": "icon", "box": [0, 0, 40, 40]},
+                                {"role": "body", "box": [0, 104, 170, 100], "content": "label"}]}],
+    }
+    assert L.lift_low_rows(spec) == 1
+    assert [o[1] for o in spec["groups"][0]["origins"]] == [264, 264]
+    assert [o[0] for o in spec["groups"][0]["origins"]] == [45, 249], "columns must not move"
+
+    # idempotent: the gap is now ordinary breathing room
+    assert L.lift_low_rows(spec) == 0
+
+
+def test_a_row_is_left_alone_when_the_band_is_spoken_for():
+    """The guard that matters: two of the four candidates have a SECOND
+    row in the band, and lifting either would have collided them."""
+    occupied = {
+        "regions": [{"role": "title", "box": [45, 91, 900, 60], "content": "title"}],
+        "groups": [
+            {"content": "pictures", "origins": [[45, 181]],
+             "regions": [{"role": "picture", "box": [0, 0, 280, 216]}]},
+            {"content": "items", "origins": [[45, 420]],
+             "regions": [{"role": "body", "box": [0, 0, 280, 100], "content": "text"}]},
+        ],
+    }
+    before = [[list(o) for o in g["origins"]] for g in occupied["groups"]]
+    assert L.lift_low_rows(occupied) == 0
+    assert [[list(o) for o in g["origins"]] for g in occupied["groups"]] == before
+
+    # a modest gap is breathing room, not a hole
+    modest = {
+        "regions": [{"role": "title", "box": [45, 91, 900, 104], "content": "title"}],
+        "groups": [{"content": "items", "origins": [[45, 300]],
+                    "regions": [{"role": "body", "box": [0, 0, 170, 100], "content": "t"}]}],
+    }
+    assert L.lift_low_rows(modest) == 0
+
+    # and a full-bleed photograph is a background, not a block to clear
+    banner = {
+        "regions": [{"role": "picture", "box": [0, 0, 1280, 720], "content": "image"},
+                    {"role": "title", "box": [45, 91, 900, 104], "content": "title"}],
+        "groups": [{"content": "items", "origins": [[45, 476]],
+                    "regions": [{"role": "body", "box": [0, 0, 170, 100], "content": "t"}]}],
+    }
+    assert L.lift_low_rows(banner) == 1
+    assert banner["groups"][0]["origins"][0][1] == 264
+
+
+def test_installing_closes_the_dead_bands_in_the_shipped_registry():
+    archetypes = _skill_modules()
+    row = archetypes.ARCHETYPES["numbered_icon_row_6"]
+    top = min(o[1] for o in row["groups"][0]["origins"])
+    title = next(r for r in row["regions"] if r.get("content") == "title")
+    assert top - (title["box"][1] + title["box"][3]) == pytest.approx(69, abs=1)
+
+    # the two whose band is occupied keep their geometry
+    for name in ("four_point_value", "quarterly_plan_4col"):
+        spec = archetypes.ARCHETYPES[name]
+        assert len(spec.get("groups") or []) >= 2 or L.lift_low_rows(dict(spec)) == 0

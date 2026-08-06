@@ -1374,6 +1374,9 @@ def install(archetypes_module, grades: Iterable[str] = ("A", "B", "C", "D")) -> 
     _, meta = load_spec()
     by_key = {a.engine_key: a for a in meta.values()}
     _correct_grey_ink(archetypes_module)
+    for existing in registry.values():
+        if isinstance(existing, dict):
+            lift_low_rows(existing)
 
     added: list[str] = []
     for key, spec in build_archetypes(grades).items():
@@ -1671,3 +1674,82 @@ def unread_keys(spec: dict, content: dict) -> list[str]:
         key for key, value in (content or {}).items()
         if key not in known and key not in ignore and value not in (None, "", [], {})
     )
+
+
+# --------------------------------------------------------------------------
+# closing dead bands
+# --------------------------------------------------------------------------
+
+# How much empty vertical space between a title and the row beneath it
+# counts as a hole rather than as breathing room, and the gap left after
+# closing one. 69px is the master's own step: a 104px title starting at
+# 91 ends at 195, and the grid's content start is 264.
+_DEAD_BAND = 200.0
+_TITLE_GAP = 69.0
+
+
+def lift_low_rows(spec: dict) -> int:
+    """Pull an item row up under its title when nothing fills the middle.
+
+    Four archetypes place their row of items in the bottom third with
+    only a title above -- geometry taken from real KONE slides where a
+    paragraph of body copy filled the band between. These archetypes have
+    no such paragraph, so a Q2 review came back with 248px of blank sand
+    between "Plan of action" and the six things it listed.
+
+    Only fires where the band is demonstrably empty: no region and no
+    other group occupies it. Rows only ever move UP, so nothing below can
+    be collided into. Returns how many groups moved.
+    """
+    groups = spec.get("groups") or []
+    if not groups:
+        return 0
+
+    solid = [
+        r for r in spec.get("regions", [])
+        if not _is_full_bleed(r["box"])
+    ]
+    moved = 0
+    for group in sorted(groups, key=lambda g: min((o[1] for o in g["origins"]), default=0)):
+        origins = group.get("origins") or []
+        if not origins:
+            continue
+        top = min(o[1] for o in origins)
+        bottoms = [r["box"][1] + r["box"][3] for r in solid if r["box"][1] + r["box"][3] <= top]
+        bottoms += [
+            max(o[1] for o in other["origins"]) + _group_height(other)
+            for other in groups
+            if other is not group and other.get("origins")
+            and max(o[1] for o in other["origins"]) + _group_height(other) <= top
+        ]
+        if not bottoms:
+            continue
+        floor = max(bottoms)
+
+        # anything straddling the band means the space is spoken for
+        straddles = any(
+            r["box"][1] < top and r["box"][1] + r["box"][3] > floor for r in solid
+        ) or any(
+            min(o[1] for o in other["origins"]) < top
+            and max(o[1] for o in other["origins"]) + _group_height(other) > floor
+            for other in groups if other is not group and other.get("origins")
+        )
+        if straddles:
+            continue
+
+        delta = (top - floor) - _TITLE_GAP
+        if top - floor <= _DEAD_BAND or delta <= 0:
+            continue
+        group["origins"] = [[x, y - delta] for x, y in origins]
+        moved += 1
+    return moved
+
+
+def _group_height(group: dict) -> float:
+    return max((r["box"][1] + r["box"][3] for r in group.get("regions", [])), default=0.0)
+
+
+def _is_full_bleed(box) -> bool:
+    """A background photograph is not a block the row has to clear."""
+    _, _, w, h = box
+    return w >= 1200 and h >= 680
