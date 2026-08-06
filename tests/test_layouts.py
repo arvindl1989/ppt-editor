@@ -312,8 +312,14 @@ def test_the_scrim_is_a_gradient_that_spares_the_middle_of_the_picture():
     A = "http://schemas.openxmlformats.org/drawingml/2006/main"
     grad = shape._element.spPr.find(f"{{{A}}}gradFill")
     assert grad is not None, "a flat fill would grey out the photograph"
-    alphas = [int(a.get("val")) for a in grad.iter(f"{{{A}}}alpha")]
-    assert alphas[0] > 0 and alphas[1] == 0 and alphas[2] > 0
+    stops = [(int(gs.get("pos")), int(a.get("val")))
+             for gs in grad.iter(f"{{{A}}}gs")
+             for a in gs.iter(f"{{{A}}}alpha")]
+    assert stops == sorted(stops), "gradient stops must run in order"
+    by_pos = dict(stops)
+    assert by_pos[0] > 0 and by_pos[100000] > 0, "the edges carry the type"
+    middle = [alpha for pos, alpha in stops if 30000 <= pos <= 70000]
+    assert middle and max(middle) == 0, "the subject of the photograph is spared"
 
 
 def test_icons_are_counted_against_content_not_geometry():
@@ -378,3 +384,249 @@ def test_the_divider_puts_the_number_left_and_the_title_right():
     assert regions["number"][0] == 45
     assert regions["title"][0] == 453
     assert regions["number"][0] < regions["title"][0]
+
+
+def test_a_named_colour_floods_the_divider_and_carries_its_own_ink():
+    """Every divider in sand made a deck monotonous, and the brand puts
+    the secondary palette on exactly this slide. The ink follows the
+    brand's own rule -- white out of blue, black out of a secondary."""
+    assert L._field_for({"field": True}, {"colour": "blue"}) == ("1450F5", "FFFFFF")
+    assert L._field_for({"field": True}, {"colour": "light-blue"}) == ("D2F5FF", "141414")
+    assert L._field_for({"field": True}, {"color": "pink"}) == ("FFCDD7", "141414")
+    # unnamed falls back to KONE Blue rather than to nothing
+    assert L._field_for({"field": True}, {}) == L.BRAND_FIELDS[L.DEFAULT_FIELD]
+    # an archetype that does not declare a field never takes one
+    assert L._field_for({}, {"colour": "pink"}) is None
+    for fill, ink in L.BRAND_FIELDS.values():
+        assert ink in ("FFFFFF", "141414") and len(fill) == 6
+
+
+def test_the_colour_field_replaces_the_engines_background_rather_than_hiding_under_it():
+    """`render_archetype` opens by flooding the slide with the
+    archetype's default fill. A field inserted at the bottom of the
+    shape tree is covered by that sand, and only the ink survives --
+    which is how a blue divider rendered as white type on sand."""
+    import sys
+
+    from pptx import Presentation
+    from pptx.enum.shapes import MSO_SHAPE
+    from pptx.util import Emu
+
+    sys.path.insert(0, "/root/.claude/skills/kone-deck-generator")
+    try:
+        import kone_engine as engine
+    except Exception:  # pragma: no cover
+        pytest.skip("archetype engine not available")
+
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = Emu(12192000), Emu(6858000)
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    engine._rect(slide, [0, 0, 1280, 720], engine._hex("F3EEEA"))   # the engine's own
+    L._paint_field(slide, engine, "1450F5")
+
+    fills = [s for s in slide.shapes if s.name == "Colour field"]
+    assert len(fills) == 1
+    assert str(fills[0].fill.fore_color.rgb) == "1450F5"
+    # and nothing full-slide is left painted over it
+    assert len(L._full_slide_fills(slide, engine)) == 1
+
+    # a shape that merely happens to be large is not mistaken for one
+    slide.shapes.add_shape(MSO_SHAPE.OVAL, 0, 0, Emu(12192000), Emu(6858000))
+    assert len(L._full_slide_fills(slide, engine)) == 1
+
+
+def test_the_scrim_darkens_where_the_white_type_actually_sits():
+    """A fixed dark-at-the-edges ramp guessed wrong on TEXT_PICTURE_G,
+    whose headline starts 60% of the way down its banner -- exactly
+    where a ramp clearing at the midpoint has recovered almost nothing.
+    The bands come from the archetype's own reversed-out boxes."""
+    spec = {"regions": [
+        {"box": [45, 39, 917, 36], "content": "eyebrow",
+         "dg": {"kind": "text", "color": "FFFFFF"}},
+        {"box": [45, 262, 697, 125], "content": "title",
+         "dg": {"kind": "text", "color": "FFFFFF"}},
+        {"box": [45, 470, 1190, 40], "content": "body",     # below the banner
+         "dg": {"kind": "text", "color": "141414"}},
+    ]}
+    content = {"eyebrow": "WHAT TENANTS EXPECT", "title": "Six expectations", "body": "x"}
+    bands = L._reversed_bands(spec, content, [0, 0, 1280, 440])
+    assert bands == [(39, 75), (262, 387)]
+
+    stops = dict(L._scrim_ramp([0, 0, 1280, 440], bands, 78))
+    # the headline band is fully protected, the middle of the picture is not
+    assert stops[65000] == 78 and stops[80000] == 78
+    # and clears completely between the eyebrow and the headline
+    assert max(stops[pos] for pos in (30000, 35000, 40000, 45000)) == 0
+
+    # an empty block is not protected: nothing is written there
+    assert L._reversed_bands(spec, {"title": "Six expectations"}, [0, 0, 1280, 440]) \
+        == [(262, 387)]
+
+
+def test_the_cut_cover_banner_crops_its_photograph_instead_of_stretching_it():
+    """`add_picture` given both a width and a height scales each axis
+    independently. Every photo in the set is between 1.3 and 1.9 wide and
+    the banner is 2.25, so the cover came out squashed by half again."""
+    import sys
+
+    from pptx import Presentation
+    from pptx.util import Emu
+
+    sys.path.insert(0, "/root/.claude/skills/kone-deck-generator")
+    try:
+        import kone_engine as engine
+    except Exception:  # pragma: no cover
+        pytest.skip("archetype engine not available")
+
+    from deckguard import photos
+
+    tall = next((p for p in photos.load_photos().values()
+                 if photos.crop_severity(p, 950 / 422) > 0.1), None)
+    if tall is None:  # pragma: no cover
+        pytest.skip("no photo narrower than the banner")
+
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = Emu(12192000), Emu(6858000)
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    picture = photos.place_cover(slide, engine, (330, 0, 950, 422), tall.path)
+
+    assert (picture.width, picture.height) == (engine.X(950), engine.X(422))
+    # narrower than the slot, so a centre BAND is kept and nothing is
+    # taken off the sides
+    assert picture.crop_top > 0 and picture.crop_top == pytest.approx(picture.crop_bottom)
+    assert picture.crop_left == 0 and picture.crop_right == 0
+
+    kept = (1 - picture.crop_top - picture.crop_bottom)
+    from PIL import Image
+    with Image.open(str(tall.path)) as image:
+        width, height = image.size
+    assert (width / (height * kept)) == pytest.approx(950 / 422, rel=1e-3)
+
+
+def test_the_slot_shape_breaks_ties_between_equally_matching_photos():
+    """The cut-cover banner is 2.25:1 and the set holds photographs at
+    exactly that ratio. Handing it a 3:2 portrait threw away a third of
+    the frame while one that fitted sat unused."""
+    from deckguard import photos
+
+    wide = photos.choose("elevator women people", slot_aspect=950 / 422)
+    assert wide is not None
+    assert photos.crop_severity(wide, 950 / 422) < 0.15
+
+    # the subject still outranks the shape: a query with no aspect given
+    # is unchanged by the new argument
+    assert photos.choose("skyline city") == photos.choose("skyline city", slot_aspect=None)
+
+
+def test_a_picture_carrying_white_type_gets_a_scrim_nobody_declared():
+    """`LAYOUTS.md` marks the type white and leaves the protection to
+    the designer, so the derived archetypes shipped without any -- the
+    full-bleed cover put a white headline onto a sunlit treeline."""
+    regions = [
+        {"role": "picture", "box": [0, 0, 1280, 720], "content": "photo"},
+        {"role": "title_light", "box": [45, 136, 578, 448], "content": "title"},
+    ]
+    assert L._implied_scrims(regions) == [
+        {"box": [0, 0, 1280, 720], "content": "photo"}]
+
+    # gallery ports carry the ink in the role name instead
+    assert L._is_light_role("gal_i64_FFFFFF") and L._is_light_role("title_light")
+    assert not L._is_light_role("gal_i19_141414")
+
+    # black type over a picture needs no protection, and neither does a
+    # white block that misses the picture entirely
+    assert L._implied_scrims([
+        regions[0], {"role": "body", "box": [45, 136, 578, 40], "content": "body"}]) == []
+    assert L._implied_scrims([
+        {"role": "picture", "box": [0, 0, 640, 300], "content": "photo"},
+        {"role": "title_light", "box": [700, 400, 400, 60], "content": "title"}]) == []
+
+
+def test_the_scrim_protects_the_type_not_the_frame_it_was_given():
+    """The full-bleed cover's title frame is 448px tall for three lines
+    of type. Protecting the frame darkened the picture end to end and
+    the cover came back a uniform grey."""
+    region = {"role": "gal_i64_FFFFFF", "box": [45, 136, 578, 448], "content": "title"}
+    height = L._typeset_height(region, "The lift is the last thing you decarbonise")
+    assert 150 < height < 300, height
+    assert height < region["box"][3]
+
+    # a long enough string still fills the frame and never overruns it
+    assert L._typeset_height(region, "word " * 400) == region["box"][3]
+
+
+def test_the_scrim_sits_above_the_photograph_and_below_the_type():
+    """A cover carries its logo and tagline as pictures too, and they
+    are added after the type. Seating the scrim above the LAST picture
+    put it over the headline and dimmed the words it exists to make
+    readable."""
+    import sys
+
+    from pptx import Presentation
+    from pptx.util import Emu
+
+    sys.path.insert(0, "/root/.claude/skills/kone-deck-generator")
+    try:
+        import kone_engine as engine
+    except Exception:  # pragma: no cover
+        pytest.skip("archetype engine not available")
+
+    from deckguard import photos
+
+    any_photo = next(iter(photos.load_photos().values()), None)
+    if any_photo is None:  # pragma: no cover
+        pytest.skip("no photographs installed")
+
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = Emu(12192000), Emu(6858000)
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    slide.shapes.add_picture(str(any_photo.path), 0, 0,
+                             Emu(1280 * 9525), Emu(720 * 9525))          # the photograph
+    slide.shapes.add_textbox(0, Emu(136 * 9525), Emu(578 * 9525), Emu(200 * 9525))
+    slide.shapes.add_picture(str(any_photo.path), Emu(1102 * 9525), Emu(633 * 9525),
+                             Emu(133 * 9525), Emu(45 * 9525))            # the tagline
+
+    L._draw_scrim(slide, engine, [0, 0, 1280, 720], protect=[(136, 300)])
+    order = [s.shape_type for s in slide.shapes]
+    names = [s.name for s in slide.shapes]
+    assert names.index("Photo protection") == 1, order
+    assert names.index("Photo protection") < names.index("TextBox 2")
+
+
+def test_the_engines_caption_grey_is_corrected_to_black_at_install():
+    """The brand allows three inks for type -- black, white and, for
+    KONE Information only, blue. The engine sets captions, muted body
+    and quote attributions in a #727272 that is in no palette, and it
+    shows on any deck carrying a quote or a captioned statistic."""
+    import sys
+
+    sys.path.insert(0, "/root/.claude/skills/kone-deck-generator")
+    try:
+        import archetypes as module
+        import kone_engine as engine
+    except Exception:  # pragma: no cover
+        pytest.skip("archetype engine not available")
+
+    # restore the engine's shipped greys first: another test in the
+    # session may already have installed and corrected them
+    greyed = {}
+    for role in ("caption", "body_muted", "attribution"):
+        style = engine.ROLE_STYLE[role]
+        greyed[role] = style
+        engine.ROLE_STYLE[role] = tuple(
+            engine.GREY if i == 2 else v for i, v in enumerate(style))
+
+    corrected = L._correct_grey_ink(module)
+    assert {"caption", "body_muted", "attribution"} <= set(corrected)
+    for role in corrected:
+        assert engine.ROLE_STYLE[role][2] == engine.BLACK
+    # and nothing anywhere is left painting type in the caption grey
+    assert not [r for r, s in engine.ROLE_STYLE.items()
+                if len(s) > 2 and s[2] == engine.GREY]
+    # idempotent: a second pass finds nothing left to correct
+    assert L._correct_grey_ink(module) == []
+    # everything else about the role is untouched -- font, size, caps
+    for role, before in greyed.items():
+        after = engine.ROLE_STYLE[role]
+        assert [v for i, v in enumerate(after) if i != 2] \
+            == [v for i, v in enumerate(before) if i != 2]

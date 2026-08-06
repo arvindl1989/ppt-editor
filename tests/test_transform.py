@@ -135,12 +135,16 @@ def test_a_structurally_matched_archetype_actually_renders(tmp_path):
 
 
 @needs_skill
-def test_audit_transform_result_suppresses_archetype_false_positives(tmp_path):
-    """The known trap this closes for good: rules_engine flags the
-    archetype engine's own deliberate styling (muted caption grey) as a
-    text violation. The transform audit excludes archetype slides from
-    the report and says how many findings were suppressed, instead of
-    reporting correct slides as defects."""
+def test_audit_transform_result_excludes_archetype_slides_from_the_report(tmp_path):
+    """The trap this closes: rules_engine flagging the archetype
+    engine's own styling as a text violation. The transform audit
+    excludes archetype slides from the report and says how many findings
+    it suppressed, instead of reporting correct slides as defects.
+
+    The muted caption grey was the original trigger and no longer is --
+    `layouts._correct_grey_ink` takes it off the brand's type roles at
+    install, because `#727272` was never in the palette. The exclusion
+    still has to hold for anything else the engine draws deliberately."""
     src = _three_slide_deck(tmp_path)
     plan = plan_transform(str(src), client=_FakeClient(_FakeResponse(_hero_stat_override(2))))
     out = tmp_path / "out.pptx"
@@ -148,8 +152,13 @@ def test_audit_transform_result_suppresses_archetype_false_positives(tmp_path):
 
     audit = audit_transform_result(str(out), archetype_indices=set(outcome.archetype_swapped))
 
-    assert audit["suppressed_archetype_findings"] >= 1
+    assert "suppressed_archetype_findings" in audit
     assert all(v.slide_index != 2 for v in audit["violations"])
+
+    # and the count is the number actually withheld, not a constant
+    unfiltered = audit_transform_result(str(out), archetype_indices=set())
+    withheld = [v for v in unfiltered["violations"] if v.slide_index == 2]
+    assert audit["suppressed_archetype_findings"] == len(withheld)
 
 
 def test_reference_similarity_reports_layout_matches_and_divergence(tmp_path):

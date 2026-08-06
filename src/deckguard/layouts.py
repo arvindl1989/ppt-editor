@@ -397,7 +397,51 @@ def _bind_roles(layout: Layout) -> dict:
         spec["groups"] = groups
     if panels:
         spec["panels"] = panels
+    scrims = _implied_scrims(regions)
+    if scrims:
+        spec["scrims"] = scrims
     return spec
+
+
+# Roles the engine draws in white. A layout that puts one of these over a
+# photograph has reversed type out of a photograph, whatever else it does.
+_LIGHT_ROLES = frozenset({"title_light", "on_panel_body", "eyebrow_light"})
+
+
+def _is_light_role(role) -> bool:
+    """Whether a region's ink is white, whichever path produced it.
+
+    Bound layouts name the role (`title_light`); gallery ports carry the
+    colour in the name itself (`gal_i64_FFFFFF`). Both reverse out of the
+    picture underneath and both need protecting.
+    """
+    role = str(role or "")
+    return role in _LIGHT_ROLES or role.upper().endswith("_FFFFFF")
+
+
+def _implied_scrims(regions: list[dict]) -> list[dict]:
+    """A picture carrying white type needs a scrim, and no layout says so.
+
+    `LAYOUTS.md` marks the type white and leaves the protection to the
+    designer, so the derived archetypes shipped without any: the
+    full-bleed cover put a white headline straight onto a sunlit
+    treeline. Any picture region a light-ink box sits on gets one.
+    """
+    pictures = [r for r in regions if r.get("role") == "picture"]
+    if not pictures:
+        return []
+    light = [r for r in regions if _is_light_role(r.get("role"))]
+    scrims = []
+    for picture in pictures:
+        px, py, pw, ph = picture["box"]
+        over = [
+            r for r in light
+            if r["box"][1] < py + ph and r["box"][1] + r["box"][3] > py
+            and r["box"][0] < px + pw and r["box"][0] + r["box"][2] > px
+        ]
+        if over:
+            scrims.append({"box": [px, py, pw, ph], "content": picture.get("content")})
+    return scrims
 
 
 # Sensible generic pictograms for an archetype whose caller named none.
@@ -495,6 +539,15 @@ def render(slide, name: str, content: dict, archetypes_module) -> None:
 
     if spec.get("chrome"):
         archetypes_module.render(slide, name, content)
+        # The gallery's ports were extracted from a reference deck that
+        # carried no scrims, and the full-bleed cover is the one layout
+        # the brand explicitly says needs one -- its headline landed
+        # white on a sunlit treeline. `_seat_above_picture` puts the
+        # gradient under the type the engine has already drawn.
+        for scrim in spec.get("scrims") or _implied_scrims(spec.get("regions", [])):
+            if scrim.get("content") in (None, "") or content.get(scrim.get("content")):
+                _draw_scrim(slide, engine, scrim["box"], scrim.get("opacity", 78),
+                            _reversed_bands(spec, content, scrim["box"]))
         return
 
     for panel in spec.get("panels", []):
@@ -564,13 +617,22 @@ def render(slide, name: str, content: dict, archetypes_module) -> None:
     # painting a full-slide background rectangle, so anything drawn
     # first is buried by it -- both numbered dividers came out as an
     # empty sand rectangle with the number, title and label underneath.
-    _paint_layout_background(slide, engine, spec)
-    for scrim in spec.get("scrims", []):
+    field = _field_for(spec, filled)
+    if field:
+        _paint_field(slide, engine, field[0])
+    else:
+        _paint_layout_background(slide, engine, spec)
+    # Derived here as well as at build time: the gallery's own ports win
+    # over the bound layouts for several archetypes, and they were
+    # extracted from a reference deck that carried no scrims at all.
+    for scrim in spec.get("scrims") or _implied_scrims(spec.get("regions", [])):
         if scrim.get("content") in (None, "") or filled.get(scrim.get("content")):
-            _draw_scrim(slide, engine, scrim["box"], scrim.get("opacity", 62))
+            _draw_scrim(slide, engine, scrim["box"], scrim.get("opacity", 78),
+                        _reversed_bands(spec, filled, scrim["box"]))
+    ink = field[1] if field else None
     for region in spec.get("regions", []):
         if "dg" in region:
-            _draw(slide, engine, region, filled.get(region.get("content")))
+            _draw(slide, engine, region, filled.get(region.get("content")), ink)
     for group in spec.get("groups", []):
         items = filled.get(group["content"]) or []
         for (ox, oy), item in zip(group["origins"], items):
@@ -579,7 +641,35 @@ def render(slide, name: str, content: dict, archetypes_module) -> None:
                     continue
                 rx, ry, rw, rh = region["box"]
                 shifted = {**region, "box": [ox + rx, oy + ry, rw, rh]}
-                _draw(slide, engine, shifted, (item or {}).get(region.get("content")))
+                _draw(slide, engine, shifted, (item or {}).get(region.get("content")), ink)
+
+
+# The brand's secondary palette, with the ink each field takes. The
+# rule is the brand's own: a blue field takes white type, a secondary
+# field takes black.
+BRAND_FIELDS = {
+    "blue": ("1450F5", "FFFFFF"),
+    "light-blue": ("D2F5FF", "141414"),
+    "pink": ("FFCDD7", "141414"),
+    "yellow": ("FFE141", "141414"),
+    "mint": ("AAE1C8", "141414"),
+    "sand": ("F3EEEA", "141414"),
+}
+DEFAULT_FIELD = "blue"
+
+
+def _field_for(spec: dict, content: dict):
+    """(fill, ink) when this archetype paints a whole-slide colour field.
+
+    Only archetypes that declare `field` -- dividers -- take one. The
+    caller names a colour per slide; a divider is the one place the
+    secondary palette is meant to carry a whole slide, and leaving them
+    all the same makes a deck monotonous.
+    """
+    if not spec.get("field"):
+        return None
+    name = str(content.get("colour") or content.get("color") or DEFAULT_FIELD).lower()
+    return BRAND_FIELDS.get(name, BRAND_FIELDS[DEFAULT_FIELD])
 
 
 def _paint_layout_background(slide, engine, spec: dict) -> None:
@@ -624,7 +714,106 @@ def _paint_layout_background(slide, engine, spec: dict) -> None:
     spTree.insert(2, shape._element)
 
 
-def _draw_scrim(slide, engine, box, opacity: int = 62) -> None:
+def _reversed_bands(spec: dict, content: dict, scrim_box) -> list:
+    """The (top, bottom) of every white text block sitting on the scrim.
+
+    Only blocks the slide actually fills count -- an archetype that
+    declares an eyebrow the author left empty must not have the picture
+    darkened where nothing is written.
+    """
+    _, sy, _, sh = scrim_box
+    bands = []
+    for region in spec.get("regions", []):
+        style = region.get("dg")
+        if style is not None:
+            if str(style.get("color", "")).upper() not in ("FFFFFF", "FFF"):
+                continue
+        elif not _is_light_role(region.get("role")):
+            # drawn by the engine; only its light roles are reversed out
+            continue
+        value = content.get(region.get("content"))
+        if not value:
+            continue
+        x, y, w, h = region["box"]
+        if y + h <= sy or y >= sy + sh:
+            continue
+        bands.append((y, y + _typeset_height(region, value)))
+    return bands
+
+
+def _typeset_height(region: dict, value) -> float:
+    """Roughly how far down its box a block of text actually reaches.
+
+    Protecting the whole BOX is what turned the full-bleed cover into a
+    uniformly dark photograph: the cover's title frame is 448px tall for
+    three lines of type, so the scrim covered the middle of the picture
+    end to end. Three lines is what needs protecting, not the frame they
+    were given.
+    """
+    _, _, width, height = region["box"]
+    style = region.get("dg") or {}
+    px = style.get("px")
+    if not px:
+        match = re.search(r"_i(\d+)_", str(region.get("role") or ""))
+        px = int(match.group(1)) if match else 0
+    if not px:
+        return height
+
+    text = " ".join(str(v) for v in value) if isinstance(value, (list, tuple)) else str(value)
+    per_line = max(1, int(width / (px * 0.52)))
+    lines = max(1, -(-len(text) // per_line))
+    return min(height, lines * px * 1.3)
+
+
+def _scrim_ramp(box, protect, opacity: int, feather: float = 0.10):
+    """Gradient stops that are dark exactly where white type sits.
+
+    A fixed dark-at-both-edges ramp is a guess, and on TEXT_PICTURE_G it
+    guessed wrong: the headline starts 60% of the way down its banner,
+    where a ramp that clears at the midpoint has recovered barely a
+    sixth of its opacity, and the first line read white-on-sunlit-
+    pavement. The bands that need protecting are not a mystery -- they
+    are the archetype's own reversed-out text boxes -- so the ramp is
+    built from them instead of guessed at.
+
+    Returns `(position, alpha)` pairs sampled across the box, each band
+    at full opacity with a soft edge so the picture is never cut by a
+    visible line.
+    """
+    _, y, _, h = box
+    if not h:
+        return [(0, opacity), (100000, opacity)]
+
+    bands = []
+    for bx in protect:
+        top = max(0.0, min(1.0, (bx[0] - y) / h))
+        bottom = max(0.0, min(1.0, (bx[1] - y) / h))
+        if bottom > top:
+            bands.append((top, bottom))
+    if not bands:
+        # nothing reversed out over this picture: the brand's plain
+        # edge-darkening, which still seats a photo on a white slide
+        bands = [(0.0, 0.06), (0.94, 1.0)]
+
+    def cover(position: float) -> float:
+        best = 0.0
+        for top, bottom in bands:
+            if top <= position <= bottom:
+                best = 1.0
+            elif position < top:
+                best = max(best, 1.0 - min(1.0, (top - position) / feather))
+            else:
+                best = max(best, 1.0 - min(1.0, (position - bottom) / feather))
+        return best
+
+    steps = 20
+    return [
+        (int(round(i / steps * 100000)), int(round(opacity * cover(i / steps))))
+        for i in range(steps + 1)
+    ]
+
+
+def _draw_scrim(slide, engine, box, opacity: int = 78, protect=()) -> None:
     """A gradient over a photo so white type stays readable on it.
 
     The brand specifies this for `COVER_F_FULLBLEED` and never says how,
@@ -632,10 +821,10 @@ def _draw_scrim(slide, engine, box, opacity: int = 62) -> None:
     same thing: a banner title came out white-on-pale-escalator and was
     close to invisible.
 
-    Dark at the top and bottom edges, clear through the middle, so it
-    protects the eyebrow and the headline without greying out the
-    subject of the picture -- which a flat overlay does, and which is
-    why the spec calls for a gradient rather than a tint.
+    Dark behind the reversed-out type and clear elsewhere, so it protects
+    the eyebrow and the headline without greying out the subject of the
+    picture -- which a flat overlay does, and which is why the spec calls
+    for a gradient rather than a tint.
     """
     from lxml import etree
     from pptx.enum.shapes import MSO_SHAPE
@@ -662,7 +851,7 @@ def _draw_scrim(slide, engine, box, opacity: int = 62) -> None:
     grad = etree.SubElement(spPr, f"{{{A}}}gradFill")
     grad.set("rotWithShape", "1")
     stops = etree.SubElement(grad, f"{{{A}}}gsLst")
-    for position, alpha in ((0, opacity), (45000, 0), (100000, opacity)):
+    for position, alpha in _scrim_ramp(box, protect, opacity):
         stop = etree.SubElement(stops, f"{{{A}}}gs")
         stop.set("pos", str(position))
         colour = etree.SubElement(stop, f"{{{A}}}srgbClr")
@@ -672,19 +861,113 @@ def _draw_scrim(slide, engine, box, opacity: int = 62) -> None:
     lin.set("ang", "5400000")   # top to bottom
     lin.set("scaled", "0")
 
-    # the gradient must sit directly on the photo, under everything else
-    # that follows -- appending puts it last in paint order, which is
-    # where the text is about to go
+    # The gradient must sit directly on the photo and UNDER the type.
+    # Appending is only correct when the caller draws the text
+    # afterwards; the gallery's ports have the engine draw theirs inside
+    # `render_archetype`, so an appended scrim greyed out the headline it
+    # was meant to protect. Seating it immediately above the picture is
+    # right for both paths.
+    _seat_above_picture(shape, box)
     return shape
 
 
-def _draw(slide, engine, region: dict, value) -> None:
+def _seat_above_picture(shape, box) -> None:
+    """Move `shape` to just after the picture it is protecting.
+
+    The FIRST substantial one, not the last: a cover carries the logo
+    and the tagline as pictures too, and they are added after the type.
+    Seating the scrim above those put it over the headline and dimmed
+    the very words it exists to make readable.
+    """
+    P = "{http://schemas.openxmlformats.org/presentationml/2006/main}"
+    tree = shape._element.getparent()
+    if tree is None:
+        return
+    left, top, width, height = box
+    area = max(1.0, width * height)
+    for index, element in enumerate(tree):
+        if element.tag != f"{P}pic":
+            continue
+        try:
+            offset = element.spPr.xfrm
+            px, py = offset.off.x / 9525.0, offset.off.y / 9525.0
+            pw, ph = offset.ext.cx / 9525.0, offset.ext.cy / 9525.0
+        except Exception:  # noqa: BLE001 -- a picture without geometry
+            continue
+        if pw * ph < area * 0.5:      # chrome, not the photograph
+            continue
+        if px < left + width and px + pw > left and py < top + height and py + ph > top:
+            tree.remove(shape._element)
+            tree.insert(index + 1, shape._element)
+            return
+
+
+def _paint_field(slide, engine, fill: str) -> None:
+    """Flood the slide with one of the brand's secondary colours.
+
+    The field has to REPLACE the engine's own background rectangle, not
+    sit under it. `render_archetype` opens by painting the archetype's
+    default fill across the slide, so a field inserted at the bottom of
+    the shape tree is covered by sand and only the ink colour survives --
+    which is how a blue divider came out as white type on sand, all but
+    invisible.
+    """
+    from pptx.enum.shapes import MSO_SHAPE
+
+    for existing in _full_slide_fills(slide, engine):
+        existing.getparent().remove(existing)
+
+    shape = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, engine.X(0), engine.X(0),
+                                   engine.X(1280), engine.X(720))
+    shape.name = "Colour field"
+    shape.fill.solid()
+    shape.fill.fore_color.rgb = engine._hex(fill)
+    shape.line.fill.background()
+    shape.shadow.inherit = False
+    style = shape._element.find(
+        "{http://schemas.openxmlformats.org/presentationml/2006/main}style")
+    if style is not None:
+        shape._element.remove(style)
+    spTree = shape._element.getparent()
+    spTree.remove(shape._element)
+    spTree.insert(2, shape._element)
+
+
+def _full_slide_fills(slide, engine):
+    """The plain filled rectangles that cover the whole slide.
+
+    Matched on geometry and fill rather than on name: the engine names
+    its background `Rectangle 1`, but that name is not reserved and a
+    port could reasonably produce another.
+    """
+    A = "http://schemas.openxmlformats.org/drawingml/2006/main"
+    width, height = engine.X(1280), engine.X(720)
+    found = []
+    for shape in slide.shapes:
+        if not shape.has_text_frame or shape.text_frame.text.strip():
+            continue
+        geom = shape._element.find(f".//{{{A}}}prstGeom")
+        if geom is None or geom.get("prst") != "rect":
+            continue
+        if (shape.left, shape.top) != (0, 0):
+            continue
+        if abs(shape.width - width) > 1000 or abs(shape.height - height) > 1000:
+            continue
+        if shape._element.find(f".//{{{A}}}solidFill") is None:
+            continue
+        found.append(shape._element)
+    return found
+
+
+def _draw(slide, engine, region: dict, value, ink: Optional[str] = None) -> None:
     """Draw one reference-specified block."""
     if value in (None, "", []):
         return
     style = region["dg"]
+    if ink:
+        style = {**style, "color": ink}
     if style["kind"] == "bullets":
-        _draw_bullets(slide, engine, region["box"], value, style)
+        _draw_bullets(slide, engine, region["box"], value, style, ink)
     else:
         _draw_text(slide, engine, region["box"], value, style)
 
@@ -702,7 +985,7 @@ def _draw_text(slide, engine, box, value, style) -> None:
         paragraph.alignment = PP_ALIGN.RIGHT
 
 
-def _draw_bullets(slide, engine, box, items, style) -> None:
+def _draw_bullets(slide, engine, box, items, style, ink: Optional[str] = None) -> None:
     """A real list, not a typed dash.
 
     The brand rule is explicit and the engine breaks it: `_dash_bullets`
@@ -727,7 +1010,8 @@ def _draw_bullets(slide, engine, box, items, style) -> None:
         pPr.set("marL", str(int((level + 1) * px * 0.9 * 0.75 * 12700)))
         colour = etree.SubElement(pPr, f"{{{A_NS}}}buClr")
         srgb = etree.SubElement(colour, f"{{{A_NS}}}srgbClr")
-        srgb.set("val", "1450F5")
+        # a blue marker vanishes on a blue field
+        srgb.set("val", ink or "1450F5")
         etree.SubElement(pPr, f"{{{A_NS}}}buSzPct").set("val", "100000")
         etree.SubElement(pPr, f"{{{A_NS}}}buFont").set("typeface", "Arial")
         etree.SubElement(pPr, f"{{{A_NS}}}buChar").set("char", "•" if level == 0 else "◦")
@@ -742,8 +1026,8 @@ def _draw_bullets(slide, engine, box, items, style) -> None:
         ]:
             paragraph = frame.paragraphs[0] if first else frame.add_paragraph()
             first = False
-            paragraph.space_after = Pt(px * 0.35)
-            engine._run(paragraph, line, "Inter", px, engine._hex("141414"))
+            paragraph.space_after = Pt(px * style.get("lead", 0.35))
+            engine._run(paragraph, line, "Inter", px, engine._hex(ink or "141414"))
             mark(paragraph, level, px)
 
 
@@ -780,9 +1064,10 @@ def _text(x, y, w, h, key, px, *, font="Inter", color="141414", caps=False, alig
                    "caps": caps, "align": align}}
 
 
-def _bullets(x, y, w, h, key, px, nested_px=None):
+def _bullets(x, y, w, h, key, px, nested_px=None, lead=0.35):
     return {"role": "dg_bullets", "box": [x, y, w, h], "content": key,
-            "dg": {"kind": "bullets", "px": px, "nested_px": nested_px or px - 2}}
+            "dg": {"kind": "bullets", "px": px, "nested_px": nested_px or px - 2,
+                   "lead": lead}}
 
 
 _REFINEMENTS: dict[str, dict] = {
@@ -828,12 +1113,39 @@ _REFINEMENTS: dict[str, dict] = {
     # the RIGHT-hand box and emitted no number at all -- which is the
     # one thing a numbered divider is for. The reference puts the
     # section label and title left, and a 420px numeral right.
+    # Agenda A. The gallery port emitted four separate one-line text
+    # boxes, so an agenda could only ever have exactly four items and
+    # they were not a list -- no markers, no hanging indent, nothing
+    # PowerPoint's outline view could edit. One bulleted box instead,
+    # on the master's own 578x448 body area, with the full-height photo
+    # the layout already declares.
+    "agenda_a_table": {
+        "regions": [
+            {"role": "picture", "box": [759, 0, 521, 720], "content": "photo"},
+            _text(45, 39, 578, 36, "eyebrow", 14,
+                  font="KONE Information", color="1450F5", caps=True),
+            _text(45, 91, 578, 60, "title", 40),
+            # an agenda is four or five short lines in a 448px column;
+            # at body size they huddle in the top corner and leave the
+            # rest of the slide empty. Bigger type, and air between the
+            # items, so the list occupies the space it is given.
+            _bullets(45, 195, 578, 434, "items", 24, lead=1.15),
+        ],
+    },
+
     # Corrected against a real deck, which uses this layout five times.
     # The gallery port and the HTML reference both put the title left
     # and the numeral right; the master's own boxes -- and every real
     # slide -- do the opposite. `Text/body` at 45 carries the number,
     # `Title` at 453 carries the words.
-    "divider_numbering": {"regions": [
+    #
+    # Colour is chosen per slide rather than fixed. The layout's own
+    # background resolves to sand, which reads as washed out against
+    # the rest of the deck; a divider is the one place the brand's
+    # secondary palette is meant to carry a whole slide. `colour` in
+    # the content picks one, and the ink follows the brand rule --
+    # blue field takes white type, a secondary field takes black.
+    "divider_numbering": {"field": True, "regions": [
         _text(45, 91, 374, 300, "number", 190),
         _text(453, 91, 578, 120, "eyebrow", 13),
         _text(453, 130, 578, 400, "title", 46),
@@ -901,7 +1213,7 @@ _REFINEMENTS: dict[str, dict] = {
 # but these are transcribed from the current rendered reference while
 # the incumbent came from the superseded gallery markup -- so here the
 # newer source wins.
-_OVERRIDE = frozenset({"divider_numbering"})
+_OVERRIDE = frozenset({"divider_numbering", "agenda_a_table"})
 
 
 # Archetypes `ARCHETYPES.md` marks `no master`. All but one are already
@@ -976,6 +1288,37 @@ def build_archetypes(
     return out
 
 
+def _correct_grey_ink(archetypes_module) -> list[str]:
+    """Take the engine's caption grey off the brand's type roles.
+
+    The brand allows exactly three inks for type -- black, white and (for
+    KONE Information only) blue -- and the engine sets `caption`,
+    `body_muted` and `attribution` in a `#727272` grey that appears
+    nowhere in the palette. It is visible on any deck carrying a quote or
+    a captioned statistic, which is most of them.
+
+    Corrected here rather than in the engine because the engine is
+    vendored from the skill and is replaced wholesale when the skill
+    updates; a patch applied at install time survives that.
+    """
+    engine = getattr(archetypes_module, "E", None)
+    styles = getattr(engine, "ROLE_STYLE", None)
+    if not styles:
+        return []
+    grey = getattr(engine, "GREY", None)
+    black = getattr(engine, "BLACK", None)
+    if grey is None or black is None:
+        return []
+
+    corrected = []
+    for role, style in list(styles.items()):
+        if len(style) < 3 or style[2] != grey:
+            continue
+        styles[role] = tuple(black if i == 2 else v for i, v in enumerate(style))
+        corrected.append(role)
+    return sorted(corrected)
+
+
 def install(archetypes_module, grades: Iterable[str] = ("A", "B", "C", "D")) -> list[str]:
     """Register the generated archetypes into the engine's registry.
 
@@ -987,6 +1330,7 @@ def install(archetypes_module, grades: Iterable[str] = ("A", "B", "C", "D")) -> 
     registry = archetypes_module.ARCHETYPES
     _, meta = load_spec()
     by_key = {a.engine_key: a for a in meta.values()}
+    _correct_grey_ink(archetypes_module)
 
     added: list[str] = []
     for key, spec in build_archetypes(grades).items():

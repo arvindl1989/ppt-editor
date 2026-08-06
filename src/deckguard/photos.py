@@ -143,26 +143,37 @@ def score(photo: Photo, terms: Iterable[str], wants_people: Optional[bool] = Non
 
 
 def find_photos(query: str, wants_people: Optional[bool] = None,
-                limit: int = 8) -> list[Photo]:
-    """Photos matching a free-text query, best first."""
+                limit: int = 8, slot_aspect: Optional[float] = None) -> list[Photo]:
+    """Photos matching a free-text query, best first.
+
+    `slot_aspect` breaks ties by how much of the frame the slot would
+    throw away. It is deliberately weak next to the subject match -- the
+    right picture badly cropped still beats the wrong picture -- but it
+    is what stops a 3:2 portrait being handed to the 2.25:1 cut-cover
+    banner when a 2.25:1 photograph is sitting right there unused.
+    """
     terms = re.split(r"[\s,]+", query.strip().lower()) if query else []
-    scored = [
-        (score(photo, terms, wants_people), photo)
-        for photo in load_photos().values()
-    ]
+    scored = []
+    for photo in load_photos().values():
+        base = score(photo, terms, wants_people)
+        if base and slot_aspect:
+            base += 1.0 - crop_severity(photo, slot_aspect)
+        scored.append((base, photo))
     ranked = sorted((s for s in scored if s[0] > 0), key=lambda s: (-s[0], s[1].name))
     return [photo for _, photo in ranked[:limit]]
 
 
 def choose(query: str = "", wants_people: Optional[bool] = None,
-           exclude: Iterable[str] = ()) -> Optional[Photo]:
+           exclude: Iterable[str] = (),
+           slot_aspect: Optional[float] = None) -> Optional[Photo]:
     """One photo for a slide, avoiding any already used.
 
     `exclude` is what stops a deck using the same picture four times --
     the single most visible symptom of automatic selection.
     """
     used = set(exclude)
-    for photo in find_photos(query, wants_people, limit=len(load_photos()) or 1):
+    for photo in find_photos(query, wants_people,
+                             limit=len(load_photos()) or 1, slot_aspect=slot_aspect):
         if photo.name not in used:
             return photo
     # nothing matched, or everything matching is used: fall back to any
@@ -173,6 +184,43 @@ def choose(query: str = "", wants_people: Optional[bool] = None,
         if wants_people is None or photo.has_people is wants_people:
             return photo
     return None
+
+
+def place_cover(slide, engine, box, path):
+    """Fill `box` with the image at `path`, cropping rather than stretching.
+
+    `add_picture` with both a width and a height SCALES THE IMAGE TO FIT,
+    independently on each axis. Every photo in this set is between 1.3
+    and 1.9 wide; the cut-image cover banner is 2.25, so the cover came
+    out horizontally squashed by half again -- faces narrowed, verticals
+    leaning. The engine's own `_image` has always cover-cropped; the
+    banner is the one place that did not.
+
+    Done with a source rectangle rather than by re-encoding a cropped
+    JPEG, so the slide still holds ONE picture the author can swap with
+    PowerPoint's own Change Picture and keep the effect.
+    """
+    from PIL import Image
+
+    x, y, w, h = box
+    picture = slide.shapes.add_picture(str(path), engine.X(x), engine.X(y),
+                                       engine.X(w), engine.X(h))
+    try:
+        with Image.open(str(path)) as image:
+            iw, ih = image.size
+    except Exception:  # noqa: BLE001 -- placed uncropped is better than not placed
+        return picture
+    if not (iw and ih and w and h):
+        return picture
+
+    slot, source = w / h, iw / ih
+    if source > slot:      # image is wider than the slot: take a centre column
+        trim = (1.0 - slot / source) / 2.0
+        picture.crop_left = picture.crop_right = trim
+    elif source < slot:    # taller: take a centre band
+        trim = (1.0 - source / slot) / 2.0
+        picture.crop_top = picture.crop_bottom = trim
+    return picture
 
 
 def crop_severity(photo: Photo, slot_aspect: float) -> float:

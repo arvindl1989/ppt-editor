@@ -530,8 +530,10 @@ def _draw_cut(slide, engine, box, rects, photo, background="FFFFFF") -> None:
     """
     if not photo or not rects:
         return
+    from deckguard.photos import place_cover
+
     bx, by, bw, bh = box
-    slide.shapes.add_picture(str(photo), engine.X(bx), engine.X(by), engine.X(bw), engine.X(bh))
+    place_cover(slide, engine, (bx, by, bw, bh), photo)
 
     # Everything the mask does NOT reveal, covered in the slide colour:
     # the gutters between panes, and the area below each pane's own

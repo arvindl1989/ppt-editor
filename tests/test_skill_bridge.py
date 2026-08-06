@@ -323,12 +323,19 @@ def test_build_deck_with_archetypes_renders_an_override_and_skips_fix_deck_for_i
     # NOT in brand_rules.yaml's approved-colors list -- if fix_deck had
     # run over this slide it would have flagged or remapped it. Confirm
     # it survives untouched.
-    grey_runs = [
-        run for s in archetype_slide.shapes if getattr(s, "has_text_frame", False)
+    inks = {
+        str(run.font.color.rgb)
+        for s in archetype_slide.shapes if getattr(s, "has_text_frame", False)
         for p in s.text_frame.paragraphs for run in p.runs
-        if run.font.color.type is not None and str(run.font.color.rgb) == "727272"
-    ]
-    assert grey_runs, "expected at least one run still using kone_engine's own grey #727272"
+        if run.font.color.type is not None
+    }
+    assert inks, "the archetype slide drew no type at all"
+    # The engine used to set captions and support text in a #727272 that
+    # appears in no KONE palette; `layouts._correct_grey_ink` takes it off
+    # the type roles at install. The slide now comes out on-palette, which
+    # is what fix_deck would have been remapping had it run.
+    assert "727272" not in inks
+    assert inks <= {"141414", "FFFFFF", "1450F5"}, inks
 
 
 @needs_skill
