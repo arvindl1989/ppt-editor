@@ -165,15 +165,39 @@ def test_an_icon_carries_no_theme_drop_shadow():
 
 
 @needs_sprite
-def test_a_square_icon_is_centred_in_a_wider_box():
+def test_an_icon_is_centred_in_a_wider_box_and_hugs_what_it_draws():
+    """The shape is sized to the geometry, not to the nominal 1024
+    frame, so it is not square unless the glyph is -- but the frame is
+    still what sets the SCALE, which is what keeps a grid of icons
+    looking the same size."""
     from pptx import Presentation
     from pptx.util import Emu
 
     prs = Presentation()
     slide = prs.slides.add_slide(prs.slide_layouts[6])
     shape = icons.add_icon(slide, "elevator", (0, 0, 200, 100))
-    assert shape.width == shape.height  # aspect kept
-    assert round(shape.left / 9525) == 50  # (200 - 100) / 2
+
+    # inside the box on the short axis, and centred on the long one
+    assert 0 <= shape.top and shape.top + shape.height <= 200 * 9525
+    assert 50 * 9525 <= shape.left <= 150 * 9525
+    # and no bigger than the frame it was scaled against
+    assert shape.width <= 100 * 9525 * 1.3
+
+
+@needs_sprite
+def test_two_icons_in_one_grid_share_a_scale():
+    """Sizing each shape to its own geometry must not resize the icon:
+    a wide glyph and a tall one still have to read as the same size."""
+    from pptx import Presentation
+    from pptx.util import Emu
+
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    wide = icons.add_icon(slide, "wind", (0, 0, 100, 100))
+    tall = icons.add_icon(slide, "elevator", (200, 0, 100, 100))
+    biggest = max(wide.width, wide.height, tall.width, tall.height)
+    smallest = min(max(wide.width, wide.height), max(tall.width, tall.height))
+    assert biggest / smallest < 1.3
 
 
 @needs_sprite
@@ -220,10 +244,12 @@ def test_clamping_leaves_a_well_behaved_icon_untouched():
 
 
 @needs_sprite
-def test_a_badly_overflowing_icon_stays_inside_the_box_it_was_given():
-    """`onbattery` reaches y=2302 against a 1024 viewBox. A browser
-    clips that away; DrawingML draws the lot, and it spilled down four
-    rows of an icon grid before this."""
+def test_a_badly_overflowing_icon_is_contained_by_default():
+    """`onbattery` reaches y=2302 against a 1024 viewBox, and unlike the
+    ordinary 5-15% overshoot that is a junk tail rather than part of the
+    drawing -- it spilled down four rows of an icon grid. Only the six
+    in BROKEN_ICONS are clamped; clamping the rest chopped the base off
+    a bucket and an elevator car."""
     from pptx import Presentation
     from pptx.util import Emu
 
@@ -240,13 +266,36 @@ def test_a_badly_overflowing_icon_stays_inside_the_box_it_was_given():
 
 
 @needs_sprite
-def test_clipping_can_be_turned_off():
+def test_an_ordinary_icon_keeps_its_overshoot():
+    """Every symbol declares `overflow="visible"`, so the 5-15% most
+    icons extend past the nominal frame is intentional and drawn.
+    Clamping it -- which this did by default for a while -- flattened
+    the bottom off a mop and bucket, reported as icons looking chopped."""
     from pptx import Presentation
-    from pptx.util import Emu
 
     prs = Presentation()
     slide = prs.slides.add_slide(prs.slide_layouts[6])
-    shape = icons.add_icon(slide, "onbattery", (0, 0, 96, 96), clip=False)
+    shape = icons.add_icon(slide, "cleaning", (0, 0, 96, 96))
     path = shape._element.spPr.find(f"{{{icons.A_NS}}}custGeom").find(
         f".//{{{icons.A_NS}}}path")
-    assert max(int(p.get("y")) for p in path.iter(f"{{{icons.A_NS}}}pt")) > icons.VIEWBOX
+
+    ops = icons.path_to_drawingml(icons.load_icons()["cleaning"])
+    def span(o):
+        ys = [y for _, pts in o for _, y in pts]
+        return max(ys) - min(ys)
+    assert icons.viewbox_overflow("cleaning") > 0, "this icon overshoots its frame"
+    assert int(path.get("h")) == round(span(ops)), "the overshoot must survive"
+    assert round(span(ops)) > round(span(icons.clamp_to_viewbox(ops)))
+
+
+@needs_sprite
+def test_the_sprite_declares_its_overflow_visible():
+    """The fact the clamping bug turned on. Checked against the asset
+    rather than against a harness of my own making -- wrapping a path in
+    a fresh <svg> without this attribute clips it, and that is how I
+    convinced myself browsers clip these."""
+    import re
+
+    text = icons.sprite_path().read_text(errors="replace")
+    symbols = re.findall(r"<symbol[^>]*>", text)
+    assert symbols and all('overflow="visible"' in s for s in symbols)

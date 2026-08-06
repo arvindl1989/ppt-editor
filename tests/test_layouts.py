@@ -314,3 +314,31 @@ def test_the_scrim_is_a_gradient_that_spares_the_middle_of_the_picture():
     assert grad is not None, "a flat fill would grey out the photograph"
     alphas = [int(a.get("val")) for a in grad.iter(f"{{{A}}}alpha")]
     assert alphas[0] > 0 and alphas[1] == 0 and alphas[2] > 0
+
+
+def test_icons_are_counted_against_content_not_geometry():
+    """An archetype serving both a plain and a grid form declares the
+    grid's origins either way. Counting those drew a full set of icons
+    onto the plain form -- four of them, two straddling the body
+    paragraph, on a slide that asked for none."""
+    spec = {
+        "regions": [{"role": "body", "box": [0, 0, 10, 10], "content": "body"}],
+        "groups": [{
+            "content": "items",
+            "origins": [[0, 0], [1, 0], [2, 0], [3, 0]],
+            "regions": [{"role": "icon", "box": [0, 0, 60, 60]}],
+        }],
+    }
+    assert L._icon_slots(spec, {"body": "just a paragraph"}) == 0
+    assert L._icon_slots(spec, {"items": [{}, {}]}) == 2
+    assert L._icon_slots(spec, {"items": [{}] * 9}) == 4   # never past the origins
+    assert L._icon_slots(spec) == 4                        # geometry, when asked
+
+
+def test_the_six_up_row_stays_inside_the_right_margin():
+    """The grid puts the last column at x=1065 and the page margin is
+    45, so a cell wider than 170 runs off the edge -- it was 187."""
+    group = L._REFINEMENTS["text_picture_g"]["groups"][0]
+    last_x = max(x for x, _ in group["origins"])
+    widest = max(r["box"][2] for r in group["regions"])
+    assert last_x + widest <= 1280 - 45

@@ -243,21 +243,31 @@ def viewbox_overflow(name: str) -> float:
     return max(0.0, max(xs) - VIEWBOX, max(ys) - VIEWBOX, -min(xs), -min(ys)) / VIEWBOX
 
 
+# The six whose geometry is not overshoot but junk: a long tail well
+# outside the frame, present in the asset itself. Everything else that
+# escapes the viewBox does so by 5-15%, which is deliberate.
+BROKEN_ICONS = frozenset({
+    "onbattery", "eco-energy", "battery-warning", "car", "piechart-4", "target",
+})
+
+
 def clamp_to_viewbox(ops: list[tuple]) -> list[tuple]:
     """Hold every coordinate inside the viewBox.
 
-    A browser CLIPS an SVG to its viewBox, so whatever spills is simply
-    not drawn -- `onbattery` renders as a battery with a flat bottom
-    edge, and the tail below it is invisible. DrawingML has no
-    equivalent: a `custGeom` draws its whole path regardless of the
-    shape's bounds, so that tail escaped down four rows of a grid.
+    NOT the default, and worth saying why. Every symbol in this sprite
+    declares `overflow="visible"`, so a browser does not clip them --
+    the 5-15% that most icons extend past their nominal 1024 frame is
+    intentional and is drawn. Clamping folds that onto the boundary,
+    which flattens the bottom off a mop-and-bucket and the base off an
+    elevator car. Reported as icons looking chopped, and correctly so.
 
-    True path clipping against a rectangle means splitting beziers,
-    which is a lot of machinery for six broken assets. Clamping the
-    points to the boundary produces the same flat edge for shapes that
-    cross it roughly perpendicular -- which is what these do -- and is a
-    no-op for the 46 icons that already fit. Verified against the
-    browser's own rendering rather than assumed.
+    (The mistake underneath it: I checked "does a browser clip this?" by
+    wrapping each path in a fresh `<svg viewBox=...>` of my own, which
+    has no `overflow="visible"` and therefore clipped. My harness
+    produced the answer, not the asset.)
+
+    It stays available for the six in `BROKEN_ICONS`, whose overflow is
+    a junk tail rather than overshoot.
     """
     def hold(value):
         return min(max(value, 0.0), float(VIEWBOX))
@@ -302,7 +312,7 @@ def custgeom_xml(ops: list[tuple], scale: int = VIEWBOX) -> etree._Element:
 KONE_BLUE = "1450F5"
 
 
-def add_icon(slide, name: str, box, colour: str = KONE_BLUE, clip: bool = True):
+def add_icon(slide, name: str, box, colour: str = KONE_BLUE, clip: Optional[bool] = None):
     """Draw a KONE pictogram as an editable shape. Returns it, or None
     if the icon does not exist.
 
@@ -310,9 +320,15 @@ def add_icon(slide, name: str, box, colour: str = KONE_BLUE, clip: bool = True):
     other geometry in this project. The icon keeps its aspect ratio --
     they are square, so it is centred in a non-square box.
 
-    `clip` holds the geometry inside the viewBox, as a browser does.
-    Without it the six badly overflowing icons draw far outside the box
-    they were given -- `onbattery` spilled down four rows of a grid.
+    The shape is sized to what the icon actually DRAWS, not to its
+    nominal 1024 frame, while keeping the viewBox-to-box scale so every
+    icon in a grid stays the same size. Most of the set extends a little
+    past that frame on purpose -- `overflow="visible"` -- so a shape
+    fixed at the frame either clipped them or let them spill.
+
+    `clip` defaults to holding only the six in `BROKEN_ICONS` inside
+    the frame, since their overflow is a junk tail rather than
+    overshoot. Pass True or False to force it either way.
     """
     from pptx.dml.color import RGBColor
     from pptx.enum.shapes import MSO_SHAPE
@@ -322,14 +338,27 @@ def add_icon(slide, name: str, box, colour: str = KONE_BLUE, clip: bool = True):
     if data is None:
         return None
 
+    ops = path_to_drawingml(data)
+    if clip is True or (clip is None and name in BROKEN_ICONS):
+        ops = clamp_to_viewbox(ops)
+
+    xs = [px for _, points in ops for px, _ in points]
+    ys = [py for _, points in ops for _, py in points]
+    lo_x, lo_y = min(xs), min(ys)
+    span_x, span_y = max(max(xs) - lo_x, 1e-6), max(max(ys) - lo_y, 1e-6)
+
     x, y, w, h = box
     side = min(w, h)
-    left, top = x + (w - side) / 2, y + (h - side) / 2
+    unit = side / VIEWBOX          # px per icon unit, from the NOMINAL frame
+    left = x + (w - side) / 2 + lo_x * unit
+    top = y + (h - side) / 2 + lo_y * unit
 
     def emu(px):
         return Emu(int(round(px * 9525)))
 
-    shape = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, emu(left), emu(top), emu(side), emu(side))
+    shape = slide.shapes.add_shape(
+        MSO_SHAPE.RECTANGLE, emu(left), emu(top),
+        emu(span_x * unit), emu(span_y * unit))
     shape.name = f"Icon {name}"
     shape.line.fill.background()
     shape.shadow.inherit = False
@@ -351,8 +380,11 @@ def add_icon(slide, name: str, box, colour: str = KONE_BLUE, clip: bool = True):
     # swap the preset rectangle for the icon's own outline
     spPr = shape._element.spPr
     prst = spPr.find(f"{{{A_NS}}}prstGeom")
-    ops = path_to_drawingml(data)
-    geom = custgeom_xml(clamp_to_viewbox(ops) if clip else ops)
+    local = [(op, [(px - lo_x, py - lo_y) for px, py in points]) for op, points in ops]
+    geom = custgeom_xml(local)
+    path_el = geom.find(f".//{{{A_NS}}}path")
+    path_el.set("w", str(max(1, int(round(span_x)))))
+    path_el.set("h", str(max(1, int(round(span_y)))))
     if prst is not None:
         spPr.replace(prst, geom)
     else:  # pragma: no cover -- every autoshape has one

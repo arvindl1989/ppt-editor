@@ -443,11 +443,23 @@ def _icon_names_for(spec: dict, content: dict, slots: int) -> list[str]:
     return chosen
 
 
-def _icon_slots(spec: dict) -> int:
+def _icon_slots(spec: dict, content: Optional[dict] = None) -> int:
+    """How many icons this slide actually needs.
+
+    Counted against the content, not the geometry. An archetype that
+    serves both a plain and a grid form declares the grid's origins
+    either way, so counting those drew a full set of icons onto the
+    plain form -- four of them, two straddling the body paragraph.
+    """
     n = sum(1 for r in spec.get("regions", []) if r.get("role") == "icon")
     for group in spec.get("groups", []):
         per = sum(1 for r in group["regions"] if r.get("role") == "icon")
-        n += per * len(group["origins"])
+        if not per:
+            continue
+        supplied = len(group["origins"]) if content is None else len(
+            (content.get(group["content"]) or [])[:len(group["origins"])]
+        )
+        n += per * supplied
     return n
 
 
@@ -513,7 +525,7 @@ def render(slide, name: str, content: dict, archetypes_module) -> None:
     # blue placeholder chip in the same box.
     from deckguard import icons as icon_mod
 
-    slots = _icon_slots(spec)
+    slots = _icon_slots(spec, filled)
     native = bool(icon_mod.load_icons()) and slots
     if native:
         engine_spec["regions"] = [r for r in engine_spec["regions"] if r.get("role") != "icon"]
@@ -539,7 +551,8 @@ def render(slide, name: str, content: dict, archetypes_module) -> None:
                 icon_mod.add_icon(slide, chosen[index], region["box"])
                 index += 1
         for group in spec.get("groups", []):
-            for (ox, oy) in group["origins"]:
+            items = filled.get(group["content"]) or []
+            for (ox, oy), _item in zip(group["origins"], items):
                 for region in group["regions"]:
                     if region.get("role") != "icon":
                         continue
@@ -829,7 +842,7 @@ _REFINEMENTS: dict[str, dict] = {
             "origins": [[45, 476], [249, 476], [453, 476], [657, 476], [861, 476], [1065, 476]],
             "regions": [
                 {"role": "icon", "box": [0, 0, 60, 60]},
-                _text(0, 71, 187, 83, "text", 15),
+                _text(0, 71, 170, 83, "text", 15),
             ],
         }],
     },
