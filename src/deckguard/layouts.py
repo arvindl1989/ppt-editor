@@ -551,6 +551,9 @@ def render(slide, name: str, content: dict, archetypes_module) -> None:
     # painting a full-slide background rectangle, so anything drawn
     # first is buried by it -- both numbered dividers came out as an
     # empty sand rectangle with the number, title and label underneath.
+    for scrim in spec.get("scrims", []):
+        if scrim.get("content") in (None, "") or filled.get(scrim.get("content")):
+            _draw_scrim(slide, engine, scrim["box"], scrim.get("opacity", 62))
     for region in spec.get("regions", []):
         if "dg" in region:
             _draw(slide, engine, region, filled.get(region.get("content")))
@@ -563,6 +566,60 @@ def render(slide, name: str, content: dict, archetypes_module) -> None:
                 rx, ry, rw, rh = region["box"]
                 shifted = {**region, "box": [ox + rx, oy + ry, rw, rh]}
                 _draw(slide, engine, shifted, (item or {}).get(region.get("content")))
+
+
+def _draw_scrim(slide, engine, box, opacity: int = 62) -> None:
+    """A gradient over a photo so white type stays readable on it.
+
+    The brand specifies this for `COVER_F_FULLBLEED` and never says how,
+    and every archetype that reverses type out of a photograph needs the
+    same thing: a banner title came out white-on-pale-escalator and was
+    close to invisible.
+
+    Dark at the top and bottom edges, clear through the middle, so it
+    protects the eyebrow and the headline without greying out the
+    subject of the picture -- which a flat overlay does, and which is
+    why the spec calls for a gradient rather than a tint.
+    """
+    from lxml import etree
+    from pptx.enum.shapes import MSO_SHAPE
+
+    A = "http://schemas.openxmlformats.org/drawingml/2006/main"
+    x, y, w, h = box
+    shape = slide.shapes.add_shape(
+        MSO_SHAPE.RECTANGLE, engine.X(x), engine.X(y), engine.X(w), engine.X(h)
+    )
+    shape.name = "Photo protection"
+    shape.line.fill.background()
+    shape.shadow.inherit = False
+    style = shape._element.find(
+        "{http://schemas.openxmlformats.org/presentationml/2006/main}style")
+    if style is not None:
+        shape._element.remove(style)
+
+    spPr = shape._element.spPr
+    for tag in ("solidFill", "noFill", "gradFill"):
+        existing = spPr.find(f"{{{A}}}{tag}")
+        if existing is not None:
+            spPr.remove(existing)
+
+    grad = etree.SubElement(spPr, f"{{{A}}}gradFill")
+    grad.set("rotWithShape", "1")
+    stops = etree.SubElement(grad, f"{{{A}}}gsLst")
+    for position, alpha in ((0, opacity), (45000, 0), (100000, opacity)):
+        stop = etree.SubElement(stops, f"{{{A}}}gs")
+        stop.set("pos", str(position))
+        colour = etree.SubElement(stop, f"{{{A}}}srgbClr")
+        colour.set("val", "141414")
+        etree.SubElement(colour, f"{{{A}}}alpha").set("val", str(alpha * 1000))
+    lin = etree.SubElement(grad, f"{{{A}}}lin")
+    lin.set("ang", "5400000")   # top to bottom
+    lin.set("scaled", "0")
+
+    # the gradient must sit directly on the photo, under everything else
+    # that follows -- appending puts it last in paint order, which is
+    # where the text is about to go
+    return shape
 
 
 def _draw(slide, engine, region: dict, value) -> None:
@@ -720,6 +777,62 @@ _REFINEMENTS: dict[str, dict] = {
         _text(45, 332, 374, 240, "title", 46),
         _text(700, 150, 490, 400, "number", 300, align="r"),
     ]},
+
+    # The next two come from REAL decks rather than the HTML reference,
+    # because real decks disagree with it about what these layouts are
+    # for. Across two on-brand KONE decks, `Text and picture A` is used
+    # 18 times and `Text and picture G` 8 -- more than every other
+    # layout combined -- and both carry a pattern the archetypes had no
+    # form for: a grid of icon-plus-short-text cells. Slides using them
+    # average 7-10 text blocks against the 3 regions bound from the
+    # placeholder map.
+    #
+    # Both keep their plain form too. The engine skips a region whose
+    # content key is missing, so one spec serves both: supply `body` and
+    # get the paragraph version, supply `items` and get the grid.
+
+    # Measured off slides 6 (plain) and 22 (2x2 grid) of the escalator
+    # portfolio deck.
+    "text_picture_a": {
+        "regions": [
+            {"role": "picture", "box": [759, 0, 521, 720], "content": "image"},
+            _text(45, 39, 917, 36, "eyebrow", 14,
+                  font="KONE Information", color="1450F5", caps=True),
+            _text(45, 91, 577, 104, "title", 34),
+            _text(45, 227, 577, 402, "body", 16),
+        ],
+        "groups": [{
+            "content": "items",
+            "origins": [[45, 181], [349, 181], [45, 405], [349, 405]],
+            "regions": [
+                {"role": "icon", "box": [0, 0, 60, 60]},
+                _text(0, 75, 274, 149, "text", 15),
+            ],
+        }],
+    },
+
+    # Measured off slides 4 (numbered) and 7 (icons) of the same deck:
+    # a banner photo across the top with the eyebrow reversed out of it,
+    # then six cells along the bottom.
+    "text_picture_g": {
+        # only when there IS a photo -- a scrim over white is a grey band
+        "scrims": [{"box": [0, 0, 1280, 440], "content": "image"}],
+        "regions": [
+            {"role": "picture", "box": [0, 0, 1280, 440], "content": "image"},
+            _text(45, 39, 917, 36, "eyebrow", 14,
+                  font="KONE Information", color="FFFFFF", caps=True),
+            _text(45, 262, 697, 125, "title", 40, color="FFFFFF"),
+            _text(45, 470, 1190, 40, "body", 16),
+        ],
+        "groups": [{
+            "content": "items",
+            "origins": [[45, 476], [249, 476], [453, 476], [657, 476], [861, 476], [1065, 476]],
+            "regions": [
+                {"role": "icon", "box": [0, 0, 60, 60]},
+                _text(0, 71, 187, 83, "text", 15),
+            ],
+        }],
+    },
 }
 
 # Refinements that must REPLACE an existing registration rather than

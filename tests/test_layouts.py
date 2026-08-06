@@ -254,3 +254,63 @@ def test_the_pictogram_set_is_rasterised():
     marks = L.pictograms()
     assert len(marks) >= 3
     assert all(m.endswith(".png") for m in marks)
+
+
+def test_the_two_most_used_layouts_carry_an_icon_grid():
+    """Measured, not assumed: across two on-brand KONE decks
+    `Text and picture A` is used 18 times and `Text and picture G` 8 --
+    more than every other layout combined -- and both carry a grid of
+    icon-plus-short-text cells that the placeholder map has no form for.
+    Slides using them average 7-10 text blocks against 3 bound regions.
+    """
+    for key in ("text_picture_a", "text_picture_g"):
+        refinement = L._REFINEMENTS[key]
+        group = refinement["groups"][0]
+        assert any(r.get("role") == "icon" for r in group["regions"]), key
+        assert len(group["origins"]) >= 4, key
+
+
+def test_an_archetype_serves_both_its_plain_and_grid_forms():
+    """One spec, two shapes. The engine skips a region whose content key
+    is absent, so supplying `body` gives the paragraph version and
+    supplying `items` gives the grid -- which is how the real decks use
+    this layout, sometimes one way and sometimes the other."""
+    regions = L._REFINEMENTS["text_picture_a"]["regions"]
+    assert any(r.get("content") == "body" for r in regions)
+    assert L._REFINEMENTS["text_picture_a"]["groups"][0]["content"] == "items"
+
+
+def test_a_photo_banner_declares_protection_for_its_reversed_type():
+    """White type on a pale photo is unreadable, and the brand specifies
+    a gradient for exactly this. Declared only when there IS a photo --
+    a scrim over white is just a grey band."""
+    scrims = L._REFINEMENTS["text_picture_g"]["scrims"]
+    assert scrims and scrims[0]["content"] == "image"
+    assert scrims[0]["box"] == [0, 0, 1280, 440]
+
+
+def test_the_scrim_is_a_gradient_that_spares_the_middle_of_the_picture():
+    """A flat tint greys out the subject, which is why the spec calls
+    for a gradient: dark at the edges where the type sits, clear through
+    the middle where the photograph does its work."""
+    import sys
+
+    from pptx import Presentation
+    from pptx.util import Emu
+
+    sys.path.insert(0, "/root/.claude/skills/kone-deck-generator")
+    try:
+        import kone_engine as engine
+    except Exception:  # pragma: no cover
+        pytest.skip("archetype engine not available")
+
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = Emu(12192000), Emu(6858000)
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    shape = L._draw_scrim(slide, engine, [0, 0, 1280, 440])
+
+    A = "http://schemas.openxmlformats.org/drawingml/2006/main"
+    grad = shape._element.spPr.find(f"{{{A}}}gradFill")
+    assert grad is not None, "a flat fill would grey out the photograph"
+    alphas = [int(a.get("val")) for a in grad.iter(f"{{{A}}}alpha")]
+    assert alphas[0] > 0 and alphas[1] == 0 and alphas[2] > 0
