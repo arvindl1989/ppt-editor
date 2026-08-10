@@ -442,13 +442,17 @@ def build_pick(_auth: None = Depends(_require_auth)):
     sets = brandmode.slide_sets()
     slides = {a: brandmode.slides_in(a) for a in brandmode.set_names()}
     body = tpl.builder_pick_page(sets, slides)
-    return HTMLResponse(tpl.page_shell("Build a deck", body))
+    return HTMLResponse(tpl.page_shell("Build a deck", body, wide=True))
 
 
 @app.post("/build/compose", response_class=HTMLResponse)
 async def build_compose(request: Request, _auth: None = Depends(_require_auth)):
     from deckguard import brandmode
-    from deckguard.skill_bridge import _archetype_image_slots, _derived_content_keys
+    from deckguard.skill_bridge import (
+        _archetype_image_slots,
+        _derived_content_keys,
+        _load_archetypes,
+    )
 
     form = await request.form()
     picks = [p for p in form.getlist("pick") if ":" in p]
@@ -458,11 +462,16 @@ async def build_compose(request: Request, _auth: None = Depends(_require_auth)):
             tpl.builder_pick_page(brandmode.slide_sets(),
                                   {a: brandmode.slides_in(a) for a in brandmode.set_names()})
             .replace("<h2", '<p class="field-hint" style="color:#b00;">'
-                     "Pick at least one slide.</p><h2", 1)), status_code=400)
+                     "Pick at least one slide.</p><h2", 1), wide=True), status_code=400)
 
     audience = picks[0].split(":", 1)[0]
     wanted = {int(p.split(":", 1)[1]) for p in picks if p.startswith(audience + ":")}
-    chosen = [s for s in brandmode.slides_in(audience) if s["n"] in wanted]
+    built = set(_load_archetypes().ARCHETYPES)
+    chosen = [s for s in brandmode.slides_in(audience)
+              if s["n"] in wanted and s["archetype"] in built]
+    if not chosen:
+        return _home("Those slides are not built yet. Pick ones with a preview.",
+                     status_code=400)
 
     image_slots = _archetype_image_slots()
     slides = []

@@ -49,6 +49,9 @@ BASE_CSS = """
   a { color: var(--accent); text-decoration: none; }
   a:hover { color: var(--accent-hover); text-decoration: underline; }
   .wrap { max-width: 760px; margin: 0 auto; padding: 0 1.5rem 5rem; }
+  /* The picker shows 25 slide previews; 760px fits two per row, which
+     makes choosing a scroll rather than a glance. */
+  .wrap.wide { max-width: 1320px; }
   .topbar {
     display: flex; align-items: center; gap: 0.65rem;
     padding: 1.6rem 0 1.2rem;
@@ -244,7 +247,7 @@ def _esc(v) -> str:
     return html.escape(str(v)) if v is not None else ""
 
 
-def page_shell(title: str, body: str, home: bool = False) -> str:
+def page_shell(title: str, body: str, home: bool = False, wide: bool = False) -> str:
     back = "" if home else '<a href="/" style="font-size:0.85rem;font-weight:600;">&larr; deckguard</a>'
     return f"""<!doctype html>
 <html><head>
@@ -252,7 +255,7 @@ def page_shell(title: str, body: str, home: bool = False) -> str:
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{_esc(title)}</title>
 <style>{BASE_CSS}</style>
-</head><body><div class="wrap">
+</head><body><div class="wrap{' wide' if wide else ''}">
 <div class="topbar">
   <div class="brand">{KONE_LOGO_SVG}<h1>deckguard</h1></div>
   {back}
@@ -831,22 +834,52 @@ def transform_result_page(
 
 
 def _set_card(audience: str, entry: dict, slides: list) -> str:
-    rows = "\n".join(
-        f'''<label class="pick-row">
+    """The 25 as preview tiles.
+
+    Each tile is a wireframe drawn from the SAME region and group data
+    the pptx renderer consumes, so what you pick is the shape you get.
+    The sample words are there to make the slide recognisable at
+    thumbnail size -- none of them reach the deck.
+    """
+    from deckguard.preview import archetype_preview_html, sample_content
+    from deckguard.skill_bridge import _load_archetypes
+
+    built = set(_load_archetypes().ARCHETYPES)
+    tiles = []
+    for s in slides:
+        arch = s["archetype"]
+        # Five of the 50 are named by the sets but not yet drawn. Picking
+        # one used to build a blank slide with no warning, which is worse
+        # than not offering it.
+        if arch not in built:
+            tiles.append(f'''<span class="tile tile-unbuilt">
+      <span class="tile-frame"><span class="unbuilt-frame">Not built yet</span></span>
+      <span class="tile-meta">
+        <span class="tile-n">{s['n']:02d}</span>
+        <span class="tile-name">{_esc(arch)}</span>
+        <span class="tile-group">{_esc(s['group'])} &middot; {_esc(s['field'])}</span>
+      </span>
+    </span>''')
+            continue
+        preview = archetype_preview_html(arch, sample_content(arch))
+        tiles.append(f'''<label class="tile">
       <input type="checkbox" name="pick" value="{audience}:{s['n']}">
-      <span class="pick-n">{s['n']:02d}</span>
-      <span class="pick-name">{_esc(s['archetype'])}</span>
-      <span class="pick-group">{_esc(s['group'])}</span>
-      <span class="pick-field">{_esc(s['field'])}</span>
-    </label>''' for s in slides)
+      <span class="tile-frame">{preview}</span>
+      <span class="tile-meta">
+        <span class="tile-n">{s['n']:02d}</span>
+        <span class="tile-name">{_esc(arch)}</span>
+        <span class="tile-group">{_esc(s['group'])} &middot; {_esc(s['field'])}</span>
+      </span>
+    </label>''')
     return f'''<div class="set-panel" data-audience="{audience}">
   <p class="field-hint" style="margin:0 0 .8rem;">{_esc(entry.get("audience", ""))}
     &middot; {_esc(entry.get("field_policy", ""))}</p>
   <div class="pick-bulk">
     <button type="button" class="secondary" onclick="pickAll('{audience}', true)">Select all 25</button>
     <button type="button" class="secondary" onclick="pickAll('{audience}', false)">Clear</button>
+    <span class="pick-count" data-for="{audience}"></span>
   </div>
-  {rows}
+  <div class="tile-grid">{"".join(tiles)}</div>
 </div>'''
 
 
@@ -887,13 +920,28 @@ function showSet(a) {{
   document.querySelectorAll('.set-panel').forEach(function (p) {{
     if (p.dataset.audience !== a) {{
       p.querySelectorAll('input[name=pick]').forEach(function (c) {{ c.checked = false; }});
+      refreshCount(p.dataset.audience);
     }}
   }});
 }}
 function pickAll(a, on) {{
   document.querySelectorAll('.set-panel[data-audience="' + a + '"] input[name=pick]')
     .forEach(function (c) {{ c.checked = on; }});
+  refreshCount(a);
 }}
+function refreshCount(a) {{
+  var panel = document.querySelector('.set-panel[data-audience="' + a + '"]');
+  var n = panel.querySelectorAll('input[name=pick]:checked').length;
+  panel.querySelector('.pick-count').textContent = n ? n + ' selected' : '';
+}}
+document.querySelectorAll('input[name=pick]').forEach(function (c) {{
+  c.addEventListener('change', function () {{
+    refreshCount(c.closest('.set-panel').dataset.audience);
+  }});
+}});
+document.querySelectorAll('.set-panel').forEach(function (p) {{
+  refreshCount(p.dataset.audience);
+}});
 showSet(document.querySelector('.tab').dataset.audience);
 </script>'''
 
@@ -903,14 +951,27 @@ _BUILDER_PICK_STYLE = """<style>
 .tab { padding:.45rem .9rem; font-size:.85rem; border:1px solid var(--border);
        background:var(--surface); cursor:pointer; border-radius:0; }
 .tab.on { background:var(--accent); color:#fff; border-color:var(--accent); }
-.pick-row { display:grid; grid-template-columns:1.4rem 2rem 1fr 8rem 5rem;
-            gap:.6rem; align-items:center; padding:.4rem .5rem; font-size:.85rem;
-            border-bottom:1px solid var(--border); cursor:pointer; }
-.pick-row:hover { background:var(--surface-2); }
-.pick-n { font-variant-numeric:tabular-nums; color:var(--muted); }
-.pick-name { font-weight:600; }
-.pick-group, .pick-field { color:var(--muted); font-size:.78rem; text-transform:uppercase;
-                           letter-spacing:.04em; }
+.tile-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(230px, 1fr));
+             gap:.9rem; }
+.tile { display:block; position:relative; cursor:pointer; }
+.tile input { position:absolute; top:.4rem; left:.4rem; z-index:2; width:1.05rem;
+              height:1.05rem; accent-color:var(--accent); }
+.tile-frame { display:block; outline:2px solid transparent; outline-offset:2px; }
+.tile:hover .tile-frame { outline-color:var(--border); }
+.tile:has(input:checked) .tile-frame { outline-color:var(--accent); }
+.tile-meta { display:grid; grid-template-columns:1.7rem 1fr; gap:0 .35rem;
+             margin-top:.35rem; align-items:baseline; }
+.tile-n { font-variant-numeric:tabular-nums; color:var(--muted); font-size:.78rem; }
+.tile-name { font-weight:600; font-size:.8rem; word-break:break-word; }
+.tile-group { grid-column:2; color:var(--muted); font-size:.7rem; text-transform:uppercase;
+              letter-spacing:.04em; }
+.pick-count { font-size:.8rem; color:var(--muted); align-self:center; }
+.tile-unbuilt { opacity:.55; cursor:not-allowed; }
+.unbuilt-frame { display:flex; align-items:center; justify-content:center;
+                 aspect-ratio:1280/720; border:1px dashed #C4C4C4; border-radius:6px;
+                 background:repeating-linear-gradient(45deg,#FAFAFA,#FAFAFA 8px,#F2F2F2 8px,#F2F2F2 16px);
+                 font-size:.75rem; color:var(--muted); text-transform:uppercase;
+                 letter-spacing:.05em; }
 .pick-bulk { display:flex; gap:.4rem; margin-bottom:.6rem; }
 .slide-edit { border:1px solid var(--border); padding:1rem; margin-bottom:.9rem; }
 .slide-edit h3 { margin:0 0 .1rem; font-size:.92rem; }

@@ -23,11 +23,18 @@ def _compose(client, picks):
     return re.search(r"/build/generate/([a-f0-9]+)", r.text).group(1), r.text
 
 
-def test_the_picker_offers_both_sets_and_all_fifty_slides(client):
+def test_the_picker_offers_both_sets_and_every_slide_in_them(client):
+    """All 50 appear; the ones whose archetype is not drawn yet appear
+    as unpickable tiles rather than being hidden, so the set still reads
+    as 25 and the gap is visible."""
+    from deckguard import brandmode as B
+
     r = client.get("/build")
     assert r.status_code == 200
-    assert r.text.count('name="pick"') == 50
     assert "Internal 25" in r.text and "External 25" in r.text
+    for audience in B.set_names():
+        for slide in B.slides_in(audience):
+            assert slide["archetype"] in r.text
 
 
 def test_composing_offers_a_slot_for_every_key_the_renderer_reads(client):
@@ -116,3 +123,79 @@ def test_a_build_with_no_slides_picked_asks_for_one(client):
     r = client.post("/build/compose", data={})
     assert r.status_code == 400
     assert "Pick at least one slide" in r.text
+
+
+# --------------------------------------------------------------------------
+# previews
+# --------------------------------------------------------------------------
+
+
+def test_every_pickable_slide_shows_a_wireframe_preview(client):
+    """The preview is drawn from the same region and group data the pptx
+    renderer consumes, so what you pick is the shape you get."""
+    r = client.get("/build")
+    pickable = r.text.count('name="pick"')
+    assert r.text.count("data-dg-frame") == pickable
+    assert pickable >= 40
+
+
+def test_slides_whose_archetype_is_not_built_are_shown_but_not_pickable(client):
+    """Five of the 50 are named by the sets and not yet drawn. Picking
+    one built a blank slide with no warning, which is worse than not
+    offering it."""
+    from deckguard.skill_bridge import _load_archetypes
+
+    from deckguard import brandmode as B
+
+    built = set(_load_archetypes().ARCHETYPES)
+    unbuilt = {a for a in B.canonical_archetypes() if a not in built}
+    assert unbuilt, "if every archetype is built, this guard can go"
+
+    r = client.get("/build")
+    assert "NOT BUILT YET" in r.text.upper()
+    for name in unbuilt:
+        # named on the page, but never inside a pickable label
+        assert name in r.text
+    # and the count of checkboxes is short by exactly the unbuilt slides
+    total = sum(len(B.slides_in(a)) for a in B.set_names())
+    unbuilt_slides = sum(1 for a in B.set_names() for s in B.slides_in(a)
+                         if s["archetype"] in unbuilt)
+    assert r.text.count('name="pick"') == total - unbuilt_slides
+
+
+def test_a_forged_pick_of_an_unbuilt_archetype_is_refused(client):
+    """The checkbox is absent, so this only happens to a crafted post --
+    but a blank slide reaching a customer deck is worth the guard."""
+    from deckguard.skill_bridge import _load_archetypes
+
+    from deckguard import brandmode as B
+
+    built = set(_load_archetypes().ARCHETYPES)
+    victim = next(s for s in B.slides_in("external") if s["archetype"] not in built)
+    r = client.post("/build/compose", data={"pick": [f"external:{victim['n']}"]})
+    assert r.status_code == 400
+    assert "not built yet" in r.text.lower()
+
+
+def test_a_list_value_never_reaches_a_preview_as_python_source():
+    """`['Standardise intake', ...]` was rendering verbatim on every
+    archetype whose bullet slot is not role `bullets`."""
+    from deckguard.preview import archetype_preview_html, sample_content
+
+    for name in ("title_content", "title_subtitle_content_a", "two_content"):
+        html = archetype_preview_html(name, sample_content(name))
+        assert "['" not in html and "', '" not in html, name
+
+
+def test_sample_content_is_preview_only_and_never_invents_deck_copy():
+    """The builder leaves an unfilled slot empty; these words exist so a
+    thumbnail is recognisable, and must not leak into a build."""
+    from deckguard.preview import sample_content
+
+    from deckguard.web import _spec_from_form
+
+    assert sample_content("two_content")            # the preview has words
+    plan = {"audience": "external", "slides": [
+        {"id": "x", "archetype": "two_content", "slots": [("title", "text")]}]}
+    built = _spec_from_form(plan, {})
+    assert built["slides"][0] == {"archetype": "two_content"}

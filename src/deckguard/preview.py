@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import html
 import importlib
+import re
 from typing import Optional
 
 SLIDE_W_PX = 1280.0
@@ -309,6 +310,14 @@ def archetype_preview_html(archetype_name: str, content: dict) -> str:
                 )
                 parts.append(_box(left, top, wp, hp, lines))
             else:
+                if isinstance(val, list):
+                    # A list reaching a plain text region rendered as
+                    # Python source -- "['Standardise intake', ...]" --
+                    # on every archetype whose bullet slot is not role
+                    # `bullets`. Show it as lines instead.
+                    val = " · ".join(
+                        str(v.get("text", next(iter(v.values()), "")) if isinstance(v, dict) else v)
+                        for v in val)
                 text = _clip(val, _MAX_TEXT)
                 if text:
                     parts.append(
@@ -398,3 +407,70 @@ def org_layout_preview_html(
         return f'<div{_FRAME_ATTR} style="{_FRAME_STYLE.format(bg="#FFFFFF")}">{"".join(parts)}</div>'
     except Exception:
         return _fallback_card(getattr(layout, "name", "layout"))
+
+
+# --------------------------------------------------------------------------
+# sample content, for previewing an archetype before it has any
+# --------------------------------------------------------------------------
+
+# Words chosen so a wireframe reads as the SHAPE of the slide rather than
+# as lorem: a preview whose job is "what am I picking" needs the reader
+# to recognise a quote slide as a quote slide at thumbnail size.
+_SAMPLE_WORDS = {
+    "title": "Request Management moves to ServiceNow",
+    "eyebrow": "Marketing Hub", "heading": "Standardise intake",
+    "subtitle": "What changed, and what happens next",
+    "lede": "The Hub moved its entire framework across with full data continuity.",
+    "statement": "Repair is no longer the cheaper option.",
+    "body": "Volume roughly doubled year on year while resolution held at 91 per cent.",
+    "text": "Standardise intake and reporting on ServiceNow.",
+    "quote": "A benchmark in easy to work with, easy to work for.",
+    "label": "Frontlines", "value": "12", "number": "01", "item": "What changed",
+    "period": "Q2 2026", "caption": "Marketing Hub", "footer": "Marketing Hub · April 2026",
+    "scope": "KSEA · KMTA · KANZ · KEI · EEM", "name": "Suresh Kumar",
+    "note": "And the Hub specialists.", "credits": "Arvind, Rupesh and Golda",
+    "support": "Measured across twelve frontlines over six weeks.",
+    "attribution": "Head of Marketing Operations", "classification": "KONE Internal",
+}
+
+
+def _sample_word(key: str) -> str:
+    for stem, word in _SAMPLE_WORDS.items():
+        if stem in key:
+            return word
+    return "Marketing Hub"
+
+
+def sample_content(archetype_name: str) -> dict:
+    """Plausible content for an archetype, for preview only.
+
+    Prefers the skill's own worked example where one exists; otherwise
+    fills each slot from its name. Never used to build a deck -- the
+    builder leaves an unfilled slot empty rather than inventing copy.
+    """
+    try:
+        from deckguard.skill_bridge import _derived_content_keys, _load_archetypes
+
+        archetypes = _load_archetypes()
+        sample = getattr(archetypes, "SAMPLES", {}).get(archetype_name)
+        if isinstance(sample, dict):
+            return dict(sample)
+        out: dict = {}
+        for raw in _derived_content_keys(archetype_name):
+            key = raw.split(" (")[0]
+            if "filled automatically" in raw:
+                continue
+            match = re.search(r"list of up to (\d+) × \{([^}]*)\}", raw)
+            if match:
+                count = min(int(match.group(1)), 4)
+                fields = [f.strip().split(":")[0] for f in match.group(2).split(",")]
+                out[key] = [{f: _sample_word(f) for f in fields} for _ in range(count)]
+            elif "list of" in raw:
+                out[key] = ["Standardise intake on ServiceNow",
+                            "Automate repeat request types",
+                            "Publish live queue status"]
+            else:
+                out[key] = _sample_word(key)
+        return out
+    except Exception:  # noqa: BLE001 -- a preview must never break the page
+        return {}
