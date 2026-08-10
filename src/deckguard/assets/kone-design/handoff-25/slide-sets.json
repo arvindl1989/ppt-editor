@@ -1,0 +1,155 @@
+{
+  "version": 1,
+  "note": "Two curated archetype sets for generation. Names are canonical UPPER_SNAKE keys from REGISTRY.md and resolve case-insensitively. Order is deck order. See EXTERNAL_25.md and INTERNAL_25.md.",
+  "sets": {
+    "external": {
+      "count": 25,
+      "audience": "customers, prospects, partners",
+      "field_policy": "white only; no secondary colour anywhere. Blue as spot colour on white, and as a full field on slides 19 (stat band) and 20 (quote panel) only.",
+      "icons": "none required",
+      "status": "built \u2014 External 25.dc.html",
+      "built_file": "External 25.dc.html",
+      "groups": [
+        { "name": "opening", "slides": [
+          { "n": 1, "archetype": "COVER_A_CUT4", "field": "white", "footer": false },
+          { "n": 2, "archetype": "COVER_F_FULLBLEED", "field": "photo", "footer": false, "photo_protection": true },
+          { "n": 3, "archetype": "AGENDA_B_NUMBERED", "field": "white", "footer": true }
+        ]},
+        { "name": "structure", "slides": [
+          { "n": 4, "archetype": "DIVIDER_NUMBERING", "field": "white", "footer": false },
+          { "n": 5, "archetype": "IMAGE_SECTION_DIVIDER", "field": "photo", "footer": false, "photo_protection": true }
+        ]},
+        { "name": "argument", "slides": [
+          { "n": 6, "archetype": "STATEMENT_A", "field": "white", "footer": true },
+          { "n": 7, "archetype": "TITLE_CONTENT", "field": "white", "footer": true },
+          { "n": 8, "archetype": "TITLE_SUBTITLE_CONTENT_A", "field": "white", "footer": true },
+          { "n": 9, "archetype": "TWO_CONTENT", "field": "white", "footer": true },
+          { "n": 10, "archetype": "TWO_CONTENT_NARROW_TITLE", "field": "white", "footer": true },
+          { "n": 11, "archetype": "THREE_CONTENT", "field": "white", "footer": true }
+        ]},
+        { "name": "photography", "slides": [
+          { "n": 12, "archetype": "TEXT_PICTURE_A", "field": "white", "footer": true },
+          { "n": 13, "archetype": "TEXT_PICTURE_G", "field": "white", "footer": true },
+          { "n": 14, "archetype": "TEXT_PICTURE_B", "field": "white", "footer": true },
+          { "n": 15, "archetype": "THREE_PICTURES_TEXT", "field": "white", "footer": true },
+          { "n": 16, "archetype": "TWO_PICTURES_TEXT_B", "field": "white", "footer": true }
+        ]},
+        { "name": "proof", "slides": [
+          { "n": 17, "archetype": "HERO_STAT", "field": "white", "footer": true },
+          { "n": 18, "archetype": "STATEMENT_B", "field": "white", "footer": true },
+          { "n": 19, "archetype": "KONE_NUMBERS", "field": "white", "footer": true },
+          { "n": 20, "archetype": "QUOTE_A", "field": "blue", "footer": true, "type_on_field": "white" }
+        ]},
+        { "name": "offer", "slides": [
+          { "n": 21, "archetype": "VALUE_PROP_FOUR_POINT", "field": "white", "footer": true },
+          { "n": 22, "archetype": "HOW_IT_WORKS_3STEP", "field": "white", "footer": true },
+          { "n": 23, "archetype": "TIMELINE", "field": "white", "footer": true },
+          { "n": 24, "archetype": "COMPARISON_TABLE", "field": "white", "footer": true }
+        ]},
+        { "name": "close", "slides": [
+          { "n": 25, "archetype": "OUTRO", "field": "white", "footer": false }
+        ]}
+      ],
+      "footer_policy": "date bottom-left x:45 y:658, page number bottom-right x:1167 y:658; absent on 1, 2, 4, 5, 25; white on slide 20",
+      "excluded": {
+        "COVER_B_CUT3": "one default cover plus one full-bleed is enough",
+        "COVER_C_CUT4_WIDE": "same",
+        "DIVIDER_TITLE_ONLY": "colour-field variants belong to the internal set",
+        "AGENDA_A_TABLE": "owners and dates are internal",
+        "ICON_COLUMNS_5": "requires named icons",
+        "NUMBERED_ICON_ROW_6": "requires named icons",
+        "RESOURCE_LINKS": "requires named icons",
+        "LIFECYCLE_4STAGE": "requires named icons",
+        "SEGMENT_BREAKDOWN": "requires named icons",
+        "REPORT_TWO_CONTENT": "annual-report density, not sales",
+        "REPORT_THREE_CONTENT": "annual-report density, not sales",
+        "REPORT_FIVE_CONTENT": "annual-report density, not sales",
+        "REPORT_SEVEN_CONTENT": "annual-report density, not sales",
+        "MATRIX_2X2": "planning artefact",
+        "QUARTERLY_PLAN_4COL": "planning artefact",
+        "TIMELINE_QUARTER_AXIS": "planning artefact",
+        "ORG_FUNCTIONS": "team artefact",
+        "MILESTONE_SLIDE": "internal announcement",
+        "CREDITS": "internal decks name people, external decks do not",
+        "OFFER_CTA": "price panel, sales-led rather than brand-led; ask first"
+      }
+    },
+    "internal": {
+      "count": 25,
+      "audience": "town halls, all-hands, programme updates, planning, ways of working",
+      "field_policy": "secondary fields allowed; max two secondary colours per layout; never yellow or green as a field; KONE Blue present on every slide",
+      "icons": "named pictograms required on slides 7, 8, 9, 17, 24 — must render legally with none",
+      "status": "built \u2014 Internal 25 v2.dc.html",
+      "built_file": "Internal 25 v2.dc.html",
+      "groups": [
+        { "name": "opening", "slides": [
+          { "n": 1, "archetype": "COVER_B_CUT3", "field": "sand", "footer": false, "note": "mask panes in sand instead of blue" },
+          { "n": 2, "archetype": "PICTURE_INTRO", "field": "white", "footer": true },
+          { "n": 3, "archetype": "AGENDA_C_SPLIT", "field": "white", "footer": true }
+        ]},
+        { "name": "structure", "slides": [
+          { "n": 4, "archetype": "DIVIDER_TITLE_ONLY", "field": "light-blue", "footer": false },
+          { "n": 5, "archetype": "DIVIDER_NUMBERING", "field": "sand", "footer": false, "note": "alternate with slide 4 so consecutive breaks differ" },
+          { "n": 6, "archetype": "IMAGE_SECTION_DIVIDER", "field": "photo", "footer": false, "photo_protection": true }
+        ]},
+        { "name": "orientation", "slides": [
+          { "n": 7, "archetype": "ICON_COLUMNS_5", "field": "white", "footer": true, "needs_icons": true },
+          { "n": 8, "archetype": "NUMBERED_ICON_ROW_6", "field": "white", "footer": true, "needs_icons": true },
+          { "n": 9, "archetype": "LIFECYCLE_4STAGE", "field": "white", "footer": true, "needs_icons": true, "note": "illustration band instead of photo band" },
+          { "n": 10, "archetype": "HOW_IT_WORKS_3STEP", "field": "white", "footer": true, "note": "line illustration in the band" }
+        ]},
+        { "name": "planning", "slides": [
+          { "n": 11, "archetype": "QUARTERLY_PLAN_4COL", "field": "white", "footer": true },
+          { "n": 12, "archetype": "TIMELINE_QUARTER_AXIS", "field": "white", "footer": true },
+          { "n": 13, "archetype": "MATRIX_2X2", "field": "white", "footer": true, "note": "sand quadrant panels, blue axis labels" },
+          { "n": 14, "archetype": "MILESTONE_SLIDE", "field": "white", "footer": true, "note": "sand stat band" },
+          { "n": 15, "archetype": "ORG_FUNCTIONS", "field": "white", "footer": true }
+        ]},
+        { "name": "numbers", "slides": [
+          { "n": 16, "archetype": "KONE_NUMBERS", "field": "sand", "footer": true },
+          { "n": 17, "archetype": "SEGMENT_BREAKDOWN", "field": "white", "footer": true, "needs_icons": true },
+          { "n": 18, "archetype": "CHART_COMMENTARY", "field": "white", "footer": true, "note": "tints for chart series only" },
+          { "n": 19, "archetype": "HERO_STAT", "field": "light-blue", "footer": true }
+        ]},
+        { "name": "team_and_voice", "slides": [
+          { "n": 20, "archetype": "QUOTE_B", "field": "secondary", "footer": true, "type_on_field": "black" },
+          { "n": 21, "archetype": "QUOTE_E", "field": "light-blue", "footer": true, "type_on_field": "black" },
+          { "n": 22, "archetype": "CREDITS", "field": "white", "footer": true }
+        ]},
+        { "name": "close", "slides": [
+          { "n": 23, "archetype": "STATEMENT_LINKS", "field": "white", "footer": true },
+          { "n": 24, "archetype": "RESOURCE_LINKS", "field": "white", "footer": true, "needs_icons": true },
+          { "n": 25, "archetype": "OUTRO", "field": "white", "footer": false }
+        ]}
+      ],
+      "shared_with_external": [
+        "DIVIDER_NUMBERING",
+        "IMAGE_SECTION_DIVIDER",
+        "HOW_IT_WORKS_3STEP",
+        "KONE_NUMBERS",
+        "HERO_STAT",
+        "OUTRO"
+      ]
+    }
+  },
+  "fields": {
+    "white": { "hex": "#FFFFFF", "type": "#141414" },
+    "sand": { "hex": "#F3EEE6", "type": "#141414" },
+    "light-blue": { "hex": "#D2F5FF", "type": "#141414" },
+    "pink": { "hex": "#FFCDD7", "type": "#141414" },
+    "mint": { "hex": "#AAE1C8", "type": "#141414", "note": "accent only inside a layout, never a full field" },
+    "blue": { "hex": "#1450F5", "type": "#FFFFFF" },
+    "black": { "hex": "#141414", "type": "#FFFFFF" }
+  },
+  "coverage": {
+    "kept_archetypes": 62,
+    "used_by_the_two_sets": 44,
+    "unused": [
+      "COVER_C_CUT4_WIDE", "AGENDA_A_TABLE", "TITLE_SUBTITLE_CONTENT_B", "TITLE_TEXT_SPLIT",
+      "TEXT_PICTURE_F", "TWO_PICTURES_TEXT_A", "THREE_PICTURE_CARDS", "FOUR_PICTURES_TEXT",
+      "TEXT_STATS_PICTURE_RIGHT", "TIMELINE_PHOTO_4COL", "REPORT_TWO_CONTENT",
+      "REPORT_THREE_CONTENT", "REPORT_FIVE_CONTENT", "REPORT_SEVEN_CONTENT",
+      "OFFER_CTA", "FULLSLIDE_PICTURE", "FULLSLIDE_VIDEO", "BLANK"
+    ]
+  }
+}

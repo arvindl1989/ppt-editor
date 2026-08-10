@@ -1,0 +1,234 @@
+"""The KONE brand mode: role -> type, and the rules that override the box.
+
+`BRAND_MODE.md` in `assets/kone-design/handoff-25/` is the source; this is
+that document in the form the renderer consumes. It exists because 223 of
+the tool's 293 regions carried no type block at all -- their size, weight
+and colour were inferred from a role name at draw time, which is why a
+short quote came out at paragraph size in a 657px panel.
+
+Nothing here is inferred from a box size. The four roles that legitimately
+change with their container say so, and `resolve` is the only place that
+decision is made.
+"""
+
+from __future__ import annotations
+
+from typing import Optional
+
+BLACK = "141414"
+WHITE = "FFFFFF"
+BLUE = "1450F5"
+
+# Fields. Yellow and mint are blocks inside a layout, never a slide field.
+SAND = "F3EEE6"
+LIGHT_BLUE = "D2F5FF"
+PINK = "FFCDD7"
+MINT = "AAE1C8"
+YELLOW = "FFE141"
+SECONDARY_FIELDS = frozenset({SAND, LIGHT_BLUE, PINK})
+BLOCK_ONLY = frozenset({MINT, YELLOW})
+
+# Chart series only -- never a background.
+TINTS = ("1450F5", "4373F7", "7296F9", "A1B9FB", "D0DCFD")
+
+INTER = "Inter"
+KONE_INFO = "KONE Information"
+
+# role -> (font, px, weight, leading, tracking, colour, caps)
+TYPE_SCALE: dict[str, tuple] = {
+    # Inter -- sentence case always, black or white, never blue, never grey.
+    "display":           (INTER, 44, 400, 1.08, -0.02, BLACK, False),
+    "statement":         (INTER, 40, 400, 1.15, -0.015, BLACK, False),
+    "title":             (INTER, 32, 400, 1.15, -0.005, BLACK, False),
+    "title_narrow":      (INTER, 28, 400, 1.15, -0.005, BLACK, False),
+    "title_light":       (INTER, 32, 400, 1.15, -0.005, WHITE, False),
+    "subtitle":          (INTER, 20, 400, 1.4, 0, BLACK, False),
+    "heading":           (INTER, 19, 600, 1.25, 0, BLACK, False),
+    "on_panel_heading":  (INTER, 19, 600, 1.25, 0, WHITE, False),
+    "body":              (INTER, 16, 400, 1.5, 0, BLACK, False),
+    "body_narrow":       (INTER, 15, 400, 1.45, 0, BLACK, False),
+    "on_panel_body":     (INTER, 16, 400, 1.5, 0, WHITE, False),
+    "bullets":           (INTER, 19, 400, 1.45, 0, BLACK, False),
+    "caption":           (INTER, 14, 400, 1.4, 0, BLACK, False),
+    "quote_lg":          (INTER, 30, 400, 1.3, -0.005, BLACK, False),
+    "quote_sm":          (INTER, 24, 400, 1.3, -0.005, BLACK, False),
+    "price":             (INTER, 34, 400, 1.1, -0.01, BLACK, False),
+    # KONE Information -- ALL CAPS always. Blue, black or white.
+    "eyebrow":           (KONE_INFO, 12, 400, 1.2, 0.08, BLUE, True),
+    "eyebrow_light":     (KONE_INFO, 12, 400, 1.2, 0.08, WHITE, True),
+    "label":             (KONE_INFO, 12, 400, 1.2, 0.06, BLUE, True),
+    "stat_label":        (KONE_INFO, 12, 400, 1.2, 0.06, BLACK, True),
+    "attribution":       (KONE_INFO, 12, 400, 1.3, 0.06, BLACK, True),
+    "axis":              (KONE_INFO, 12, 400, 1.2, 0.06, BLUE, True),
+    "footer":            (KONE_INFO, 11, 400, 1.0, 0.05, BLACK, True),
+    "classification":    (KONE_INFO, 10, 400, 1.0, 0.05, BLACK, True),
+    # KONE numbers -- figure blue, label black, so the blue reads as the
+    # number rather than as the pair.
+    "hero_value":        (INTER, 96, 400, 1.0, -0.02, BLACK, False),
+    "stat_value":        (INTER, 64, 400, 1.0, -0.02, BLUE, False),
+    "stat_value_md":     (INTER, 44, 400, 1.0, -0.02, BLUE, False),
+    "number":            (INTER, 28, 400, 1.0, -0.01, BLUE, False),
+    "figure":            (INTER, 200, 400, 0.85, -0.03, BLACK, False),
+}
+
+# Role names that encode a rendering rather than an intent. `gal_i64_141414`
+# means "Inter 64 black", which is an output, not a decision. Two of these
+# are deliberately absent: `gal_i19_141414` reads as bullets OR heading
+# depending on the slot, so it must be decided per slot rather than mapped.
+RETIRED_ROLES: dict[str, str] = {
+    "body_muted": "body",              # "muted" was the grey that got banned
+    "gal_i64_141414": "hero_value",
+    "gal_i43_141414": "stat_value_md",
+    "gal_i15_141414": "body_narrow",
+    "gal_i16_141414": "body",
+    "gal_i64_FFFFFF": "stat_value",
+    "gal_i19_FFFFFF": "on_panel_body",
+    "gal_i34_FFFFFF": "title_light",
+    "gal_k12_FFFFFF_c": "eyebrow_light",
+}
+
+# The roles that legitimately change with their container, and the widths
+# they change at. Everything else is fixed regardless of its box.
+NARROW_TITLE_MAX = 374
+NARROW_BODY_MAX = 300
+QUOTE_LARGE_MIN = 600
+
+# Vertical rhythm. A block starts 32px below the block above it; a row of
+# OBJECTS starts 69px below a title instead, because an object's top edge
+# is hard and needs more air than a line of text does.
+TITLE_BAND_BOTTOM = 195
+GAP_TEXT = 32
+GAP_OBJECTS = 69
+CONTENT_START_TEXT = TITLE_BAND_BOTTOM + GAP_TEXT        # 227
+CONTENT_START_OBJECTS = TITLE_BAND_BOTTOM + GAP_OBJECTS  # 264
+SUBTITLE_BAND_BOTTOM = 232
+FLOOR = 629          # nothing but chrome below this
+FOOTER_Y = 658
+
+# Chrome, owned by the layout. An archetype declares what it needs and
+# draws nothing.
+LOGO_LEFT = (45, 45)
+LOGO_RIGHT_EDGE = 1235
+FOOTER_DATE_X = 45
+FOOTER_PAGE_X = 1167
+CLASSIFICATION_Y = 640
+NO_FOOTER = frozenset({"cover", "divider", "outro", "fullslide_picture", "blank"})
+
+# Photo protection. Only where type sits ON the photograph -- a cover that
+# puts its title on white gets none.
+SCRIM_BOTTOM_UP = ((0.45, 0.0), (1.0, 0.72))
+SCRIM_LEFT_RIGHT = ((0.0, 0.78), (0.55, 0.0))
+
+
+def canonical(role: str) -> str:
+    """The role a retired name reads back to."""
+    return RETIRED_ROLES.get(role, role)
+
+
+def resolve(
+    role: str,
+    *,
+    width: Optional[float] = None,
+    on_dark: bool = False,
+) -> Optional[dict]:
+    """The type block for a role, or None if the role carries no type.
+
+    `width` is the region's own width and is consulted only for the four
+    roles that say they change with it. `on_dark` swaps a role for its
+    light twin -- type on blue, black or a scrimmed photograph.
+    """
+    role = canonical(role)
+
+    if role == "title" and width is not None and width <= NARROW_TITLE_MAX:
+        role = "title_narrow"
+    elif role == "body" and width is not None and width <= NARROW_BODY_MAX:
+        role = "body_narrow"
+    elif role in ("quote", "quote_lg", "quote_sm"):
+        # The one place a box legitimately changes the type: a quote sizes
+        # to its panel rather than to `body`.
+        role = "quote_lg" if width is None or width >= QUOTE_LARGE_MIN else "quote_sm"
+
+    if on_dark:
+        role = _ON_DARK.get(role, role)
+
+    entry = TYPE_SCALE.get(role)
+    if entry is None:
+        return None
+    font, px, weight, lead, track, colour, caps = entry
+    return {
+        "kind": "text", "role": role, "font": font, "px": px, "weight": weight,
+        "lead": lead, "track": track, "color": colour, "caps": caps, "align": "l",
+    }
+
+
+_ON_DARK = {
+    "title": "title_light",
+    "title_narrow": "title_light",
+    "heading": "on_panel_heading",
+    "body": "on_panel_body",
+    "body_narrow": "on_panel_body",
+    "eyebrow": "eyebrow_light",
+}
+
+
+def content_start(*, has_subtitle: bool = False, objects: bool = False) -> int:
+    """Where content begins under the title band.
+
+    Both numbers `LAYOUTS.md` shows come out of one rule, which is why
+    neither is the standard on its own.
+    """
+    if has_subtitle:
+        return SUBTITLE_BAND_BOTTOM + GAP_TEXT
+    return CONTENT_START_OBJECTS if objects else CONTENT_START_TEXT
+
+
+# --------------------------------------------------------------------------
+# the two curated sets
+# --------------------------------------------------------------------------
+
+import json
+from functools import lru_cache
+from pathlib import Path
+
+
+def handoff_dir() -> Path:
+    return Path(__file__).parent / "assets" / "kone-design" / "handoff-25"
+
+
+@lru_cache(maxsize=1)
+def slide_sets() -> dict:
+    """The internal and external 25s, as Design defined them.
+
+    Read from `slide-sets.json` rather than transcribed, so the sets
+    cannot drift from the handoff they came from.
+    """
+    return json.loads((handoff_dir() / "slide-sets.json").read_text())["sets"]
+
+
+def set_names() -> list[str]:
+    return sorted(slide_sets())
+
+
+def slides_in(audience: str) -> list[dict]:
+    """The 25 slides of a set, in deck order, each carrying its group,
+    field, footer flag and on-field type colour."""
+    entry = slide_sets().get(audience)
+    if entry is None:
+        raise KeyError(f"no such set: {audience!r} (have {', '.join(set_names())})")
+    out = []
+    for group in entry["groups"]:
+        for slide in group["slides"]:
+            out.append({**slide, "group": group["name"],
+                        "archetype": slide["archetype"].lower()})
+    return sorted(out, key=lambda s: s["n"])
+
+
+def canonical_archetypes() -> set:
+    """Every archetype either set uses -- the library the builder offers."""
+    return {s["archetype"] for name in set_names() for s in slides_in(name)}
+
+
+def shared_archetypes() -> set:
+    """The six that serve both sets: built once, field parameterised."""
+    sets = [{s["archetype"] for s in slides_in(n)} for n in set_names()]
+    return set.intersection(*sets) if sets else set()
