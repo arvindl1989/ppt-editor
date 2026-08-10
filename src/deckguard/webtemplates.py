@@ -393,6 +393,7 @@ def transform_card(ai_enabled: bool = True, error: str | None = None) -> str:
   <p class="field-hint" style="margin:0 0 1.1rem;">{ai_hint}</p>
   <div class="btn-row">
     <button type="submit" class="primary">Plan transform</button>
+    <a href="/build" class="secondary" style="padding:.5rem .9rem;text-decoration:none;">Pick slides yourself &rarr;</a>
     <button type="submit" class="secondary" formaction="/audit">Audit only</button>
   </div>
 </form>
@@ -822,3 +823,185 @@ def transform_result_page(
 <thead><tr><th>Slide</th><th>Severity</th><th>Rule</th><th>Shape</th><th>Message</th><th>Fix?</th></tr></thead>
 <tbody>{_violation_rows(violations)}</tbody>
 </table></div></div>"""
+
+
+# --------------------------------------------------------------------------
+# the slide builder
+# --------------------------------------------------------------------------
+
+
+def _set_card(audience: str, entry: dict, slides: list) -> str:
+    rows = "\n".join(
+        f'''<label class="pick-row">
+      <input type="checkbox" name="pick" value="{audience}:{s['n']}">
+      <span class="pick-n">{s['n']:02d}</span>
+      <span class="pick-name">{_esc(s['archetype'])}</span>
+      <span class="pick-group">{_esc(s['group'])}</span>
+      <span class="pick-field">{_esc(s['field'])}</span>
+    </label>''' for s in slides)
+    return f'''<div class="set-panel" data-audience="{audience}">
+  <p class="field-hint" style="margin:0 0 .8rem;">{_esc(entry.get("audience", ""))}
+    &middot; {_esc(entry.get("field_policy", ""))}</p>
+  <div class="pick-bulk">
+    <button type="button" class="secondary" onclick="pickAll('{audience}', true)">Select all 25</button>
+    <button type="button" class="secondary" onclick="pickAll('{audience}', false)">Clear</button>
+  </div>
+  {rows}
+</div>'''
+
+
+def builder_pick_page(sets: dict, slides_by_set: dict) -> str:
+    """Choose the audience, then choose the slides.
+
+    Both sets are rendered and one is hidden, so switching audience does
+    not cost a round trip and nothing is lost if the user switches back.
+    """
+    tabs = "\n".join(
+        f'''<button type="button" class="tab{' on' if i == 0 else ''}"
+      data-audience="{a}" onclick="showSet('{a}')">{_esc(a.title())} 25</button>'''
+        for i, a in enumerate(sorted(sets)))
+    panels = "\n".join(_set_card(a, sets[a], slides_by_set[a]) for a in sorted(sets))
+    return f'''<div class="card tool-card">
+<h2 style="margin:0 0 .3rem;font-size:1.05rem;">Build a deck</h2>
+<p class="field-hint" style="margin:0 0 1rem;">Pick an audience, then the slides you want.
+  You will fill the text on the next screen. Order follows the set; you can change it there.</p>
+<form method="post" action="/build/compose">
+  <div class="tabs">{tabs}</div>
+  {panels}
+  <div class="btn-row" style="margin-top:1.2rem;">
+    <button type="submit" class="primary">Fill these slides &rarr;</button>
+  </div>
+</form>
+</div>
+{_BUILDER_PICK_STYLE}
+<script>
+function showSet(a) {{
+  document.querySelectorAll('.set-panel').forEach(function (p) {{
+    p.style.display = p.dataset.audience === a ? 'block' : 'none';
+  }});
+  document.querySelectorAll('.tab').forEach(function (t) {{
+    t.classList.toggle('on', t.dataset.audience === a);
+  }});
+  // Unpicking the hidden set keeps the submitted list honest -- a deck
+  // is one audience, and the two sets have different field policies.
+  document.querySelectorAll('.set-panel').forEach(function (p) {{
+    if (p.dataset.audience !== a) {{
+      p.querySelectorAll('input[name=pick]').forEach(function (c) {{ c.checked = false; }});
+    }}
+  }});
+}}
+function pickAll(a, on) {{
+  document.querySelectorAll('.set-panel[data-audience="' + a + '"] input[name=pick]')
+    .forEach(function (c) {{ c.checked = on; }});
+}}
+showSet(document.querySelector('.tab').dataset.audience);
+</script>'''
+
+
+_BUILDER_PICK_STYLE = """<style>
+.tabs { display:flex; gap:.4rem; margin-bottom:1rem; }
+.tab { padding:.45rem .9rem; font-size:.85rem; border:1px solid var(--border);
+       background:var(--surface); cursor:pointer; border-radius:0; }
+.tab.on { background:var(--accent); color:#fff; border-color:var(--accent); }
+.pick-row { display:grid; grid-template-columns:1.4rem 2rem 1fr 8rem 5rem;
+            gap:.6rem; align-items:center; padding:.4rem .5rem; font-size:.85rem;
+            border-bottom:1px solid var(--border); cursor:pointer; }
+.pick-row:hover { background:var(--surface-2); }
+.pick-n { font-variant-numeric:tabular-nums; color:var(--muted); }
+.pick-name { font-weight:600; }
+.pick-group, .pick-field { color:var(--muted); font-size:.78rem; text-transform:uppercase;
+                           letter-spacing:.04em; }
+.pick-bulk { display:flex; gap:.4rem; margin-bottom:.6rem; }
+.slide-edit { border:1px solid var(--border); padding:1rem; margin-bottom:.9rem; }
+.slide-edit h3 { margin:0 0 .1rem; font-size:.92rem; }
+.slide-edit .meta { font-size:.75rem; color:var(--muted); text-transform:uppercase;
+                    letter-spacing:.04em; margin:0 0 .8rem; }
+.slot { margin-bottom:.6rem; }
+.slot label { display:block; font-size:.75rem; text-transform:uppercase;
+              letter-spacing:.05em; color:var(--muted); margin-bottom:.2rem; }
+.slot input, .slot textarea { width:100%; font-size:.85rem; padding:.45rem; }
+.slide-tools { display:flex; gap:.5rem; align-items:center; font-size:.8rem; }
+</style>"""
+
+
+_LONG_SLOTS = frozenset({"body", "body2", "body3", "lede", "text", "context",
+                         "quote", "scope", "credits", "support", "note", "intro"})
+
+
+def _slot_field(slide_id: str, key: str, hint: str) -> str:
+    """One content slot. A list slot takes one item per line, which is
+    the only editing affordance a plain form can offer for a repeating
+    group without becoming a spreadsheet."""
+    name = f"v:{slide_id}:{key}"
+    if "list of" in hint:
+        rows = 4
+        placeholder = "One per line"
+        if "×" in hint:
+            fields = hint.split("{", 1)[-1].rstrip("}) ")
+            placeholder = f"One per line — {fields}, separated by |"
+        return f'''<div class="slot"><label for="{name}">{_esc(key)} <span
+      style="text-transform:none;letter-spacing:0;">({_esc(hint)})</span></label>
+    <textarea id="{name}" name="{name}" rows="{rows}" placeholder="{_esc(placeholder)}"></textarea></div>'''
+    if key in _LONG_SLOTS:
+        return f'''<div class="slot"><label for="{name}">{_esc(key)}</label>
+    <textarea id="{name}" name="{name}" rows="2"></textarea></div>'''
+    return f'''<div class="slot"><label for="{name}">{_esc(key)}</label>
+    <input type="text" id="{name}" name="{name}"></div>'''
+
+
+def builder_edit_page(token: str, audience: str, slides: list) -> str:
+    """One block per chosen slide: its text slots, its order, and the
+    controls for dropping or duplicating it."""
+    blocks = []
+    for i, slide in enumerate(slides):
+        sid = slide["id"]
+        slots = "\n".join(_slot_field(sid, k, h) for k, h in slide["slots"])
+        photo = ""
+        if slide["photos"]:
+            photo = f'''<div class="slot"><label>photo</label>
+      <input type="text" name="p:{sid}" placeholder="Leave empty to choose one automatically
+ — or name a photo, e.g. colleagues-walking"></div>'''
+        blocks.append(f'''<div class="slide-edit">
+  <h3>{_esc(slide["archetype"])}</h3>
+  <p class="meta">{_esc(slide["group"])} &middot; field {_esc(slide["field"])}
+    {" &middot; no footer" if not slide["footer"] else ""}</p>
+  {slots or '<p class="field-hint">This slide takes no text.</p>'}
+  {photo}
+  <div class="slide-tools">
+    <label style="text-transform:none;letter-spacing:0;">order
+      <input type="number" name="o:{sid}" value="{(i + 1) * 10}" step="1"
+        style="width:4.5rem;margin-left:.3rem;padding:.25rem;"></label>
+    <label style="text-transform:none;letter-spacing:0;">
+      <input type="checkbox" name="d:{sid}"> drop this slide</label>
+    <label style="text-transform:none;letter-spacing:0;">
+      <input type="checkbox" name="x:{sid}"> duplicate it</label>
+  </div>
+</div>''')
+    return f'''<div class="card tool-card">
+<h2 style="margin:0 0 .3rem;font-size:1.05rem;">Fill the slides</h2>
+<p class="field-hint" style="margin:0 0 1rem;">{_esc(audience.title())} set &middot;
+  {len(slides)} slides. Empty slots are left out rather than filled with placeholder text.
+  Change <em>order</em> to reorder; the numbers only have to sort.</p>
+<form method="post" action="/build/generate/{_esc(token)}">
+  {"".join(blocks)}
+  <div class="btn-row">
+    <button type="submit" class="primary">Build the deck</button>
+    <a href="/build" class="secondary" style="padding:.5rem .9rem;">Start over</a>
+  </div>
+</form>
+</div>
+{_BUILDER_PICK_STYLE}'''
+
+
+def builder_result_page(token: str, audience: str, count: int, dropped: int) -> str:
+    note = (f" {dropped} dropped." if dropped else "")
+    return f'''<div class="card tool-card">
+<h2 style="margin:0 0 .3rem;font-size:1.05rem;">Deck built</h2>
+<p class="field-hint" style="margin:0 0 1.1rem;">{count} slides from the
+  {_esc(audience)} set, plus the master's retained cover and closing slide.{_esc(note)}</p>
+<div class="btn-row">
+  <a class="primary" href="/download/{_esc(token)}/deck.pptx"
+     style="padding:.5rem .9rem;text-decoration:none;">Download the deck</a>
+  <a class="secondary" href="/build" style="padding:.5rem .9rem;">Build another</a>
+</div>
+</div>'''

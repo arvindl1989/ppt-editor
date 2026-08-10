@@ -37,11 +37,20 @@ KONE_INFO = "KONE Information"
 # role -> (font, px, weight, leading, tracking, colour, caps)
 TYPE_SCALE: dict[str, tuple] = {
     # Inter -- sentence case always, black or white, never blue, never grey.
+    # The four display roles come from README's as-built table rather than
+    # from BRAND_MODE's role table: README states they are measured from
+    # the built decks, and BRAND_MODE's numbers for them (44 for a cover
+    # title against a measured 76) read as conservative defaults rather
+    # than measurements. Everything else below is BRAND_MODE's.
+    "cover_title":       (INTER, 76, 400, 0.98, -0.03, BLACK, False),
+    "outro_title":       (INTER, 120, 400, 0.95, -0.04, BLACK, False),
     "display":           (INTER, 44, 400, 1.08, -0.02, BLACK, False),
     "statement":         (INTER, 40, 400, 1.15, -0.015, BLACK, False),
     "title":             (INTER, 32, 400, 1.15, -0.005, BLACK, False),
     "title_narrow":      (INTER, 28, 400, 1.15, -0.005, BLACK, False),
     "title_light":       (INTER, 32, 400, 1.15, -0.005, WHITE, False),
+    "cover_title_light": (INTER, 76, 400, 0.98, -0.03, WHITE, False),
+    "outro_title_light": (INTER, 120, 400, 0.95, -0.04, WHITE, False),
     "subtitle":          (INTER, 20, 400, 1.4, 0, BLACK, False),
     "heading":           (INTER, 19, 600, 1.25, 0, BLACK, False),
     "on_panel_heading":  (INTER, 19, 600, 1.25, 0, WHITE, False),
@@ -64,11 +73,16 @@ TYPE_SCALE: dict[str, tuple] = {
     "classification":    (KONE_INFO, 10, 400, 1.0, 0.05, BLACK, True),
     # KONE numbers -- figure blue, label black, so the blue reads as the
     # number rather than as the pair.
-    "hero_value":        (INTER, 96, 400, 1.0, -0.02, BLACK, False),
+    # Size from README's as-built table; colour stays BRAND_MODE's. The
+    # built decks describe both of these as blue ("280px blue figure",
+    # "300px blue numeral") while BRAND_MODE's table sets them black and
+    # says "black on every secondary field". Colour was not part of the
+    # size ruling, and the table is the per-role authority -- flagged.
+    "hero_value":        (INTER, 280, 400, 0.86, -0.04, BLACK, False),
     "stat_value":        (INTER, 64, 400, 1.0, -0.02, BLUE, False),
     "stat_value_md":     (INTER, 44, 400, 1.0, -0.02, BLUE, False),
     "number":            (INTER, 28, 400, 1.0, -0.01, BLUE, False),
-    "figure":            (INTER, 200, 400, 0.85, -0.03, BLACK, False),
+    "figure":            (INTER, 300, 400, 0.8, -0.04, BLACK, False),
 }
 
 # Role names that encode a rendering rather than an intent. `gal_i64_141414`
@@ -162,6 +176,8 @@ def resolve(
 
 
 _ON_DARK = {
+    "cover_title": "cover_title_light",
+    "outro_title": "outro_title_light",
     "title": "title_light",
     "title_narrow": "title_light",
     "heading": "on_panel_heading",
