@@ -1,7 +1,7 @@
 from pptx import Presentation
 from pptx.enum.dml import MSO_THEME_COLOR
 
-from deckguard.exact_transplant import transplant_exact_treatment
+from deckguard.legacy.exact_transplant import transplant_exact_treatment
 from tests.helpers import add_rectangle, set_run, set_run_theme_color, set_theme_slot
 
 

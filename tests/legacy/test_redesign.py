@@ -16,7 +16,7 @@ import pytest
 from pptx import Presentation
 from pptx.util import Inches
 
-from deckguard.redesign import (
+from deckguard.legacy.redesign import (
     RedesignError,
     Usage,
     call_claude_for_brand_review,
@@ -25,8 +25,8 @@ from deckguard.redesign import (
     partition_skipped,
     redesign_deck,
 )
-from deckguard.skill_bridge import _skill_dir
-from deckguard.slide_import import default_template_path
+from deckguard.legacy.skill_bridge import _skill_dir
+from deckguard.legacy.slide_import import default_template_path
 from tests.helpers import add_picture, add_rectangle, add_slide, body_run, make_pattern_png, new_deck, title_run
 
 TEMPLATE_PATH = default_template_path()
@@ -843,7 +843,7 @@ def _decorative_overload_deck(tmp_path, title="Appendix"):
 
 
 def test_call_claude_for_brand_review_parses_response():
-    from deckguard.retemplate import SlideProposal
+    from deckguard.legacy.retemplate import SlideProposal
 
     proposal = SlideProposal(
         slide_index=3, eligible=False, reason="too many free-form shapes to safely reflow",
@@ -981,7 +981,7 @@ def test_redesign_deck_brand_review_leaves_a_non_divider_slide_skipped(tmp_path)
     for i in range(20):
         box = slide.shapes.add_textbox(Inches(1), Inches(0.3 * i), Inches(3), Inches(0.25))
         box.text_frame.text = f"Line {i}: real detailed content"
-    from deckguard.retemplate import MAX_TEXT_BLOCKS
+    from deckguard.legacy.retemplate import MAX_TEXT_BLOCKS
 
     assert 20 > MAX_TEXT_BLOCKS  # sanity: this really is ineligible for verbatim carryover
     src_path = tmp_path / "source.pptx"

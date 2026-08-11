@@ -74,9 +74,9 @@ from pptx.util import Pt
 
 from deckguard import effects as effects_mod
 from deckguard.config import default_config_path, load_config
-from deckguard.fixer import fix_deck
-from deckguard.retemplate import SlideProfile, _layout_profile, _set_text_block, match_layout
-from deckguard.slide_import import _delete_slide, default_template_path, import_layouts
+from deckguard.legacy.fixer import fix_deck
+from deckguard.legacy.retemplate import SlideProfile, _layout_profile, _set_text_block, match_layout
+from deckguard.legacy.slide_import import _delete_slide, default_template_path, import_layouts
 
 CHROME_NAME_RE = re.compile(r"logo|tagline", re.IGNORECASE)
 
@@ -404,7 +404,7 @@ def _fix_new_slides(prs, config: dict, slide_indices: set) -> list:
     that guarantee while still resolving their inherited-not-explicit
     run colors the same way `fix_deck` would.
     """
-    from deckguard.fixer import _apply_violation
+    from deckguard.legacy.fixer import _apply_violation
     from deckguard.inventory import build_inventory
     from deckguard.rules_engine import audit_deck, sort_violations
 

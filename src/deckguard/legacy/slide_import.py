@@ -36,7 +36,7 @@ DEFAULT_OUTRO_LAYOUTS = {"Outro", "End"}
 
 
 def default_template_path() -> Path:
-    return Path(__file__).with_name("assets") / "kone_master_template.pptx"
+    return (Path(__file__).parent.parent / "assets") / "kone_master_template.pptx"
 
 
 def _read_zip(path) -> dict[str, bytes]:

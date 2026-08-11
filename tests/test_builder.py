@@ -9,12 +9,22 @@ import re
 import pytest
 from fastapi.testclient import TestClient
 
-from deckguard.web import app
 
 
 @pytest.fixture
 def client():
-    return TestClient(app)
+    """Built from a freshly imported module.
+
+    `test_web` reloads `deckguard.web` to pick up env vars, which
+    rebinds the module object and its STORAGE_ROOT. A client holding
+    the app imported at collection time then writes decks one place and
+    reads them from another, so downloads 404 depending on test order.
+    """
+    import importlib
+
+    from deckguard import web as web_mod
+
+    return TestClient(importlib.reload(web_mod).app)
 
 
 def _compose(client, picks):
@@ -143,7 +153,7 @@ def test_slides_whose_archetype_is_not_built_are_shown_but_not_pickable(client):
     """Five of the 50 are named by the sets and not yet drawn. Picking
     one built a blank slide with no warning, which is worse than not
     offering it."""
-    from deckguard.skill_bridge import _load_archetypes
+    from deckguard.registry import _load_archetypes
 
     from deckguard import brandmode as B
 
@@ -166,7 +176,7 @@ def test_slides_whose_archetype_is_not_built_are_shown_but_not_pickable(client):
 def test_a_forged_pick_of_an_unbuilt_archetype_is_refused(client):
     """The checkbox is absent, so this only happens to a crafted post --
     but a blank slide reaching a customer deck is worth the guard."""
-    from deckguard.skill_bridge import _load_archetypes
+    from deckguard.registry import _load_archetypes
 
     from deckguard import brandmode as B
 

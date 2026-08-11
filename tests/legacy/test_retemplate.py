@@ -13,7 +13,7 @@ from pptx import Presentation
 from pptx.enum.shapes import PROG_ID
 from pptx.util import Inches
 
-from deckguard.retemplate import (
+from deckguard.legacy.retemplate import (
     CONTENT_LAYOUT_CANDIDATES,
     LayoutProfile,
     SlideProfile,
@@ -26,7 +26,7 @@ from deckguard.retemplate import (
     propose_retemplate,
     rebuild_slides_as_dividers,
 )
-from deckguard.slide_import import default_template_path
+from deckguard.legacy.slide_import import default_template_path
 from tests.helpers import add_picture, add_rectangle, add_slide, body_run, make_pattern_png, new_deck, title_run
 
 TEMPLATE_PATH = default_template_path()
@@ -314,7 +314,7 @@ def test_rebuild_non_standard_layout_slides_only_rebuilds_flagged_slides(tmp_pat
     non_standard_layout via a real audit, rebuilds only those slides
     (verbatim), leaves everything else -- including OTHER eligible
     slides that just happen to already be fine -- completely alone."""
-    from deckguard.retemplate import rebuild_non_standard_layout_slides
+    from deckguard.legacy.retemplate import rebuild_non_standard_layout_slides
 
     path = _simple_deck(tmp_path)  # all 3 slides use the test fixture's own non-org-template layout
     out_path = tmp_path / "out.pptx"
@@ -335,7 +335,7 @@ def test_rebuild_non_standard_layout_slides_only_rebuilds_flagged_slides(tmp_pat
 
 
 def test_rebuild_non_standard_layout_slides_is_a_no_op_when_everything_is_already_approved(tmp_path):
-    from deckguard.retemplate import apply_rebrand, rebuild_non_standard_layout_slides
+    from deckguard.legacy.retemplate import apply_rebrand, rebuild_non_standard_layout_slides
 
     path = _simple_deck(tmp_path)
     rebranded_path = tmp_path / "rebranded.pptx"
@@ -801,8 +801,8 @@ def test_an_image_inside_a_picture_placeholder_is_found(tmp_path):
     from pptx import Presentation
     from pptx.util import Inches
 
-    from deckguard.retemplate import _extract_slide_content
-    from deckguard.slide_import import default_template_path
+    from deckguard.legacy.retemplate import _extract_slide_content
+    from deckguard.legacy.slide_import import default_template_path
     from tests.helpers import make_solid_png
 
     photo = tmp_path / "p.png"
@@ -837,8 +837,8 @@ def test_body_copy_never_lands_in_a_label_sized_placeholder(tmp_path):
     came first. The real 6 x 4in body area was left empty."""
     from pptx import Presentation
 
-    from deckguard.retemplate import _is_content_slot, _transplant_content, SlideProfile
-    from deckguard.slide_import import default_template_path
+    from deckguard.legacy.retemplate import _is_content_slot, _transplant_content, SlideProfile
+    from deckguard.legacy.slide_import import default_template_path
 
     prs = Presentation(str(default_template_path()))
     layout = next(
@@ -862,7 +862,7 @@ def test_body_copy_never_lands_in_a_label_sized_placeholder(tmp_path):
 def test_a_tiny_body_placeholder_is_not_counted_as_capacity():
     """It also inflated layout capacity, so a layout was chosen on the
     promise of a body slot that could never hold anything."""
-    from deckguard.retemplate import _is_content_slot
+    from deckguard.legacy.retemplate import _is_content_slot
 
     class _Ph:
         def __init__(self, w_in, h_in):

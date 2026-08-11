@@ -16,7 +16,7 @@ from lxml import etree
 from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 
-from deckguard.slide_import import (
+from deckguard.legacy.slide_import import (
     _next_master_or_layout_id,
     _next_sld_id,
     default_template_path,
@@ -220,7 +220,7 @@ def test_replace_intro_outro_survives_full_deckguard_fix_afterward(tmp_path):
     import warnings
 
     from deckguard.config import load_config, default_config_path
-    from deckguard.fixer import fix_deck
+    from deckguard.legacy.fixer import fix_deck
 
     target = new_deck()
     slide = add_slide(target, layout_idx=1)

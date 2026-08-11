@@ -7,9 +7,9 @@ import json
 
 import pytest
 
-from deckguard.skill_bridge import _skill_dir
-from deckguard.slide_import import default_template_path
-from deckguard.transform import (
+from deckguard.legacy.skill_bridge import _skill_dir
+from deckguard.legacy.slide_import import default_template_path
+from deckguard.legacy.transform import (
     audit_transform_result,
     execute_transform,
     execute_transform_from_brief,
@@ -18,7 +18,7 @@ from deckguard.transform import (
     reference_similarity,
 )
 from tests.helpers import add_slide, body_run, make_solid_png, new_deck, title_run
-from tests.test_redesign import _FakeClient, _FakeResponse, _kone_slide, _kone_spec_json
+from tests.legacy.test_redesign import _FakeClient, _FakeResponse, _kone_slide, _kone_spec_json
 
 TEMPLATE_PATH = default_template_path()
 pytestmark = pytest.mark.skipif(not TEMPLATE_PATH.exists(), reason="bundled template asset not present")
@@ -360,7 +360,7 @@ def test_reference_sourced_master_keeps_one_logo_not_two(tmp_path):
     every carried-over slide. The reference's own mark must win."""
     from pptx import Presentation
 
-    from deckguard.transform import _dedupe_reference_master_logos
+    from deckguard.legacy.transform import _dedupe_reference_master_logos
 
     ref_logo = tmp_path / "ref_logo.png"
     bundled = tmp_path / "bundled_logo.png"
@@ -392,7 +392,7 @@ def test_non_overlapping_master_pictures_are_left_alone(tmp_path):
     device) must survive untouched."""
     from pptx import Presentation
 
-    from deckguard.transform import _dedupe_reference_master_logos
+    from deckguard.legacy.transform import _dedupe_reference_master_logos
 
     ref_logo = tmp_path / "ref_logo.png"
     other = tmp_path / "other.png"
@@ -512,7 +512,7 @@ def test_rebuilt_slides_keep_their_date_footer_and_page_number(tmp_path):
     13-slide deck came back with page numbers on three of them."""
     from pptx import Presentation
 
-    from deckguard.transform import restore_footer_chrome
+    from deckguard.legacy.transform import restore_footer_chrome
     from tests.helpers import add_slide, new_deck, title_run
 
     prs = new_deck()

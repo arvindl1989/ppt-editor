@@ -228,8 +228,8 @@ def test_every_canonical_archetype_is_renderable():
     faster than this can bind them, this is where it shows up."""
     import sys
 
-    from deckguard import gallery
-    from deckguard.skill_bridge import _ensure_skill_on_path
+    from deckguard.legacy import gallery
+    from deckguard.registry import _ensure_skill_on_path
 
     _ensure_skill_on_path()
     archetypes = __import__("archetypes")
@@ -641,7 +641,7 @@ def _skill_modules():
         import kone_engine  # noqa: F401
     except Exception:  # pragma: no cover
         pytest.skip("archetype engine not available")
-    from deckguard import gallery
+    from deckguard.legacy import gallery
 
     L.install(archetypes)
     gallery.install(archetypes)
@@ -743,7 +743,7 @@ def test_build_deck_takes_the_registry_from_the_loader_not_a_bare_import(tmp_pat
     reverted to a port with no bullets, and the divider to one with no
     number and no colour field. Both looked like rendering bugs."""
     _skill_modules()
-    from deckguard.skill_bridge import _load_archetypes
+    from deckguard.registry import _load_archetypes
 
     registry = _load_archetypes().ARCHETYPES
 
@@ -780,7 +780,7 @@ def test_the_planner_is_told_the_keys_the_renderer_actually_reads():
     most were named and nothing more. The keys come off the live
     registry instead, and cannot drift from it."""
     _skill_modules()
-    from deckguard.skill_bridge import _derived_content_keys, _load_archetypes
+    from deckguard.registry import _derived_content_keys, _load_archetypes
 
     registry = _load_archetypes().ARCHETYPES
     described = [n for n in registry if _derived_content_keys(n)]
@@ -805,7 +805,7 @@ def test_a_worked_example_that_no_longer_matches_is_not_shown():
     was rebuilt to read `items` -- so a planner emitted four keys nothing
     reads and the agenda came back as a title on an empty half."""
     _skill_modules()
-    from deckguard.skill_bridge import _kone_archetype_guide, _load_archetypes, _sample_agrees
+    from deckguard.legacy.skill_bridge import _kone_archetype_guide, _load_archetypes, _sample_agrees
 
     archetypes = _load_archetypes()
     stale = {"title": "x", "text1": "a", "text2": "b"}
@@ -868,7 +868,7 @@ def test_a_repeating_group_tells_the_planner_it_can_name_the_icons():
     never mentioned it and every deck came back with the default
     cloud/people/clock cycle regardless of what the text said."""
     _skill_modules()
-    from deckguard.skill_bridge import _derived_content_keys
+    from deckguard.registry import _derived_content_keys
 
     (items,) = [k for k in _derived_content_keys("icon_columns_5") if k.startswith("items ")]
     assert "icon" in items and "text" in items and "up to 5" in items
@@ -1068,7 +1068,7 @@ def test_the_guide_teaches_the_rules_a_planner_has_to_act_on():
     A deck came back with `6 weeks` as a stat value against an
     `End-to-end migration` label -- the unit said twice -- and a scope
     line restating counts already in the band."""
-    from deckguard import skill_bridge
+    from deckguard.legacy import skill_bridge
 
     entry = [b for b in skill_bridge._kone_archetype_guide().split("\n\n")
              if b.startswith("### milestone_slide")][0]

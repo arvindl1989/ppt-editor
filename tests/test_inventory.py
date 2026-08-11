@@ -141,7 +141,7 @@ def test_an_image_in_a_picture_placeholder_is_inventoried(tmp_path):
     from pptx import Presentation
 
     from deckguard.inventory import build_inventory
-    from deckguard.slide_import import default_template_path
+    from deckguard.legacy.slide_import import default_template_path
     from tests.helpers import make_solid_png
 
     photo = tmp_path / "p.png"

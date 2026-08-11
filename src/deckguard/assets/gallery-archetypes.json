@@ -1,0 +1,599 @@
+{
+ "_note": "Eleven archetypes that legacy/gallery.py used to parse out of kone-design's HTML gallery ON EVERY IMPORT. Captured here so the registry reads data rather than re-running a generator -- and so retiring any of them is a reviewable edit rather than a side effect of moving a file. BRAND_MODE section 9 retires nine of these; picture_intro and agenda_a_table are the two that stay.",
+ "archetypes": {
+  "agenda_a_bullets": {
+   "background": "FFFFFF",
+   "regions": [
+    {
+     "role": "picture",
+     "content": "photo",
+     "box": [
+      759.0,
+      0.0,
+      521.0,
+      720.0
+     ]
+    },
+    {
+     "role": "gal_i43_141414",
+     "content": "title",
+     "box": [
+      45.0,
+      91.0,
+      578.0,
+      68.8
+     ]
+    }
+   ],
+   "groups": [],
+   "chrome": [
+    {
+     "kind": "asset",
+     "box": [
+      1153.0,
+      45.0,
+      81.0,
+      31.0
+     ],
+     "asset": "kone-logo-white.png"
+    }
+   ]
+  },
+  "agenda_a_table": {
+   "background": "FFFFFF",
+   "regions": [
+    {
+     "role": "picture",
+     "box": [
+      759,
+      0,
+      521,
+      720
+     ],
+     "content": "photo"
+    },
+    {
+     "role": "dg_text",
+     "box": [
+      45,
+      39,
+      578,
+      36
+     ],
+     "content": "eyebrow",
+     "dg": {
+      "kind": "text",
+      "px": 14,
+      "font": "KONE Information",
+      "color": "1450F5",
+      "caps": true,
+      "align": "l"
+     }
+    },
+    {
+     "role": "dg_text",
+     "box": [
+      45,
+      91,
+      578,
+      60
+     ],
+     "content": "title",
+     "dg": {
+      "kind": "text",
+      "px": 40,
+      "font": "Inter",
+      "color": "141414",
+      "caps": false,
+      "align": "l"
+     }
+    },
+    {
+     "role": "dg_bullets",
+     "box": [
+      45,
+      195,
+      578,
+      434
+     ],
+     "content": "items",
+     "dg": {
+      "kind": "bullets",
+      "px": 24,
+      "nested_px": 22,
+      "lead": 1.15
+     }
+    }
+   ]
+  },
+  "agenda_a_text": {
+   "background": "FFFFFF",
+   "regions": [
+    {
+     "role": "picture",
+     "content": "photo",
+     "box": [
+      759.0,
+      0.0,
+      521.0,
+      720.0
+     ]
+    },
+    {
+     "role": "gal_i43_141414",
+     "content": "title",
+     "box": [
+      45.0,
+      91.0,
+      578.0,
+      68.8
+     ]
+    }
+   ],
+   "groups": [],
+   "chrome": [
+    {
+     "kind": "asset",
+     "box": [
+      1153.0,
+      45.0,
+      81.0,
+      31.0
+     ],
+     "asset": "kone-logo-white.png"
+    }
+   ]
+  },
+  "cover_d_cut3_wide": {
+   "background": "FFFFFF",
+   "regions": [
+    {
+     "role": "gal_i64_141414",
+     "content": "title",
+     "box": [
+      45.0,
+      429.0,
+      1067.0,
+      155.0
+     ]
+    },
+    {
+     "role": "gal_i19_141414",
+     "content": "context",
+     "box": [
+      45.0,
+      592.0,
+      578.0,
+      30.400000000000002
+     ]
+    }
+   ],
+   "groups": [],
+   "chrome": [
+    {
+     "kind": "cut",
+     "box": [
+      330.0,
+      0.0,
+      950.0,
+      422.0
+     ],
+     "rects": [
+      [
+       0.0,
+       0.0,
+       288.9,
+       322.3
+      ],
+      [
+       330.2,
+       0.0,
+       289.00000000000006,
+       421.3
+      ],
+      [
+       661.0,
+       0.0,
+       288.9,
+       371.8
+      ]
+     ],
+     "content": "photo",
+     "background": "FFFFFF"
+    },
+    {
+     "kind": "asset",
+     "box": [
+      45.0,
+      45.0,
+      81.0,
+      31.0
+     ],
+     "asset": "kone-logo.png"
+    },
+    {
+     "kind": "asset",
+     "box": [
+      1102.0,
+      633.0,
+      133.0,
+      45.0
+     ],
+     "asset": "kone-tagline.png"
+    }
+   ]
+  },
+  "cover_e_side": {
+   "background": "FFFFFF",
+   "regions": [
+    {
+     "role": "gal_i64_141414",
+     "content": "title",
+     "box": [
+      45.0,
+      136.0,
+      578.0,
+      448.0
+     ]
+    },
+    {
+     "role": "gal_i19_141414",
+     "content": "context",
+     "box": [
+      45.0,
+      592.0,
+      578.0,
+      30.400000000000002
+     ]
+    }
+   ],
+   "groups": [],
+   "chrome": [
+    {
+     "kind": "cut",
+     "box": [
+      661.0,
+      0.0,
+      619.0,
+      488.0
+     ],
+     "rects": [
+      [
+       0.0,
+       0.0,
+       288.5,
+       371.3
+      ],
+      [
+       330.1,
+       0.0,
+       289.0,
+       487.5
+      ]
+     ],
+     "content": "photo",
+     "background": "FFFFFF"
+    },
+    {
+     "kind": "asset",
+     "box": [
+      45.0,
+      45.0,
+      81.0,
+      31.0
+     ],
+     "asset": "kone-logo.png"
+    },
+    {
+     "kind": "asset",
+     "box": [
+      1102.0,
+      633.0,
+      133.0,
+      45.0
+     ],
+     "asset": "kone-tagline.png"
+    }
+   ]
+  },
+  "divider_a": {
+   "background": "D2F5FF",
+   "regions": [
+    {
+     "role": "gal_i64_141414",
+     "content": "title",
+     "box": [
+      45.0,
+      136.0,
+      578.0,
+      493.0
+     ]
+    }
+   ],
+   "groups": [],
+   "chrome": [
+    {
+     "kind": "asset",
+     "box": [
+      45.0,
+      45.0,
+      81.0,
+      31.0
+     ],
+     "asset": "kone-logo.png"
+    },
+    {
+     "kind": "asset",
+     "box": [
+      861.0,
+      220.0,
+      336.0,
+      324.0
+     ],
+     "asset": "kone-pictogram-arrow.png"
+    }
+   ]
+  },
+  "divider_b": {
+   "background": "FFCDD7",
+   "regions": [
+    {
+     "role": "gal_i64_141414",
+     "content": "title",
+     "box": [
+      45.0,
+      136.0,
+      578.0,
+      493.0
+     ]
+    }
+   ],
+   "groups": [],
+   "chrome": [
+    {
+     "kind": "asset",
+     "box": [
+      45.0,
+      45.0,
+      81.0,
+      31.0
+     ],
+     "asset": "kone-logo.png"
+    },
+    {
+     "kind": "asset",
+     "box": [
+      861.0,
+      220.0,
+      238.0,
+      324.0
+     ],
+     "asset": "kone-numeral-3.png"
+    }
+   ]
+  },
+  "divider_c": {
+   "background": "F3EEEA",
+   "regions": [
+    {
+     "role": "gal_i64_141414",
+     "content": "title",
+     "box": [
+      45.0,
+      136.0,
+      578.0,
+      493.0
+     ]
+    }
+   ],
+   "groups": [],
+   "chrome": [
+    {
+     "kind": "asset",
+     "box": [
+      45.0,
+      45.0,
+      81.0,
+      31.0
+     ],
+     "asset": "kone-logo.png"
+    },
+    {
+     "kind": "asset",
+     "box": [
+      861.0,
+      220.0,
+      238.0,
+      324.0
+     ],
+     "asset": "kone-numeral-3.png"
+    }
+   ]
+  },
+  "divider_d": {
+   "background": "FFFFFF",
+   "regions": [
+    {
+     "role": "gal_i64_141414",
+     "content": "title",
+     "box": [
+      45.0,
+      136.0,
+      374.0,
+      448.0
+     ]
+    }
+   ],
+   "groups": [],
+   "chrome": [
+    {
+     "kind": "asset",
+     "box": [
+      45.0,
+      45.0,
+      81.0,
+      31.0
+     ],
+     "asset": "kone-logo.png"
+    },
+    {
+     "kind": "asset",
+     "box": [
+      684.0,
+      136.0,
+      422.0,
+      448.0
+     ],
+     "asset": "kone-illustration-technician.png"
+    },
+    {
+     "kind": "asset",
+     "box": [
+      1102.0,
+      633.0,
+      133.0,
+      45.0
+     ],
+     "asset": "kone-tagline.png"
+    }
+   ]
+  },
+  "end_logo": {
+   "background": "141414",
+   "regions": [
+    {
+     "role": "picture",
+     "content": "photo",
+     "box": [
+      0.0,
+      0.0,
+      1280.0,
+      720.0
+     ]
+    }
+   ],
+   "groups": [],
+   "chrome": [
+    {
+     "kind": "asset",
+     "box": [
+      215.0,
+      195.0,
+      850.0,
+      329.0
+     ],
+     "asset": "kone-logo-white.png"
+    }
+   ]
+  },
+  "picture_intro": {
+   "background": "FFFFFF",
+   "regions": [
+    {
+     "role": "picture",
+     "content": "photo",
+     "box": [
+      0.0,
+      0.0,
+      1280.0,
+      382.0
+     ]
+    },
+    {
+     "role": "gal_i43_141414",
+     "content": "title",
+     "box": [
+      45.0,
+      435.0,
+      587.0,
+      68.8
+     ]
+    },
+    {
+     "role": "gal_i19_141414",
+     "content": "text1",
+     "box": [
+      45.0,
+      551.0,
+      578.0,
+      30.400000000000002
+     ]
+    }
+   ],
+   "groups": [],
+   "chrome": [
+    {
+     "kind": "asset",
+     "box": [
+      1153.0,
+      45.0,
+      81.0,
+      31.0
+     ],
+     "asset": "kone-logo-white.png"
+    }
+   ]
+  }
+ },
+ "bg": {
+  "cover_d_cut3_wide": "FFFFFF",
+  "cover_e_side": "FFFFFF",
+  "divider_a": "D2F5FF",
+  "divider_b": "FFCDD7",
+  "divider_c": "F3EEEA",
+  "divider_d": "FFFFFF",
+  "picture_intro": "FFFFFF",
+  "agenda_a_bullets": "FFFFFF",
+  "agenda_a_text": "FFFFFF",
+  "agenda_a_table": "FFFFFF",
+  "end_logo": "141414"
+ },
+ "samples": {
+  "cover_d_cut3_wide": {
+   "photo": "",
+   "title": "A longer presentation title on one wide line",
+   "context": "Presenter name · Occasion"
+  },
+  "cover_e_side": {
+   "photo": "",
+   "title": "A presentation title over several lines",
+   "context": "Presenter name · Occasion"
+  },
+  "divider_a": {
+   "title": "The section title goes here"
+  },
+  "divider_b": {
+   "title": "The section title goes here"
+  },
+  "divider_c": {
+   "title": "The section title goes here"
+  },
+  "divider_d": {
+   "title": "The section title"
+  },
+  "picture_intro": {
+   "photo": "",
+   "title": "The slide title sits here",
+   "text1": "A one-line lead-in that frames the picture above."
+  },
+  "agenda_a_bullets": {
+   "photo": "",
+   "title": "Agenda"
+  },
+  "agenda_a_text": {
+   "photo": "",
+   "title": "The slide title sits here"
+  },
+  "agenda_a_table": {
+   "photo": "",
+   "title": "Agenda",
+   "text1": "Subject",
+   "text2": "Subject",
+   "text3": "Subject",
+   "text4": "Subject"
+  },
+  "end_logo": {
+   "photo": ""
+  }
+ }
+}

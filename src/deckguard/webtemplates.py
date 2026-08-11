@@ -270,25 +270,25 @@ without your per-slide approval.</footer>
 
 
 def home_hero() -> str:
-    """Orientation for a first-time visitor: the one Transform flow,
-    told as its four steps."""
+    """Orientation for a first-time visitor: the one flow, as its three
+    steps. It used to describe four products; three of them are parked
+    and describing them was the tool's biggest source of confusion."""
     caps = [
-        ("1 · Upload", "An old deck to transform, a reference deck to match, a brief for a new deck — any combination."),
-        ("2 · Review", "Every slide side by side: what it is now, what it would become — approve or override each one."),
-        ("3 · Transform", "Approved slides rebuild onto approved layouts or KONE archetypes; everything gets brand patches."),
-        ("4 · Audit", "The result is audited against the brand rules — and against your reference deck, when given."),
+        ("1 &middot; Choose", "Internal or external, then the slides you want &mdash; each one previewed "
+                              "before you pick it."),
+        ("2 &middot; Fill", "Type into the slots the slide actually reads. Anything you leave empty is "
+                            "left out, never padded."),
+        ("3 &middot; Build", "A .pptx on the KONE master. Geometry and type come from the brand mode, "
+                             "so a slide cannot come out off-brand."),
     ]
-    cap_html = "".join(f'<div class="cap"><b>{_esc(t)}</b><span>{_esc(d)}</span></div>' for t, d in caps)
+    cap_html = "".join(f'<div class="cap"><b>{t}</b><span>{d}</span></div>' for t, d in caps)
     return f"""<div class="hero">
   <span class="eyebrow">KONE &middot; Dedicated to People Flow&trade;</span>
   <h1>Every deck, on brand.</h1>
-  <p class="lede">Deterministic brand compliance for PowerPoint, with AI assistance where it earns its keep --
-    color, font, effect and layout rules apply the same way whether a deck is fixed, redesigned, or built
-    from nothing.</p>
+  <p class="lede">Pick from KONE's own slide sets and fill them in. Colour, type, spacing and chrome are
+    the brand's, not yours to get wrong &mdash; and nothing is generated that you cannot see and change.</p>
   <div class="capstrip">{cap_html}</div>
 </div>"""
-
-
 
 
 def _status_pill(critical: int, major: int, minor: int) -> str:
@@ -353,53 +353,21 @@ rebuilds and archetype upgrades, each slide approved by you first.</div>
 
 
 def transform_card(ai_enabled: bool = True, error: str | None = None) -> str:
-    """The home page's single tool: one form, three optional inputs --
-    an old deck, a reference deck, a brief -- covering every starting
-    point the four old tabs handled between them. Deck alone =
-    fix/rebrand; deck + reference = the old Learn flow; brief alone =
-    a new deck; deck + brief isn't a combination the engine supports
-    yet, so the brief is ignored when a deck is present (said in the
-    hint, not silently)."""
-    error_html = f'<div class="error">{_esc(error)}</div><div style="height:1rem"></div>' if error else ""
-    ai_hint = (
-        "AI archetype suggestions are on (server has an API key) — each one still needs your approval."
+    """The landing card. One button, because there is one flow."""
+    error_html = f'<div class="card error-card">{_esc(error)}</div>' if error else ""
+    note = (
+        "A brief or a pasted email can pre-fill the slides you pick &mdash; the server has an API key."
         if ai_enabled else
-        "No <code>ANTHROPIC_API_KEY</code> configured — deck transforms stay fully deterministic "
-        "(no archetype suggestions), and a brief-only new deck is unavailable."
+        "No <code>ANTHROPIC_API_KEY</code> configured, so nothing here calls a model. "
+        "The builder never needs one."
     )
     return f"""{error_html}<div class="card tool-card">
-<form method="post" action="/plan" enctype="multipart/form-data">
-  <div class="field">
-    <label class="field-label">Deck to transform (.pptx)</label>
-    <input type="file" name="file" accept=".pptx">
-    <p class="field-hint">Leave empty to build a new deck from the brief below instead.</p>
-  </div>
-  <div class="field">
-    <label class="field-label">Reference deck (optional, already on-brand)</label>
-    <input type="file" name="reference" accept=".pptx">
-    <p class="field-hint">Slides sharing a layout with it keep that exact layout (chrome refreshed from the
-      reference), and the final audit includes a similarity report against it.</p>
-  </div>
-  <div class="field">
-    <label class="field-label">Brief (for a new deck, when no file is uploaded)</label>
-    <textarea name="brief" rows="2" placeholder="e.g. a Marketing Hub Q2 review: volume up ~2x, 91% resolution, 2025–2027 roadmap"
-      style="width:100%;font-size:0.85rem;padding:0.6rem;"></textarea>
-  </div>
-  <div class="field">
-    <label class="field-label" for="shape">Shape</label>
-    <select name="shape" id="shape" style="width:100%;font-size:0.85rem;padding:0.6rem;"
-      onchange="document.getElementById('shape-hint').textContent=this.selectedOptions[0].dataset.hint">
-{_shape_options()}
-    </select>
-    <p class="field-hint" id="shape-hint">{_shape_hint()}</p>
-  </div>
-  <p class="field-hint" style="margin:0 0 1.1rem;">{ai_hint}</p>
+  <h2 style="margin:0 0 .3rem;font-size:1.05rem;">Build a deck</h2>
+  <p class="field-hint" style="margin:0 0 1.1rem;">Choose an audience, pick your slides from the KONE set,
+    and fill them in. {note}</p>
   <div class="btn-row">
-    <button type="submit" class="primary">Plan transform</button>
-    <a href="/build" class="secondary" style="padding:.5rem .9rem;text-decoration:none;">Pick slides yourself &rarr;</a>
-    <button type="submit" class="secondary" formaction="/audit">Audit only</button>
+    <a class="primary" href="/build" style="padding:.55rem 1rem;text-decoration:none;">Start &rarr;</a>
   </div>
-</form>
 </div>"""
 
 
@@ -842,7 +810,7 @@ def _set_card(audience: str, entry: dict, slides: list) -> str:
     thumbnail size -- none of them reach the deck.
     """
     from deckguard.preview import archetype_preview_html, sample_content
-    from deckguard.skill_bridge import _load_archetypes
+    from deckguard.registry import _load_archetypes
 
     built = set(_load_archetypes().ARCHETYPES)
     tiles = []

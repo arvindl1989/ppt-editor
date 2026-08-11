@@ -410,7 +410,7 @@ def install_reference(archetypes_module, deck_path, prefix: str = "ref") -> dict
         for role, (font, px, colour, caps, bold, fit) in mined["role_styles"].items()
     })
     archetypes_module.ARCHETYPES.update(mined["archetypes"])
-    from deckguard.skill_bridge import invalidate_archetype_caches
+    from deckguard.legacy.skill_bridge import invalidate_archetype_caches
 
     invalidate_archetype_caches()  # the matcher's derived views predate these
     if hasattr(archetypes_module, "SAMPLES"):

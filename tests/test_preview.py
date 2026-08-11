@@ -11,8 +11,8 @@ from deckguard.preview import (
     org_layout_preview_html,
     slide_preview_html,
 )
-from deckguard.skill_bridge import _skill_dir
-from deckguard.slide_import import default_template_path
+from deckguard.legacy.skill_bridge import _skill_dir
+from deckguard.legacy.slide_import import default_template_path
 from tests.helpers import add_rectangle, add_slide, body_run, new_deck, set_run, title_run
 
 needs_skill = pytest.mark.skipif(

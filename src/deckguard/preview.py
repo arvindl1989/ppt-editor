@@ -271,7 +271,7 @@ def archetype_preview_html(archetype_name: str, content: dict) -> str:
     region/group data the pptx renderer consumes -- what you approve is
     what renders."""
     try:
-        from deckguard.skill_bridge import _ensure_skill_on_path, _load_archetypes
+        from deckguard.registry import _ensure_skill_on_path, _load_archetypes
 
         _ensure_skill_on_path()
         archetypes_mod = _load_archetypes()
@@ -449,7 +449,7 @@ def sample_content(archetype_name: str) -> dict:
     builder leaves an unfilled slot empty rather than inventing copy.
     """
     try:
-        from deckguard.skill_bridge import _derived_content_keys, _load_archetypes
+        from deckguard.registry import _derived_content_keys, _load_archetypes
 
         archetypes = _load_archetypes()
         sample = getattr(archetypes, "SAMPLES", {}).get(archetype_name)

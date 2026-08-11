@@ -224,7 +224,7 @@ def _replace_old_logo_region_everywhere(prs, region_in, new_logo_path: Optional[
 
     from pptx.util import Inches
 
-    from deckguard.slide_import import default_template_path
+    from deckguard.legacy.slide_import import default_template_path
 
     region_emu = tuple(Inches(v) for v in region_in)
     # The org template's own actual logo size/position -- NOT the (deliberately
@@ -290,7 +290,7 @@ def _normalize_footer_chrome_position(prs) -> list[Change]:
     placeholder already at the reference position, so an already-
     correct deck is left byte-for-byte untouched on this axis.
     """
-    from deckguard.slide_import import default_template_path
+    from deckguard.legacy.slide_import import default_template_path
 
     changes: list[Change] = []
     reference = {}

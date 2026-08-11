@@ -8,6 +8,12 @@ import re
 
 from fastapi.testclient import TestClient
 
+def _app():
+    from deckguard.web import app
+
+    return app
+
+
 from tests.helpers import add_rectangle, add_slide, body_run, new_deck, set_run, title_run
 
 
@@ -55,168 +61,14 @@ def _post_plan(client, deck_path, reference_path=None):
 # --------------------------------------------------------------------------
 
 
-def test_index_renders_the_single_transform_tool(tmp_path, monkeypatch):
-    client, _ = _client(tmp_path, monkeypatch)
-    resp = client.get("/")
-    assert resp.status_code == 200
-    assert 'action="/plan"' in resp.text
-    assert 'formaction="/audit"' in resp.text
-    # the four old tabs are gone for real
-    for retired in ('action="/fix"', 'action="/learn"', 'action="/create"', 'action="/redesign"'):
-        assert retired not in resp.text
-
-
-def test_audit_flow(tmp_path, monkeypatch):
-    client, _ = _client(tmp_path, monkeypatch)
-    deck = tmp_path / "d.pptx"
-    _write_violating_deck(deck)
-
-    with deck.open("rb") as f:
-        resp = client.post("/audit", files={"file": ("d.pptx", f, "application/octet-stream")})
-    assert resp.status_code == 200
-    assert "critical" in resp.text
-    assert "/download/" in resp.text
-    assert "Transform this deck" in resp.text  # audit points at the one tool that can fix it
-
-
-def test_audit_requires_a_file(tmp_path, monkeypatch):
-    client, _ = _client(tmp_path, monkeypatch)
-    resp = client.post("/audit", data={})
-    assert resp.status_code == 400
-    assert "Audit needs an uploaded" in resp.text
-
-
-def test_corrupt_file_gives_clean_error_not_500(tmp_path, monkeypatch):
-    client, _ = _client(tmp_path, monkeypatch)
-    bad = tmp_path / "bad.pptx"
-    bad.write_bytes(b"not really a pptx")
-    with bad.open("rb") as f:
-        resp = client.post("/audit", files={"file": ("bad.pptx", f, "application/octet-stream")})
-    assert resp.status_code == 400
-    assert "valid .pptx" in resp.text
-    assert "Traceback" not in resp.text
-
-
 # --------------------------------------------------------------------------
 # plan -> review
 # --------------------------------------------------------------------------
 
 
-def test_plan_renders_review_page_with_per_slide_actions(tmp_path, monkeypatch):
-    client, _ = _client(tmp_path, monkeypatch)
-    deck = tmp_path / "d.pptx"
-    _write_three_slide_deck(deck)
-
-    resp = _post_plan(client, deck)
-
-    assert resp.status_code == 200
-    assert "Review plan" in resp.text
-    # one action radio set per slide, defaulting to rebuild; keep is always offered
-    for idx in (1, 2, 3):
-        assert f'name="action_{idx}"' in resp.text
-    assert 'value="rebuild" checked' in resp.text
-    assert 'value="keep"' in resp.text
-    # previews present: current wireframes + proposed layout boxes
-    assert "aspect-ratio:1280/720" in resp.text
-    assert "Cover B" in resp.text  # the cover swap proposal is visible
-    m = re.search(r'action="/transform/([a-f0-9]+)"', resp.text)
-    assert m, "review form must post to /transform/{token}"
-
-
-def test_plan_requires_deck_or_brief(tmp_path, monkeypatch):
-    client, _ = _client(tmp_path, monkeypatch)
-    resp = client.post("/plan", data={})
-    assert resp.status_code == 400
-    assert "Upload a deck" in resp.text
-
-
-def test_plan_brief_only_is_gated_on_server_api_key(tmp_path, monkeypatch):
-    client, _ = _client(tmp_path, monkeypatch)  # no ANTHROPIC_API_KEY
-    resp = client.post("/plan", data={"brief": "a deck about elevators"})
-    assert resp.status_code == 400
-    assert "ANTHROPIC_API_KEY" in resp.text
-
-
-def test_plan_brief_only_renders_archetype_review(tmp_path, monkeypatch):
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-never-used")
-    client, web_mod = _client(tmp_path, monkeypatch)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-never-used")  # reload cleared it
-
-    from deckguard.transform import SlidePlan, TransformPlan
-
-    def fake_plan(brief, **kwargs):
-        return TransformPlan(
-            slides=[SlidePlan(index=1, default_action="new", archetype={
-                "archetype": "hero_stat", "eyebrow": "KPI", "value": "91%", "caption": "c", "support": "s",
-            })],
-            ai_suggestions_ran=True, deck_title="Planned deck",
-        )
-
-    monkeypatch.setattr(web_mod, "plan_transform_from_brief", fake_plan)
-
-    resp = client.post("/plan", data={"brief": "a deck about elevators"})
-
-    assert resp.status_code == 200
-    assert "Planned deck" in resp.text
-    assert 'name="include_1"' in resp.text
-    assert "hero_stat" in resp.text
-
-
 # --------------------------------------------------------------------------
 # transform (execute)
 # --------------------------------------------------------------------------
-
-
-def test_transform_executes_choices_and_downloads(tmp_path, monkeypatch):
-    import io
-
-    from pptx import Presentation
-
-    client, _ = _client(tmp_path, monkeypatch)
-    deck = tmp_path / "d.pptx"
-    _write_three_slide_deck(deck)
-
-    token = re.search(r'action="/transform/([a-f0-9]+)"', _post_plan(client, deck).text).group(1)
-
-    resp = client.post(f"/transform/{token}", data={"action_1": "rebuild", "action_2": "keep", "action_3": "rebuild"})
-
-    assert resp.status_code == 200
-    assert "Transformed" in resp.text
-    assert "Remaining findings" in resp.text
-
-    m = re.search(r'/download/([a-f0-9]+)/transformed\.pptx', resp.text)
-    assert m
-    dl = client.get(m.group(0))
-    assert dl.status_code == 200
-    prs = Presentation(io.BytesIO(dl.content))
-    assert len(prs.slides) == 3
-    assert prs.slides[0].slide_layout.name == "Cover B"  # slide 1 rebuilt (cover swap)
-    assert prs.slides[1].shapes.title.text_frame.text == "Resolution rate"  # slide 2 kept
-
-    report = client.get(m.group(0).replace("transformed.pptx", "transform.json"))
-    assert report.status_code == 200
-
-
-def test_transform_with_reference_shows_similarity_report(tmp_path, monkeypatch):
-    client, _ = _client(tmp_path, monkeypatch)
-    deck = tmp_path / "d.pptx"
-    _write_three_slide_deck(deck)
-    reference = tmp_path / "ref.pptx"
-    _write_three_slide_deck(reference)
-
-    token = re.search(r'action="/transform/([a-f0-9]+)"', _post_plan(client, deck, reference).text).group(1)
-    resp = client.post(f"/transform/{token}", data={"action_1": "keep", "action_2": "keep", "action_3": "keep"})
-
-    assert resp.status_code == 200
-    assert "Vs. reference deck" in resp.text
-    assert "layouts match" in resp.text
-
-
-def test_transform_expired_token_gives_clean_message(tmp_path, monkeypatch):
-    client, _ = _client(tmp_path, monkeypatch)
-    resp = client.post("/transform/deadbeef", data={})
-    assert resp.status_code == 404
-    assert "expired" in resp.text
 
 
 # --------------------------------------------------------------------------
@@ -259,43 +111,6 @@ def test_result_page_names_slides_that_need_a_manual_redraw(tmp_path, monkeypatc
         audit, None, {"pptx": "/a", "json": "/b"},
     )
     assert "manual redraw" not in quiet
-
-
-def test_a_keyless_server_still_offers_every_readable_slide_an_archetype(tmp_path, monkeypatch):
-    """The complaint this closes: with no ANTHROPIC_API_KEY the route
-    switched the archetype step off entirely, so dense slides showed
-    "Structure kept" and nothing else. Structural matching runs
-    regardless, and the card states what the mapping would cost."""
-    client, _ = _client(tmp_path, monkeypatch)  # no ANTHROPIC_API_KEY
-    deck = tmp_path / "d.pptx"
-    _write_three_slide_deck(deck)
-
-    resp = _post_plan(client, deck)
-
-    assert resp.status_code == 200
-    assert 'value="archetype"' in resp.text
-    assert "Archetype suggestions are switched off" in resp.text  # honest about why
-
-
-def test_the_plan_page_can_set_every_slide_at_once(tmp_path, monkeypatch):
-    """A twenty-slide deck meant twenty individual decisions before the
-    reviewer could press Transform, and most of them are the same one."""
-    client, _ = _client(tmp_path, monkeypatch)
-    deck = tmp_path / "d.pptx"
-    _write_three_slide_deck(deck)
-
-    resp = _post_plan(client, deck)
-
-    assert resp.status_code == 200
-    for action in ("archetype", "rebuild", "keep"):
-        assert f'data-bulk="{action}"' in resp.text
-    # the bar has to be INSIDE the form, or it scrolls with nothing to act on
-    form = resp.text.index('action="/transform/')
-    assert form < resp.text.index('class="card bulkbar"') < resp.text.index("</form>")
-    # and the buttons must not submit the form on the way past
-    bar = resp.text[resp.text.index('class="card bulkbar"'):]
-    assert 'type="submit"' not in bar[:bar.index("</div>")]
-    assert 'id="bulk-note"' in resp.text
 
 
 def test_the_brief_plan_page_can_include_or_exclude_every_slide_at_once(tmp_path, monkeypatch):
@@ -359,3 +174,38 @@ def test_the_result_page_says_what_had_nowhere_to_go():
     outcome["dropped_content"] = {}
     assert "nowhere to go" not in templates.transform_result_page(
         "d.pptx", outcome, audit, None, {"pptx": "/x.pptx", "json": "/x.json"})
+
+
+def test_the_landing_page_offers_one_flow():
+    client = TestClient(_app())
+    """It used to describe four products. Three are parked, and
+    describing them was the tool's biggest source of confusion."""
+    r = client.get("/")
+    assert r.status_code == 200
+    assert "/build" in r.text
+    for gone in ("/audit", "/plan", "Audit only", "Plan transform"):
+        assert gone not in r.text, gone
+
+
+def test_the_parked_routes_are_gone_rather_than_hidden():
+    client = TestClient(_app())
+    for route in ("/audit", "/plan"):
+        assert client.post(route, data={}).status_code == 404, route
+
+
+def test_no_core_module_imports_from_legacy():
+    """Parked code may read the core; the core may never read parked
+    code. Without this the split rots back into one tangle."""
+    import ast
+    import pathlib
+
+    offenders = []
+    for path in pathlib.Path("src/deckguard").glob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text())):
+            if not isinstance(node, (ast.Import, ast.ImportFrom)):
+                continue
+            mod = getattr(node, "module", None) or ""
+            names = [a.name for a in node.names]
+            if "legacy" in mod or any("legacy" in n for n in names):
+                offenders.append(f"{path.name}: {mod or names}")
+    assert not offenders, offenders

@@ -8,7 +8,7 @@ DESIGNS out so old content can be re-rendered through them.
 
 import pytest
 
-from deckguard.mine import _cluster_repeats, _signature, mine_reference
+from deckguard.legacy.mine import _cluster_repeats, _signature, mine_reference
 from tests.helpers import add_rectangle, add_slide, new_deck, set_run, title_run
 
 
@@ -129,7 +129,7 @@ def test_mining_never_raises_on_an_unreadable_deck(tmp_path):
     with pytest.raises(Exception):
         mine_reference(bad)  # the miner itself surfaces the error...
 
-    from deckguard.mine import install_reference
+    from deckguard.legacy.mine import install_reference
 
     class _Module:
         ARCHETYPES: dict = {}
@@ -142,7 +142,7 @@ def test_mined_designs_are_preferred_but_not_at_any_cost():
     """"Make it look like that deck" means that deck's layouts -- but a
     reference design that would drop half the content must not beat a
     built-in one that holds all of it."""
-    from deckguard.skill_bridge import match_archetypes
+    from deckguard.legacy.skill_bridge import match_archetypes
 
     blocks = [[f"Point {i}"] for i in range(6)]
     plain = match_archetypes("A title", blocks, 0, limit=1)

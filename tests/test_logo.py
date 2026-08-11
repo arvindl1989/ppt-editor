@@ -162,7 +162,7 @@ def test_reference_logo_geometry_matches_the_bundled_template():
     """The bundled KONE template's own logo shapes agree on one
     size/position across the overwhelming majority of its layouts --
     reference_logo_geometry should return exactly that, in EMU."""
-    from deckguard.slide_import import default_template_path
+    from deckguard.legacy.slide_import import default_template_path
 
     if not default_template_path().exists():
         import pytest

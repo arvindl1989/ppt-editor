@@ -32,7 +32,7 @@ from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 
 from deckguard import effects as effects_mod
-from deckguard.slide_import import (
+from deckguard.legacy.slide_import import (
     _delete_slide,
     _move_slide,
     default_template_path,
@@ -1051,7 +1051,7 @@ def apply_rebrand(
     )
 
     from deckguard.config import default_config_path, load_config
-    from deckguard.fixer import fix_deck
+    from deckguard.legacy.fixer import fix_deck
 
     config = rules_config if rules_config is not None else load_config(default_config_path())
     out_prs = Presentation(str(out_path))

@@ -89,10 +89,10 @@ from typing import Optional
 import anthropic
 from pptx import Presentation
 
-from deckguard.compose import ComposeError, ComposeResult, Outline, build_deck, outline_from_list
+from deckguard.legacy.compose import ComposeError, ComposeResult, Outline, build_deck, outline_from_list
 from deckguard.config import default_config_path, load_config
-from deckguard.fixer import fix_deck
-from deckguard.retemplate import EMPTY_SLIDE_REASON, SlideProfile, _extract_slide_content
+from deckguard.legacy.fixer import fix_deck
+from deckguard.legacy.retemplate import EMPTY_SLIDE_REASON, SlideProfile, _extract_slide_content
 
 DEFAULT_MODEL = "claude-opus-5"
 
@@ -297,7 +297,10 @@ OUTLINE_SCHEMA = {
 }
 
 
-class RedesignError(ComposeError):
+from deckguard.registry import RegistryError
+
+
+class RedesignError(ComposeError, RegistryError):
     """Raised when the AI redesign step itself fails (missing API key,
     missing dependency, nothing to work from, or a malformed/unusable
     model response)."""
@@ -709,8 +712,8 @@ def _rebrand_deck(
     writes to brand_rules.yaml. Findings land in
     `RedesignResult.reference_match_notes`.
     """
-    from deckguard.retemplate import EMPTY_SLIDE_REASON, apply_rebrand, rebuild_slides_as_dividers
-    from deckguard.slide_import import default_template_path
+    from deckguard.legacy.retemplate import EMPTY_SLIDE_REASON, apply_rebrand, rebuild_slides_as_dividers
+    from deckguard.legacy.slide_import import default_template_path
 
     rebrand_result = apply_rebrand(
         str(deck_path), out_path, template_path=template_path, rules_config=rules_config,
@@ -777,8 +780,8 @@ def _rebrand_deck(
         # for, never on by default, so apply_rebrand's own "fully
         # deterministic, zero API calls" identity is untouched unless a
         # human already asked for --review.
-        from deckguard.retemplate import SlideProfile, _extract_slide_content
-        from deckguard.skill_bridge import apply_archetype_overrides_to_deck, select_archetype_overrides_for_rebrand
+        from deckguard.legacy.retemplate import SlideProfile, _extract_slide_content
+        from deckguard.legacy.skill_bridge import apply_archetype_overrides_to_deck, select_archetype_overrides_for_rebrand
 
         reopened = Presentation(str(out_path))
         n_slides_total = len(reopened.slides)
@@ -820,7 +823,7 @@ def _rebrand_deck(
             f"{', '.join(map(str, touched))}."
         )
     if reference_path is not None:
-        from deckguard.exact_transplant import transplant_exact_treatment
+        from deckguard.legacy.exact_transplant import transplant_exact_treatment
 
         config = rules_config if rules_config is not None else load_config(default_config_path())
         out_prs = Presentation(str(out_path))
@@ -952,7 +955,7 @@ def redesign_deck(
         # path does. See skill_bridge.py's own docstring for why this is
         # scoped to ONLY this starting point (deck_path is None) and not the
         # other two `redesign_deck` modes.
-        from deckguard.skill_bridge import build_deck_via_skill
+        from deckguard.legacy.skill_bridge import build_deck_via_skill
 
         return build_deck_via_skill(
             brief, out_path, target_slides=target_slides, model=model, effort=effort,
@@ -999,7 +1002,7 @@ def redesign_deck(
     # image_count and pick a picture-carrying archetype when one fits;
     # the blobs themselves are stripped before serializing and placed
     # into the archetype's picture slots later, at render time.
-    from deckguard.skill_bridge import build_deck_with_archetypes, select_archetype_overrides
+    from deckguard.legacy.skill_bridge import build_deck_with_archetypes, select_archetype_overrides
 
     overrides = select_archetype_overrides(raw_slides, model=model, effort=effort, api_key=api_key, client=client)
 

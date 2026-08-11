@@ -43,8 +43,8 @@ from pptx import Presentation
 
 from deckguard.config import default_config_path, load_config
 from deckguard.inventory import build_inventory, iter_shapes_recursive
-from deckguard.redesign import DEFAULT_MODEL
-from deckguard.retemplate import (
+from deckguard.legacy.redesign import DEFAULT_MODEL
+from deckguard.legacy.retemplate import (
     SlideProfile,
     _extract_slide_content,
     apply_rebrand,
@@ -273,8 +273,8 @@ def plan_transform(
     reference_sources: dict = {}
     if reference_path and suggest_archetypes:
         try:
-            from deckguard.mine import install_reference
-            from deckguard.skill_bridge import _ensure_skill_on_path, _load_archetypes
+            from deckguard.legacy.mine import install_reference
+            from deckguard.legacy.skill_bridge import _ensure_skill_on_path, _load_archetypes
 
             _ensure_skill_on_path()
             mined = install_reference(_load_archetypes(), reference_path)
@@ -286,7 +286,7 @@ def plan_transform(
     suggestions: dict = {}
     ai_ran = False
     if suggest_archetypes:
-        from deckguard.skill_bridge import (
+        from deckguard.legacy.skill_bridge import (
             archetype_suggestions_available,
             match_archetypes,
             select_archetype_overrides_for_rebrand,
@@ -320,7 +320,7 @@ def plan_transform(
     # keyless server offered nothing but "keep" on every dense slide.
     structural: dict = {}
     if suggest_archetypes:
-        from deckguard.skill_bridge import match_archetypes as _match
+        from deckguard.legacy.skill_bridge import match_archetypes as _match
 
         cover_end = {plan.cover_index, plan.end_index}
         pool = {
@@ -437,7 +437,7 @@ def plan_transform_from_brief(
     appear. Raises RedesignError on a failed planning call, same as the
     brief-only path always has (unlike existing-deck planning there is
     no deterministic fallback to degrade to)."""
-    from deckguard.skill_bridge import (
+    from deckguard.legacy.skill_bridge import (
         _load_archetypes,
         _validate_kone_spec,
         call_claude_for_kone_spec,
@@ -577,7 +577,7 @@ def _config_learned_from_reference(deck_path, reference_path, base_config: dict)
     the backend's own canned tables. Never writes to brand_rules.yaml --
     the learned config is scoped to this one run.
     """
-    from deckguard import learn as learn_mod
+    from deckguard.legacy import learn as learn_mod
 
     try:
         result = learn_mod.learn(Presentation(str(deck_path)), Presentation(str(reference_path)), base_config)
@@ -650,7 +650,7 @@ def execute_transform(
     # plain copy with no fix pass at all -- cover that case here so an
     # all-keep transform is still a brand fix, not a no-op.
     if not rebuild_indices and not rebrand_result.reference_layout_indices:
-        from deckguard.fixer import fix_deck
+        from deckguard.legacy.fixer import fix_deck
 
         prs_out = Presentation(str(out_path))
         fix_deck(prs_out, effective_config, source_path=str(out_path), output_path=str(out_path), dry_run=False)
@@ -662,7 +662,7 @@ def execute_transform(
     }
 
     if archetype_indices:
-        from deckguard.skill_bridge import apply_archetype_overrides_to_deck
+        from deckguard.legacy.skill_bridge import apply_archetype_overrides_to_deck
 
         prs = Presentation(str(deck_path))
         slide_height_in = prs.slide_height / 914400 if prs.slide_height else None
@@ -710,7 +710,7 @@ def execute_transform(
         rebrand_result.reference_layout_indices
     )
     if reference_path:
-        from deckguard.exact_transplant import transplant_exact_treatment
+        from deckguard.legacy.exact_transplant import transplant_exact_treatment
 
         try:
             out_prs = Presentation(str(out_path))
@@ -759,7 +759,7 @@ def execute_transform_from_brief(out_path, plan: TransformPlan, approved_indices
     """Render the approved subset of a brief-only plan through the
     skill's own whole-deck builder (retained master cover + outro, same
     as the brief-only path always produced)."""
-    from deckguard.skill_bridge import fill_empty_photo_slots
+    from deckguard.legacy.skill_bridge import fill_empty_photo_slots
 
     approved = approved_indices if approved_indices is not None else {s.index for s in plan.slides}
     spec_slides = [dict(s.archetype) for s in plan.slides if s.index in approved and s.archetype]
@@ -783,7 +783,7 @@ def execute_transform_from_brief(out_path, plan: TransformPlan, approved_indices
     restore_logo_chrome(out_path)  # exactly one mark per slot
     # An author who asked for a cover/closer archetype gets theirs, not
     # theirs plus the master's.
-    from deckguard.gallery import drop_redundant_master_slides, stamp_footers
+    from deckguard.legacy.gallery import drop_redundant_master_slides, stamp_footers
 
     drop_redundant_master_slides(out_path, spec)
     # Page numbers depend on final slide order, so this runs last.

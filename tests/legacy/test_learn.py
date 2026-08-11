@@ -2,7 +2,7 @@ from copy import deepcopy
 
 from pptx import Presentation
 
-from deckguard import learn
+from deckguard.legacy import learn
 from deckguard.config import default_config_path, load_config
 from tests.helpers import add_rectangle, add_slide, body_run, new_deck, set_run, title_run
 

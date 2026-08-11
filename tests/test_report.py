@@ -1,4 +1,4 @@
-from deckguard.fixer import Change, FixReport
+from deckguard.legacy.fixer import Change, FixReport
 from deckguard.report import remap_overrides_summary
 
 

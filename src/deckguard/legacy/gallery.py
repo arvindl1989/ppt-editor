@@ -70,7 +70,7 @@ def gallery_dir() -> Optional[Path]:
         candidates.append(Path(env) / "templates" / "kone-deck")
         candidates.append(Path(env))
     candidates.append(Path.home() / ".claude" / "skills" / "kone-design" / "templates" / "kone-deck")
-    candidates.append(Path(__file__).parent / "assets" / "kone-design" / "templates" / "kone-deck")
+    candidates.append(Path(__file__).parent.parent / "assets" / "kone-design" / "templates" / "kone-deck")
     # Keyed on the gallery FILE, not on ARCHETYPES.md: an older install
     # can carry the spec under the previous gallery filenames, and
     # picking it would parse nothing while looking like it worked.
@@ -409,7 +409,7 @@ def build_archetypes(directory: Optional[Path] = None) -> dict:
 
 def _asset_path(name: str) -> Optional[str]:
     for base in (
-        Path(__file__).parent / "assets" / "kone-design" / "logo",
+        Path(__file__).parent.parent / "assets" / "kone-design" / "logo",
         Path.home() / ".claude" / "skills" / "kone-design" / "assets" / "logo",
     ):
         candidate = base / name
@@ -428,7 +428,7 @@ def _photo_for(content: dict) -> Optional[str]:
     the library carries a written description of each picture, so the
     slide's own words can choose one.
     """
-    from deckguard.skill_bridge import _photo_library
+    from deckguard.legacy.skill_bridge import _photo_library
 
     supplied = content.get("photo")
     if supplied and Path(str(supplied)).is_file():
@@ -577,7 +577,7 @@ def install(archetypes_module) -> int:
     })
 
     archetypes_module.ARCHETYPES.update(built["archetypes"])
-    from deckguard.skill_bridge import invalidate_archetype_caches
+    from deckguard.legacy.skill_bridge import invalidate_archetype_caches
 
     invalidate_archetype_caches()
     if hasattr(archetypes_module, "SAMPLES"):

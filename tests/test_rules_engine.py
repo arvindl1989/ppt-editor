@@ -676,7 +676,7 @@ def test_the_bold_rule_keys_on_the_family_not_the_approved_match(tmp_path):
 def test_bolded_inter_is_un_bolded_by_the_fixer(tmp_path):
     from pptx import Presentation
 
-    from deckguard.fixer import fix_deck
+    from deckguard.legacy.fixer import fix_deck
 
     from deckguard.config import default_config_path, load_config
 

@@ -8,7 +8,7 @@ from pptx.util import Inches
 
 from deckguard import logo as logo_mod
 from deckguard.config import load_config, default_config_path
-from deckguard.fixer import fix_deck
+from deckguard.legacy.fixer import fix_deck
 from deckguard.inventory import build_inventory
 from deckguard.rules_engine import audit_deck
 from tests.helpers import (
@@ -104,8 +104,8 @@ def test_fix_is_idempotent_on_a_clean_deck():
     # The stock template's own DATE/SLIDE_NUMBER layout placeholders don't
     # match the org template's position either -- bring those up to brand
     # too, same reasoning as the theme/font lines above.
-    from deckguard.fixer import _reference_placeholder_geometry
-    from deckguard.slide_import import default_template_path
+    from deckguard.legacy.fixer import _reference_placeholder_geometry
+    from deckguard.legacy.slide_import import default_template_path
 
     layout = slide.slide_layout
     containers = [layout.placeholders, layout.slide_master.shapes]
@@ -389,7 +389,7 @@ def test_fix_sizes_the_replacement_logo_from_the_template_not_the_search_region(
     from pptx.util import Inches
 
     from deckguard import logo as logo_mod
-    from deckguard.slide_import import default_template_path
+    from deckguard.legacy.slide_import import default_template_path
 
     if not default_template_path().exists():
         pytest.skip("bundled template asset not present")
@@ -697,8 +697,8 @@ def test_fix_repositions_date_and_slide_number_to_brand_position():
     slide-number at the LEFT edge and its confidentiality/footer text
     at the RIGHT -- backwards from the org template's own convention
     (date left, slide number right, confirmed by direct inspection)."""
-    from deckguard.fixer import _reference_placeholder_geometry
-    from deckguard.slide_import import default_template_path
+    from deckguard.legacy.fixer import _reference_placeholder_geometry
+    from deckguard.legacy.slide_import import default_template_path
 
     if not default_template_path().exists():
         pytest.skip("bundled template asset not present")

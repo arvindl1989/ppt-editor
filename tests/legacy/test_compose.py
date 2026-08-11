@@ -9,7 +9,7 @@ import textwrap
 import pytest
 from pptx import Presentation
 
-from deckguard.compose import (
+from deckguard.legacy.compose import (
     ComposeError,
     Outline,
     SlideSpec,
@@ -22,7 +22,7 @@ from deckguard.compose import (
 from deckguard.config import default_config_path, load_config
 from deckguard.inventory import build_inventory
 from deckguard.rules_engine import audit_deck
-from deckguard.slide_import import default_template_path
+from deckguard.legacy.slide_import import default_template_path
 from tests.helpers import make_pattern_png
 
 TEMPLATE_PATH = default_template_path()

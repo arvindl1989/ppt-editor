@@ -1496,7 +1496,7 @@ def install(archetypes_module, grades: Iterable[str] = ("A", "B", "C", "D")) -> 
 
     if added:
         try:  # the matcher caches signatures; new names must invalidate them
-            from deckguard.skill_bridge import invalidate_archetype_caches
+            from deckguard.registry import invalidate_archetype_caches
 
             invalidate_archetype_caches()
         except Exception:
@@ -1635,7 +1635,7 @@ def build_deck(spec: dict, out_path, archetypes_module=None, report=None) -> str
         # `gallery.install` overwrites what it finds, so installing it
         # second silently reverted the refined agenda to a port with no
         # bullets and the divider to one with no number and no colour.
-        from deckguard.skill_bridge import _load_archetypes
+        from deckguard.registry import _load_archetypes
 
         archetypes_module = _load_archetypes()
 
@@ -1692,7 +1692,7 @@ def build_deck(spec: dict, out_path, archetypes_module=None, report=None) -> str
 
 
 def _load_creator():
-    from deckguard.skill_bridge import _load_creator as load
+    from deckguard.registry import _load_creator as load
 
     return load()
 
@@ -2162,7 +2162,7 @@ def recognition_deck(content: dict) -> dict:
     # `text_picture_a` carries a picture slot the arc never supplies by
     # hand; unfilled it renders as a white half-slide.
     try:
-        from deckguard.skill_bridge import fill_empty_photo_slots
+        from deckguard.registry import fill_empty_photo_slots
 
         fill_empty_photo_slots(spec)
     except Exception:  # noqa: BLE001 -- no photo library is not an error
