@@ -248,3 +248,38 @@ def shared_archetypes() -> set:
     """The six that serve both sets: built once, field parameterised."""
     sets = [{s["archetype"] for s in slides_in(n)} for n in set_names()]
     return set.intersection(*sets) if sets else set()
+
+
+# --------------------------------------------------------------------------
+# which chrome a slide gets
+# --------------------------------------------------------------------------
+
+# An archetype's KIND decides its chrome, not its name. Covers, dividers
+# and the outro carry the logo top-left and no footer; everything else
+# carries the logo top-right, a date and a page number.
+_COVER = ("cover_", "intro")
+_DIVIDER = ("divider_", "image_section_divider", "section_divider")
+_NO_CHROME = ("outro", "end_logo", "thank_you", "fullslide_picture", "blank")
+
+
+def slide_kind(archetype: str) -> str:
+    name = (archetype or "").lower()
+    if name.startswith(_NO_CHROME) or name in _NO_CHROME:
+        return "outro" if "outro" in name or "thank" in name else "bare"
+    if name.startswith(_COVER):
+        return "cover"
+    if name.startswith(_DIVIDER) or "divider" in name:
+        return "divider"
+    return "content"
+
+
+def wants_footer(archetype: str) -> bool:
+    """Footer chrome on every slide except covers, dividers, the outro,
+    a full-bleed picture and a blank. Missing from every generated body
+    slide until it was moved here -- an archetype was expected to draw
+    its own, and none of them did."""
+    return slide_kind(archetype) == "content"
+
+
+def logo_on_left(archetype: str) -> bool:
+    return slide_kind(archetype) in ("cover", "divider", "outro")

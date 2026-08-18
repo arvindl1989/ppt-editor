@@ -619,6 +619,12 @@ def render(slide, name: str, content: dict, archetypes_module) -> None:
         bg=getattr(archetypes_module, "BG", {}).get(name),
     )
 
+    # The banner is one photograph; the cut comes from masking it. Drawn
+    # after the engine so the masks sit ON the picture rather than under
+    # it, which is the whole mechanism.
+    bg_name = getattr(archetypes_module, "BG", {}).get(name) or spec.get("background")
+    draw_cut_cover(slide, engine, name, _bg_hex(bg_name))
+
     if native:
         chosen = _icon_names_for(spec, filled, slots)
         index = 0
@@ -1671,6 +1677,12 @@ def build_deck(spec: dict, out_path, archetypes_module=None, report=None) -> str
             if dropped:
                 report.setdefault("dropped", {})[position] = (name, dropped)
         render(slide, name, content, archetypes_module)
+        stamp_chrome(
+            slide, archetypes_module.E, str(name),
+            page=position + 1,          # the retained cover is page 1
+            date=str(spec.get("date") or content.get("footer") or _deck_date()),
+            classification=str(content.get("classification") or spec.get("classification") or ""),
+        )
 
     body = [el for el in list(slide_ids) if el not in originals]
     keep = {id(intro), id(outro), *(id(b) for b in body)}
@@ -1689,6 +1701,13 @@ def build_deck(spec: dict, out_path, archetypes_module=None, report=None) -> str
 
     prs.save(str(out_path))
     return str(out_path)
+
+
+def _deck_date() -> str:
+    """The master's own footer format: `12 MARCH 2026`."""
+    from datetime import date
+
+    return date.today().strftime("%d %B %Y").lstrip("0")
 
 
 def _load_creator():
@@ -2268,3 +2287,220 @@ def shape_notes(shape: str) -> tuple[Optional[str], Optional[int]]:
         return None, None
     notes = entry["notes"]
     return (notes() if callable(notes) else notes), entry["target"]
+
+
+# --------------------------------------------------------------------------
+# chrome, owned by the layout
+# --------------------------------------------------------------------------
+
+
+def stamp_chrome(slide, engine, archetype: str, *, page: int, date: str,
+                 classification: str = "") -> None:
+    """Date, page number and classification, placed by the layout.
+
+    BRAND_MODE section 3 says chrome belongs to the layout and an
+    archetype should draw none of it. Every archetype duly drew none --
+    and so did the layout, so every generated body slide came out with
+    nothing at all below y=629. The master's own retained cover and
+    Thank you carried theirs, which is why it read as a formatting
+    quirk rather than as chrome being absent.
+
+    Covers, dividers, the outro, a full-bleed picture and a blank take
+    none of this by design.
+    """
+    from deckguard import brandmode as bm
+
+    if not bm.wants_footer(archetype):
+        return
+
+    dark = _slide_is_dark(slide, engine)
+    ink = bm.WHITE if dark else bm.BLACK
+    if date:
+        _chrome_text(slide, engine, [bm.FOOTER_DATE_X, bm.FOOTER_Y, 500, 16],
+                     date, "footer", ink)
+    if page:
+        _chrome_text(slide, engine, [bm.FOOTER_PAGE_X, bm.FOOTER_Y, 68, 16],
+                     f"{page:02d}", "footer", ink)
+    if classification:
+        _chrome_text(slide, engine, [bm.FOOTER_DATE_X, bm.CLASSIFICATION_Y, 500, 14],
+                     classification, "classification", ink)
+
+
+def _chrome_text(slide, engine, box, value: str, role: str, ink: str) -> None:
+    from deckguard import brandmode as bm
+
+    style = bm.resolve(role) or {}
+    _draw_text(slide, engine, box, value, {
+        "kind": "text", "px": style.get("px", 11),
+        "font": style.get("font", bm.KONE_INFO),
+        "color": ink, "caps": True, "align": "l",
+    })
+
+
+def _slide_is_dark(slide, engine) -> bool:
+    """Is the bottom-left of this slide a dark ground?
+
+    The handoff is explicit that chrome colour is set against the
+    image, not against the archetype -- external slide 12 keeps a black
+    page number because the photograph is light in that corner while
+    slide 14's is dark. Approximated here by the largest shape covering
+    the footer band.
+    """
+    from pptx.util import Emu
+
+    px = None
+    try:
+        px = slide.part.package.presentation_part.presentation.slide_width / 1280
+    except Exception:  # noqa: BLE001
+        return False
+    band_top = 620 * px
+    best, best_area = None, 0
+    for shape in slide.shapes:
+        try:
+            top, height = shape.top, shape.height
+            left, width = shape.left, shape.width
+        except Exception:  # noqa: BLE001
+            continue
+        if None in (top, height, left, width):
+            continue
+        if top + height < band_top or left > 700 * px:
+            continue
+        area = width * height
+        if area > best_area:
+            best, best_area = shape, area
+    if best is None:
+        return False
+    try:
+        if best.shape_type is not None and best.shape_type.name == "PICTURE":
+            return True   # a photograph under the footer: white reads on both
+        fill = best.fill
+        if fill.type is not None and str(fill.fore_color.rgb) in ("1450F5", "141414"):
+            return True
+    except Exception:  # noqa: BLE001
+        return False
+    return False
+
+
+# --------------------------------------------------------------------------
+# the cut cover
+# --------------------------------------------------------------------------
+
+# One photograph behind background-coloured masks -- never a photo
+# pre-sliced into panes, so dropping in a new image reproduces the
+# chopped effect and PowerPoint's Change Picture still works.
+#
+# COVER_B_CUT3's panes are published in INTERNAL_25.md slide 01.
+# COVER_A_CUT4's are not published anywhere in the handoff: it is
+# described only as "four photo panes cut across the top". The four
+# below keep the internal cover's rhythm -- top-anchored, staggered
+# heights, 10px gutters -- across the content column, and are the one
+# piece of this geometry that is derived rather than measured.
+_CUT_COVERS: dict[str, dict] = {
+    "cover_b_cut3": {
+        "band": [267, 0, 968, 430],
+        "panes": [[267, 300, 340], [577, 300, 430], [887, 348, 380]],
+    },
+    "cover_a_cut4": {
+        "band": [45, 0, 1190, 430],
+        "panes": [[45, 290, 340], [345, 290, 430], [645, 290, 370], [945, 290, 400]],
+        "derived": True,
+    },
+}
+
+
+def _cover_band(slide, engine, band) -> bool:
+    """Grow the banner photograph so it spans the whole cut band."""
+    bx, by, bw, bh = band
+    left, top = engine.X(bx), engine.X(by)
+    right, bottom = engine.X(bx + bw), engine.X(by + bh)
+    banner, area = None, 0
+    for shape in slide.shapes:
+        kind = getattr(shape, "shape_type", None)
+        if kind is None or kind.name != "PICTURE":
+            continue
+        size = (shape.width or 0) * (shape.height or 0)
+        if size > area:
+            banner, area = shape, size
+    if banner is None:
+        return False
+    # Set to the band, not unioned with it. A union left the banner
+    # wider than the cut on COVER_A_CUT4, so photograph bled past the
+    # leftmost pane into the margin with no mask over it.
+    banner.left, banner.top = left, top
+    banner.width, banner.height = right - left, bottom - top
+    return True
+
+
+def _bg_hex(bg) -> str:
+    """A background name or hex to the hex the masks paint in.
+
+    A mask has to match the field exactly or the cut shows as a seam.
+    """
+    from deckguard import brandmode as bm
+
+    if not bg:
+        return bm.WHITE
+    text = str(bg).strip().lstrip("#")
+    if len(text) == 6 and all(c in "0123456789abcdefABCDEF" for c in text):
+        return text.upper()
+    return {
+        "white": bm.WHITE, "sand": bm.SAND, "light_blue": bm.LIGHT_BLUE,
+        "lightblue": bm.LIGHT_BLUE, "pink": bm.PINK, "mint": bm.MINT,
+        "yellow": bm.YELLOW, "blue": bm.BLUE, "black": bm.BLACK,
+    }.get(text.lower(), bm.WHITE)
+
+
+def _cut_masks(band, panes) -> list:
+    """The rectangles that hide everything the panes do not show.
+
+    Three kinds: the gutters between panes, the strip under a pane
+    shorter than the band, and any run of band before the first pane or
+    after the last. Computed rather than listed so a pane change cannot
+    leave a stale mask behind.
+    """
+    bx, by, bw, bh = band
+    masks, cursor = [], bx
+    for x, w, h in sorted(panes):
+        if x > cursor:
+            masks.append([cursor, by, x - cursor, bh])
+        if h < bh:
+            masks.append([x, by + h, w, bh - h])
+        cursor = x + w
+    if cursor < bx + bw:
+        masks.append([cursor, by, bx + bw - cursor, bh])
+    return masks
+
+
+def draw_cut_cover(slide, engine, name: str, background: str = "FFFFFF") -> int:
+    """Mask a cut cover's banner into panes. Returns how many it drew.
+
+    The cut covers rendered their photograph full-width with no masks
+    at all, so the chopped effect the brand asks for simply never
+    appeared. The test that would have caught it was skipped rather
+    than passing.
+    """
+    from pptx.enum.shapes import MSO_SHAPE
+
+    cut = _CUT_COVERS.get((name or "").lower())
+    if not cut:
+        return 0
+    # The banner has to cover the band it is cut from, or a pane shows
+    # background instead of photograph. cover_b_cut3's picture starts at
+    # x:330 while its published panes start at 267, so the leftmost pane
+    # would have come out empty.
+    _cover_band(slide, engine, cut["band"])
+
+    drawn = 0
+    for x, y, w, h in _cut_masks(cut["band"], cut["panes"]):
+        if w <= 0 or h <= 0:
+            continue
+        shape = slide.shapes.add_shape(
+            MSO_SHAPE.RECTANGLE, engine.X(x), engine.X(y), engine.X(w), engine.X(h)
+        )
+        shape.name = "Cut mask"
+        shape.fill.solid()
+        shape.fill.fore_color.rgb = engine._hex(background)
+        shape.line.fill.background()
+        shape.shadow.inherit = False
+        drawn += 1
+    return drawn

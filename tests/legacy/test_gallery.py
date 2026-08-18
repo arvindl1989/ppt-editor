@@ -225,15 +225,6 @@ def test_chrome_assets_keep_their_transparency(tmp_path):
     assert all(m == "RGBA" for m in modes), f"alpha was flattened: {modes}"
 
 
-@pytest.mark.xfail(
-    reason="The cut cover renders its photograph but none of the mask "
-           "rectangles, so the chopped effect is missing. This test was "
-           "SKIPPED before the legacy split -- `needs_gallery` never fired -- "
-           "so the defect has been live and invisible. Fixing it belongs with "
-           "re-speccing COVER_A_CUT4 against the 25+25 handoff, which gives "
-           "the mask geometry (windows at 330/660/990, widths 289/290/290).",
-    strict=True,
-)
 @needs_gallery
 def test_the_cut_cover_is_one_swappable_picture_not_four_baked_panes(tmp_path):
     """Asked for as "a template where when we add a picture it adds that

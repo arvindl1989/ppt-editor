@@ -1197,3 +1197,81 @@ def test_the_arc_notes_are_built_from_the_arc_itself():
     notes = L._arc_notes()
     for name, _why in L.RECOGNITION_ARC:
         assert name in notes
+
+
+# --------------------------------------------------------------------------
+# chrome and the cut cover
+# --------------------------------------------------------------------------
+
+
+def test_every_content_slide_carries_a_date_and_a_page_number(tmp_path):
+    """BRAND_MODE section 3 puts chrome in the layout and tells the
+    archetype to draw none. Every archetype duly drew none -- and so did
+    the layout, so generated body slides came out with nothing at all
+    below y=629 while the master's retained cover and Thank you kept
+    theirs, which made it read as a quirk rather than as chrome missing."""
+    from pptx import Presentation
+
+    out = tmp_path / "chrome.pptx"
+    L.build_deck({"title": "T", "date": "12 March 2026", "slides": [
+        {"archetype": "cover_a_cut4", "title": "Cover"},
+        {"archetype": "title_content", "title": "Findings", "bullets": ["One"]},
+        {"archetype": "divider_numbering", "number": "01", "title": "Section"},
+        {"archetype": "three_content", "title": "Three",
+         "items": [{"heading": "A", "text": "a"}]},
+    ]}, str(out), _skill_modules())
+
+    prs = Presentation(str(out))
+    px = prs.slide_width / 1280
+    footers = []
+    for slide in prs.slides:
+        low = [(round(sh.left / px), sh.text_frame.text.strip())
+               for sh in slide.shapes
+               if getattr(sh, "has_text_frame", False) and sh.text_frame.text.strip()
+               and sh.top / px > 640]
+        footers.append(low)
+
+    # deck order: master cover, cover, title_content, divider, three_content, master outro
+    assert any("12 MARCH 2026" in t for _x, t in footers[2]), footers[2]
+    assert any(t == "03" for _x, t in footers[2]), "page number missing"
+    assert any(t == "05" for _x, t in footers[4]), footers[4]
+    assert footers[1] == [], "a cover takes no footer"
+    assert footers[3] == [], "a divider takes no footer"
+
+
+def test_the_page_number_sits_right_and_the_date_left():
+    from deckguard import brandmode as bm
+
+    assert bm.FOOTER_DATE_X == 45
+    assert bm.FOOTER_PAGE_X == 1167
+    assert bm.FOOTER_Y == 658 > bm.FLOOR
+
+
+def test_the_cut_cover_masks_one_photograph_rather_than_slicing_it():
+    """One picture behind background-coloured masks, so dropping in a
+    new image reproduces the chopped effect and Change Picture works."""
+    for name, cut in L._CUT_COVERS.items():
+        masks = L._cut_masks(cut["band"], cut["panes"])
+        assert len(masks) >= len(cut["panes"]), name
+        bx, by, bw, bh = cut["band"]
+        for x, y, w, h in masks:
+            assert w > 0 and h > 0, (name, x, y, w, h)
+            assert bx <= x and x + w <= bx + bw + 1, (name, "mask outside the band")
+            assert by <= y and y + h <= by + bh + 1, (name, "mask outside the band")
+        # and no mask covers a pane's visible area
+        for px_, pw, ph in cut["panes"]:
+            for x, y, w, h in masks:
+                overlap_x = max(0, min(px_ + pw, x + w) - max(px_, x))
+                overlap_y = max(0, min(ph, y + h) - max(by, y))
+                assert not (overlap_x and overlap_y), (name, "mask covers a pane")
+
+
+def test_a_mask_is_painted_in_the_slides_own_field_colour():
+    """A mask that misses the field by a shade shows as a seam."""
+    from deckguard import brandmode as bm
+
+    assert L._bg_hex(None) == bm.WHITE
+    assert L._bg_hex("sand") == bm.SAND
+    assert L._bg_hex("#F3EEE6") == "F3EEE6"
+    assert L._bg_hex("light_blue") == bm.LIGHT_BLUE
+    assert L._bg_hex("nonsense") == bm.WHITE

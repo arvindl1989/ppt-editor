@@ -118,3 +118,23 @@ def test_the_canonical_library_is_forty_four():
 def test_an_unknown_set_says_what_it_has():
     with pytest.raises(KeyError, match="internal"):
         B.slides_in("sideways")
+
+
+# --------------------------------------------------------------------------
+# chrome
+# --------------------------------------------------------------------------
+
+
+def test_chrome_follows_the_kind_of_slide_not_its_name():
+    for cover in ("cover_a_cut4", "cover_b_cut3", "cover_f_fullbleed"):
+        assert B.slide_kind(cover) == "cover"
+        assert not B.wants_footer(cover) and B.logo_on_left(cover)
+    for divider in ("divider_numbering", "divider_title_only", "image_section_divider"):
+        assert B.slide_kind(divider) == "divider"
+        assert not B.wants_footer(divider) and B.logo_on_left(divider)
+    assert not B.wants_footer("outro") and B.logo_on_left("outro")
+    for content in ("title_content", "kone_numbers", "quote_a", "timeline"):
+        assert B.wants_footer(content), content
+        assert not B.logo_on_left(content)
+    # a blank takes none of it, and is not a cover either
+    assert B.slide_kind("blank") == "bare" and not B.wants_footer("blank")
