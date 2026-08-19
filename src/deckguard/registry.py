@@ -160,6 +160,62 @@ def _install_gallery(module) -> None:
         if isinstance(target, dict):
             for name, value in data.get(key, {}).items():
                 target.setdefault(name, value)
+    _teach_encoded_roles(module)
+
+
+def _teach_encoded_roles(module) -> None:
+    """Give the engine a style for the `gal_*` roles.
+
+    `gallery.install` used to register these into `ROLE_STYLE` as it
+    parsed. Snapshotting its output captured the archetypes, the
+    backgrounds and the samples -- and not this -- so the first slide
+    using one raised `KeyError: 'gal_i43_141414'` mid-draw.
+
+    The name is decoded literally -- `gal_i43_141414` is "Inter 43,
+    #141414" -- rather than resolved through BRAND_MODE's retirement
+    table, even though that table says what these ought to become.
+    The reason is geometry: these boxes were mined at the same time as
+    the type, and `gal_i64_141414` maps to `hero_value`, which is 280px
+    against a box laid out for 64. Retiring the role means moving the
+    type AND the box together, which belongs with re-speccing the
+    archetype, not with stopping a KeyError.
+    """
+    try:
+        table = module.E.ROLE_STYLE
+    except Exception:  # noqa: BLE001
+        return
+
+    roles = set()
+    for spec in module.ARCHETYPES.values():
+        for region in spec.get("regions") or []:
+            roles.add(region.get("role"))
+        for group in spec.get("groups") or []:
+            for region in group.get("regions") or []:
+                roles.add(region.get("role"))
+
+    for role in roles:
+        if not role or role in table or not role.startswith(("gal_", "ref_")):
+            continue
+        entry = _decode_role(role)
+        if entry:
+            table[role] = entry
+
+
+_ENCODED = re.compile(r"^(?:gal|ref)_([ik])(\d+)_([0-9A-Fa-f]{6})(_c)?$")
+
+
+def _decode_role(role: str):
+    """`gal_i43_141414` is literally "Inter 43, #141414" -- an output
+    used as a name, which is exactly why BRAND_MODE retires it."""
+    match = _ENCODED.match(role)
+    if not match:
+        return None
+    kind, size, colour, centred = match.groups()
+    from pptx.dml.color import RGBColor
+
+    font = "Inter" if kind == "i" else "KONE Information"
+    return (font, int(size), RGBColor.from_string(colour.upper()),
+            kind == "k", False, bool(centred))
 
 
 def _kone_catalog() -> dict:

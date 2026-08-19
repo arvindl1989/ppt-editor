@@ -157,6 +157,21 @@ def build(plan_dict: dict, out_path: str, mined: Optional[dict] = None) -> dict:
     return preflight(out_path)
 
 
+def _is_dash_marker(text: str) -> bool:
+    """Is this run a dash pretending to be a bullet?
+
+    Checking `text.strip().startswith("— ")` missed the real case: the
+    marker is its own run holding exactly `"—  "`, and stripping it
+    leaves a bare dash with no trailing space. So the check passed on
+    every deck while the violation it was written for went out the
+    door.
+    """
+    stripped = (text or "").strip()
+    if stripped in ("-", "—", "–", "*", "•-"):
+        return True
+    return stripped.startswith(("- ", "— ", "– "))
+
+
 def _below_the_floor(shape, px) -> bool:
     """Does this text region hang below the floor?
 
@@ -215,7 +230,7 @@ def preflight(deck_path: str) -> dict:
                     if colour and colour.upper() not in allowed:
                         findings.append((number, f"type in #{colour}, which is not "
                                                  "black, white or KONE Blue"))
-                    if text.strip().startswith(("- ", "— ", "– ")):
+                    if _is_dash_marker(text):
                         findings.append((number, "a dash standing in for a bullet"))
             if _below_the_floor(shape, px):
                 bottom = (shape.top + shape.height) / px

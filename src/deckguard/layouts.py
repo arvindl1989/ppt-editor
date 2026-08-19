@@ -601,6 +601,32 @@ def render(slide, name: str, content: dict, archetypes_module) -> None:
     # blue placeholder chip in the same box.
     from deckguard import icons as icon_mod
 
+    # The engine renders a plain `bullets` region with `_dash_bullets`,
+    # which literally emits "—  " as the marker. BRAND_MODE section 6
+    # calls a dash standing in for a bullet a brand violation and names
+    # the archetypes doing it. Withhold those regions and draw real disc
+    # markers here, the same way the `dg` path already does.
+    plain_bullets = [(r["box"], filled[r["content"]])
+                     for r in spec.get("regions", [])
+                     if r.get("role") == "bullets" and filled.get(r.get("content"))]
+    for group in spec.get("groups", []):
+        items = filled.get(group.get("content")) or []
+        for (ox, oy), item in zip(group.get("origins", []), items):
+            if not isinstance(item, dict):
+                continue
+            for region in group.get("regions", []):
+                value = item.get(region.get("content"))
+                if region.get("role") == "bullets" and value:
+                    rx, ry, rw, rh = region["box"]
+                    plain_bullets.append(([ox + rx, oy + ry, rw, rh], value))
+    if plain_bullets:
+        engine_spec["regions"] = [r for r in engine_spec["regions"]
+                                  if r.get("role") != "bullets"]
+        engine_spec["groups"] = [
+            {**g, "regions": [r for r in g["regions"] if r.get("role") != "bullets"]}
+            for g in engine_spec["groups"]
+        ]
+
     slots = _icon_slots(spec, filled)
     native = bool(icon_mod.load_icons()) and slots
     if native:
@@ -618,6 +644,10 @@ def render(slide, name: str, content: dict, archetypes_module) -> None:
         slide, engine_spec, filled, icons=icons,
         bg=getattr(archetypes_module, "BG", {}).get(name),
     )
+
+    for box, value in plain_bullets:
+        _draw_bullets(slide, engine, box, value,
+                      {"kind": "bullets", "px": 19, "nested_px": 17, "lead": 0.45}, None)
 
     # The banner is one photograph; the cut comes from masking it. Drawn
     # after the engine so the masks sit ON the picture rather than under

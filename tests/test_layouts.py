@@ -1275,3 +1275,80 @@ def test_a_mask_is_painted_in_the_slides_own_field_colour():
     assert L._bg_hex("#F3EEE6") == "F3EEE6"
     assert L._bg_hex("light_blue") == bm.LIGHT_BLUE
     assert L._bg_hex("nonsense") == bm.WHITE
+
+
+def test_every_registered_archetype_has_a_style_for_every_role_it_uses():
+    """`KeyError: 'gal_i43_141414'` mid-draw.
+
+    `gallery.install` registered these into the engine's ROLE_STYLE as
+    it parsed. Snapshotting its output to JSON captured the archetypes,
+    the backgrounds and the samples -- and not this -- so the first
+    slide using one crashed the build. Checking every archetype rather
+    than the eleven that regressed, because the next omission will be a
+    different eleven.
+    """
+    archetypes = _skill_modules()
+    known = set(archetypes.E.ROLE_STYLE)
+    # roles the layout layer draws itself, never through the engine
+    # roles handled before the ROLE_STYLE lookup is ever reached
+    drawn_here = {"dg_text", "dg_bullets", "dg_tick", "picture", "image_band",
+                  "panel", "panel_sand", "icon", "figure", "table", "axis",
+                  "bullets", None}
+
+    missing = {}
+    for name, spec in archetypes.ARCHETYPES.items():
+        roles = {r.get("role") for r in spec.get("regions") or []}
+        for group in spec.get("groups") or []:
+            roles |= {r.get("role") for r in group.get("regions") or []}
+        unknown = sorted(r for r in roles if r not in known and r not in drawn_here)
+        if unknown:
+            missing[name] = unknown
+    assert not missing, missing
+
+
+def test_an_encoded_role_name_is_decoded_to_the_type_it_names():
+    """`gal_i43_141414` is "Inter 43, #141414" -- an output used as a
+    name, which is why BRAND_MODE retires it. It is decoded literally
+    rather than mapped to its brand role, because the box was laid out
+    for 43px and `hero_value` is 280px: retiring the role means moving
+    the type AND the geometry, which belongs with the re-spec."""
+    from deckguard.registry import _decode_role
+
+    assert _decode_role("gal_i43_141414")[:2] == ("Inter", 43)
+    assert _decode_role("ref_i53_141414")[:2] == ("Inter", 53)
+    kone = _decode_role("gal_k12_FFFFFF_c")
+    assert kone[0] == "KONE Information" and kone[3] is True, "KONE Information is caps"
+    assert kone[5] is True, "the _c suffix means centred"
+    assert _decode_role("not_a_role") is None
+    assert _decode_role("gal_bad") is None
+
+
+def test_bullets_are_real_markers_not_a_dash(tmp_path):
+    """BRAND_MODE section 6 calls a dash standing in for a bullet a
+    brand violation and names the archetypes doing it. The engine's own
+    `_dash_bullets` emits "—  " as the marker, so every archetype with a
+    plain `bullets` region was shipping one -- including inside groups,
+    which is where all four named archetypes keep theirs."""
+    from pptx import Presentation
+
+    archetypes = _skill_modules()
+    names = ("statement_links", "lifecycle_4stage", "two_picture_compare",
+             "three_pictures_text", "org_functions")
+    out = tmp_path / "bullets.pptx"
+    L.build_deck({"title": "T", "slides": [
+        dict(archetypes.SAMPLES.get(n) or {}, archetype=n) for n in names
+    ]}, str(out), archetypes)
+
+    prs = Presentation(str(out))
+    dashes, markers = 0, 0
+    for slide in prs.slides:
+        markers += slide.shapes._spTree.xml.count("buChar")
+        for shape in slide.shapes:
+            if not getattr(shape, "has_text_frame", False):
+                continue
+            for para in shape.text_frame.paragraphs:
+                for run in para.runs:
+                    if run.text.strip() in ("—", "-", "–"):
+                        dashes += 1
+    assert dashes == 0, f"{dashes} dash markers still drawn"
+    assert markers > 0, "no real list markers were drawn either"
