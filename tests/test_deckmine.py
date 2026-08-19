@@ -8,7 +8,7 @@ DESIGNS out so old content can be re-rendered through them.
 
 import pytest
 
-from deckguard.legacy.mine import _cluster_repeats, _signature, mine_reference
+from deckguard.deckmine import _cluster_repeats, _signature, mine_reference
 from tests.helpers import add_rectangle, add_slide, new_deck, set_run, title_run
 
 
@@ -129,7 +129,7 @@ def test_mining_never_raises_on_an_unreadable_deck(tmp_path):
     with pytest.raises(Exception):
         mine_reference(bad)  # the miner itself surfaces the error...
 
-    from deckguard.legacy.mine import install_reference
+    from deckguard.deckmine import install_reference
 
     class _Module:
         ARCHETYPES: dict = {}

@@ -355,3 +355,69 @@ def invalidate_archetype_caches() -> None:
     global _signature_cache, _image_slots_cache
     _signature_cache = None
     _image_slots_cache = None
+
+
+def register_mined(mined: dict) -> list:
+    """Add archetypes read out of someone's own deck to the registry.
+
+    Without this the renderer looks up a mined name, finds nothing, and
+    draws a slide with no content on it -- the deck builds, the file
+    downloads, and every page from your own templates is blank. The
+    same silent failure the picker had for unbuilt archetypes.
+
+    KONE's own always win a name clash: mined designs are additive.
+    Returns the names actually added.
+    """
+    archetypes = _load_archetypes()
+    added = []
+    for name, spec in (mined.get("archetypes") or {}).items():
+        if name not in archetypes.ARCHETYPES:
+            archetypes.ARCHETYPES[name] = spec
+            added.append(name)
+    for attr, key in (("SAMPLES", "samples"), ("BG", "bg")):
+        target = getattr(archetypes, attr, None)
+        if isinstance(target, dict):
+            for name, value in (mined.get(key) or {}).items():
+                target.setdefault(name, value)
+    _register_role_styles(mined.get("role_styles") or {})
+    if added:
+        global _image_slots_cache
+        _image_slots_cache = None
+    return added
+
+
+def _register_role_styles(styles: dict) -> None:
+    """Teach the engine the type a mined deck used.
+
+    Mined roles are auto-named from what they render -- `ref_i53_141414`
+    is "Inter 53 black" -- so the engine has never heard of them and
+    raises KeyError mid-draw. They also arrive with the colour as a hex
+    string where the engine wants an RGB triple.
+
+    These deliberately are NOT mapped onto brand roles. The point of
+    mining someone's deck is to reuse THEIR design; preflight is what
+    then says where that design is off-brand.
+    """
+    if not styles:
+        return
+    try:
+        engine = _load_archetypes().E
+        table = engine.ROLE_STYLE
+    except Exception:  # noqa: BLE001
+        return
+    for role, style in styles.items():
+        if role in table:
+            continue
+        entry = list(style)
+        if len(entry) >= 3 and isinstance(entry[2], str):
+            # The engine assigns this straight to `font.color.rgb`, which
+            # only accepts an RGBColor -- a plain tuple raises just as a
+            # hex string does.
+            from pptx.dml.color import RGBColor
+
+            text = entry[2].lstrip("#")
+            try:
+                entry[2] = RGBColor.from_string(text.upper())
+            except Exception:  # noqa: BLE001
+                entry[2] = RGBColor(0x14, 0x14, 0x14)
+        table[role] = tuple(entry)
