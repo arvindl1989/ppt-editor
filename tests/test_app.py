@@ -182,3 +182,115 @@ def test_preflight_still_catches_a_real_violation(tmp_path):
 
     findings = assemble.preflight(str(out))["findings"]
     assert any("dash standing in for a bullet" in m for _n, m in findings), findings
+
+
+# --------------------------------------------------------------------------
+# the brief path
+# --------------------------------------------------------------------------
+
+
+class _Stream:
+    def __init__(self, message):
+        self._message = message
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def get_final_message(self):
+        return self._message
+
+
+class _Message:
+    def __init__(self, payload):
+        self.content = [type("Block", (), {"type": "text", "text": payload})()]
+        self.stop_reason = "end_turn"
+        self.usage = type("U", (), {"input_tokens": 10, "output_tokens": 20})()
+
+
+class _FakeClient:
+    """Stands in for `anthropic.Anthropic`, so the whole planning path
+    runs without a key. Nothing else exercised it, which is how a
+    missing `import anthropic` reached production: the module imported
+    fine and the call was never made."""
+
+    def __init__(self, payload):
+        self.calls = []
+        outer = self
+
+        class _Messages:
+            def stream(self, **kwargs):
+                outer.calls.append(kwargs)
+                return _Stream(_Message(payload))
+
+        self.messages = _Messages()
+
+
+_SPEC = """{"slides": [
+  {"archetype": "title_content", "title": "Survey findings",
+   "bullets": ["Twelve units past economic repair"]},
+  {"archetype": "kone_numbers", "title": "At scale",
+   "stats": [{"value": "12", "label": "Frontlines"}]}
+]}"""
+
+
+def test_a_brief_is_planned_into_slides(monkeypatch):
+    from deckguard import planner
+
+    client = _FakeClient(_SPEC)
+    spec, usage = planner.call_claude_for_kone_spec(
+        "We migrated Request Management to ServiceNow in six weeks.",
+        api_key="test-key", client=client,
+    )
+    assert [s["archetype"] for s in spec["slides"]] == ["title_content", "kone_numbers"]
+    assert usage.output_tokens == 20
+    assert client.calls, "the planner never called the model"
+
+
+def test_the_brief_path_builds_a_real_deck(tmp_path, monkeypatch):
+    """End to end with the model faked: brief in, .pptx out."""
+    from deckguard import assemble, planner
+
+    monkeypatch.setattr(
+        planner, "call_claude_for_kone_spec",
+        lambda brief, **kw: (__import__("json").loads(_SPEC), None),
+    )
+    plan = assemble.plan(brief="Subject: ServiceNow migration complete",
+                         audience="external", title="")
+    assert plan["title"] == "ServiceNow migration complete", "title read off the subject line"
+    out = tmp_path / "brief.pptx"
+    checks = assemble.build(plan, str(out))
+    assert out.is_file() and checks["slides"] >= 2
+
+
+def test_a_planning_failure_is_reported_not_swallowed(client, monkeypatch):
+    from deckguard import planner
+
+    def _boom(*_a, **_kw):
+        raise planner.PlanningError("ANTHROPIC_API_KEY is not set")
+
+    monkeypatch.setattr(planner, "call_claude_for_kone_spec", _boom)
+    r = client.post("/generate", data={"brief": "Build me a deck", "audience": "internal"})
+    assert r.status_code == 400
+    assert "ANTHROPIC_API_KEY" in r.text
+
+
+def test_planner_translates_a_rate_limit_into_something_actionable():
+    import anthropic
+
+    from deckguard import planner
+
+    import httpx
+
+    response = httpx.Response(429, request=httpx.Request("POST", "https://api.anthropic.com"))
+
+    class _Boom:
+        class messages:
+            @staticmethod
+            def stream(**_kw):
+                raise anthropic.APIStatusError("busy", response=response, body=None)
+
+    with pytest.raises(planner.PlanningError, match="rate-limited or overloaded"):
+        planner._stream_final_message(_Boom(), model="m", messages=[])

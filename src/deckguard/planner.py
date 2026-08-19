@@ -17,6 +17,8 @@ import os
 import re
 from typing import Optional
 
+import anthropic
+
 from dataclasses import dataclass
 
 from deckguard.registry import (
@@ -43,6 +45,28 @@ class Usage:
 
 class PlanningError(RegistryError):
     """The planning call could not produce a usable spec."""
+
+
+def _stream_final_message(client, **stream_kwargs):
+    """Call `client.messages.stream(...)` and return the final message.
+
+    Anthropic's own error types are translated here rather than letting
+    a raw API error dict reach the user: a 429 or a 5xx is transient and
+    on Anthropic's side, and saying so is the difference between "try
+    again in a minute" and "something is wrong with my brief".
+    """
+    try:
+        with client.messages.stream(**stream_kwargs) as stream:
+            return stream.get_final_message()
+    except anthropic.APIStatusError as exc:
+        if exc.status_code == 429 or exc.status_code >= 500:
+            raise PlanningError(
+                f"Claude's API is rate-limited or overloaded (HTTP {exc.status_code}) -- "
+                "nothing to do with your brief. Wait a moment and try again."
+            ) from exc
+        raise PlanningError(f"Claude API error (HTTP {exc.status_code}): {exc.message}") from exc
+    except anthropic.APIConnectionError as exc:
+        raise PlanningError(f"Could not reach the Anthropic API: {exc}") from exc
 
 
 _KONE_SYSTEM_RULES = """\
