@@ -726,6 +726,26 @@ python -c "from deckguard import contracts; print(contracts.gaps() or 'none')"
 python -c "from deckguard import contracts; print(contracts.guide('internal'))"
 ```
 
+### Packaging a handoff for Claude Design
+
+```bash
+python scripts/design_handoff.py [outdir]     # needs soffice + pdftoppm
+```
+
+Writes a folder and a zip holding everything needed to answer a design
+question without reading this repo: the contracts for all 50 slides, a
+real render of each of the 45 that build, a contact sheet per set, the
+two decks those renders came from, the brand handoff, an inventory of
+every icon/illustration/photo by name, and an empty
+`placeholders.template.json` generated from the live registry.
+
+Character budgets in `CONTRACTS.md` are **measured** off the built deck,
+not estimated — the estimate got covers wrong by a factor of four,
+because the box carries role `title` and the renderer resolves it to a
+cover headline. `tests/test_design_handoff.py` keeps the template
+honest: every key in it is one the renderer reads, and every list is
+asked for at the length the layout holds.
+
 ### Slide thumbnails
 
 The picker on the home page shows a real render of each slide, not a
