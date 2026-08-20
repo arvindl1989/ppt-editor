@@ -332,3 +332,108 @@ def menu(audience: str) -> str:
         job = job_for(slide["archetype"], audience)
         lines.append(f"  {slide['archetype']}" + (f" — {job}" if job else ""))
     return "\n".join(lines)
+
+
+# --------------------------------------------------------------------------
+# what a deck should cover
+# --------------------------------------------------------------------------
+
+# Picking individual slides is precise but slow, and a brief alone leaves
+# the planner guessing at shape. This is the middle: say what the deck
+# should COVER and let it choose the layout for each. Every section names
+# the archetypes that serve it, so the planner is choosing within a
+# shortlist rather than across fifty.
+DECK_SECTIONS: dict[str, dict] = {
+    "context": {
+        "label": "Why we're here",
+        "hint": "The situation, the problem, what prompted this",
+        "internal": ["picture_intro", "agenda_c_split"],
+        "external": ["statement_a", "title_content"],
+    },
+    "numbers": {
+        "label": "The numbers",
+        "hint": "Proof: counts, percentages, scale",
+        "internal": ["kone_numbers", "hero_stat", "segment_breakdown"],
+        "external": ["kone_numbers", "hero_stat", "statement_b"],
+    },
+    "one_number": {
+        "label": "One number that matters",
+        "hint": "A single figure carrying the whole point",
+        "internal": ["hero_stat"],
+        "external": ["hero_stat"],
+    },
+    "scope": {
+        "label": "Scope — in and out",
+        "hint": "What is covered, what is not, and who owns the rest",
+        "internal": ["icon_columns_5", "resource_links", "matrix_2x2"],
+        "external": ["two_content", "comparison_table", "three_content"],
+    },
+    "process": {
+        "label": "How it works",
+        "hint": "A sequence of steps or stages",
+        "internal": ["how_it_works_3step", "lifecycle_4stage", "numbered_icon_row_6"],
+        "external": ["how_it_works_3step", "three_content"],
+    },
+    "timeline": {
+        "label": "Timeline or phasing",
+        "hint": "Dates, quarters, milestones, what happens when",
+        "internal": ["timeline_quarter_axis", "quarterly_plan_4col"],
+        "external": ["timeline"],
+    },
+    "ownership": {
+        "label": "Who does what",
+        "hint": "Roles, owners, which team handles which part",
+        "internal": ["org_functions", "numbered_icon_row_6"],
+        "external": ["three_content", "value_prop_four_point"],
+    },
+    "comparison": {
+        "label": "Options compared",
+        "hint": "This against that — repair or replace, us or them",
+        "internal": ["matrix_2x2", "chart_commentary"],
+        "external": ["comparison_table", "two_content", "two_pictures_text_b"],
+    },
+    "voice": {
+        "label": "A quote or voice",
+        "hint": "Someone's own words, a customer or a team",
+        "internal": ["quote_b", "quote_e"],
+        "external": ["quote_a"],
+    },
+    "evidence": {
+        "label": "Photography or examples",
+        "hint": "Real sites, reference projects, what it looks like",
+        "internal": ["picture_intro", "image_section_divider"],
+        "external": ["three_pictures_text", "text_picture_a", "text_picture_b"],
+    },
+    "next": {
+        "label": "What happens next",
+        "hint": "Actions, owners, dates, the ask",
+        "internal": ["statement_links", "milestone_slide", "resource_links"],
+        "external": ["timeline", "value_prop_four_point"],
+    },
+    "credits": {
+        "label": "Credit and thanks",
+        "hint": "Who did the work",
+        "internal": ["credits"],
+        "external": ["credits"],
+    },
+}
+
+
+def section_names() -> list:
+    return list(DECK_SECTIONS)
+
+
+def sections_brief(chosen: list, audience: str) -> str:
+    """The chosen sections written for a planner, each with the
+    archetypes that serve it."""
+    lines = []
+    for key in chosen:
+        entry = DECK_SECTIONS.get(key)
+        if not entry:
+            continue
+        suits = [a for a in entry.get(audience, []) if a]
+        lines.append(
+            f"  {entry['label']} — {entry['hint']}."
+            + (f" Archetypes that suit it: {', '.join(suits)}." if suits else "")
+        )
+    return "\n".join(lines)

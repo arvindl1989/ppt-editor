@@ -419,3 +419,183 @@ def test_chrome_is_named_so_content_can_be_held_to_the_real_floor(tmp_path):
     named = [sh.name for slide in Presentation(str(out)).slides for sh in slide.shapes
              if (sh.name or "").startswith("Chrome")]
     assert named, "the footer and page number should be named as chrome"
+
+
+# --------------------------------------------------------------------------
+# what the deck should cover
+# --------------------------------------------------------------------------
+
+
+def test_the_sections_a_user_ticked_reach_the_planner():
+    from deckguard import assemble, planner
+
+    seen = {}
+
+    def _capture(brief, **kw):
+        seen["notes"] = kw.get("notes")
+        return {"slides": [{"archetype": "title_content", "title": "x"}]}, None
+
+    original = planner.call_claude_for_kone_spec
+    planner.call_claude_for_kone_spec = _capture
+    try:
+        assemble.plan(brief="An email.", audience="internal",
+                      sections=["numbers", "timeline"])
+    finally:
+        planner.call_claude_for_kone_spec = original
+
+    notes = seen["notes"]
+    assert "MUST cover these" in notes
+    from deckguard import brandmode as B
+
+    assert B.DECK_SECTIONS["numbers"]["label"] in notes
+    assert B.DECK_SECTIONS["timeline"]["label"] in notes
+    # and it must name layouts that can carry them, or the instruction is
+    # a wish rather than a choice
+    assert any(a in notes for a in B.DECK_SECTIONS["timeline"]["internal"])
+
+
+def test_no_sections_ticked_leaves_the_instruction_alone():
+    notes = _notes_for("internal")
+    assert "MUST cover these" not in notes
+
+
+def test_every_section_offers_a_built_archetype_to_both_audiences():
+    """A section whose shortlist names nothing the renderer can build is
+    an instruction the planner cannot follow."""
+    from deckguard import brandmode as B
+    from deckguard.registry import _load_archetypes
+
+    built = set(_load_archetypes().ARCHETYPES)
+    for key, entry in B.DECK_SECTIONS.items():
+        for audience in ("internal", "external"):
+            names = entry[audience]
+            assert names, f"{key}/{audience} has no shortlist"
+            assert [n for n in names if n in built], f"{key}/{audience}: {names}"
+
+
+def test_the_home_page_offers_the_sections_as_chips():
+    from html import escape
+
+    from deckguard import brandmode as B, screens
+
+    html = screens.home()
+    assert html.count('name="section"') == len(B.DECK_SECTIONS)
+    for entry in B.DECK_SECTIONS.values():
+        assert escape(entry["label"]) in html
+
+
+# --------------------------------------------------------------------------
+# a divider is a pause, so it reads centred
+# --------------------------------------------------------------------------
+
+
+def test_the_divider_sits_in_the_middle_of_the_page(tmp_path):
+    """It shipped with the numeral and title jammed under the top edge.
+    KONE's own dividers centre them."""
+    from pptx import Presentation
+
+    from deckguard import assemble
+
+    out = tmp_path / "d.pptx"
+    assemble.build({"title": "T", "date": "1 March 2026", "slides": [
+        {"archetype": "divider_numbering", "number": "03",
+         "eyebrow": "Marketing Hub", "title": "Brand guidelines"}]}, str(out))
+
+    prs = Presentation(str(out))
+    px = prs.slide_width / 1280
+    shapes = {sh.text_frame.text.strip(): sh for sh in list(prs.slides)[1].shapes
+              if getattr(sh, "has_text_frame", False) and sh.text_frame.text.strip()}
+    numeral = shapes["03"]
+    mid = (numeral.top + numeral.height / 2) / px
+    assert 300 <= mid <= 420, f"numeral centred at {mid:.0f}, want near 360"
+    assert shapes["Brand guidelines"].top / px > 250
+
+
+# --------------------------------------------------------------------------
+# previews that look like the slide
+# --------------------------------------------------------------------------
+
+
+def test_the_set_archetypes_have_rendered_thumbnails():
+    """Every archetype the picker offers AND can build should have a
+    real picture of itself. A missing one is not fatal -- the wireframe
+    still draws -- but it is a regeneration someone forgot."""
+    from deckguard import thumbs
+    from deckguard.registry import _load_archetypes
+
+    built = set(_load_archetypes().ARCHETYPES)
+    missing = [n for n in thumbs.set_archetypes()
+               if n in built and thumbs.path_for(n) is None]
+    assert not missing, f"run `python -m deckguard.thumbs`: {missing}"
+
+
+def test_a_tile_shows_the_render_and_falls_back_to_the_wireframe():
+    from deckguard import screens, thumbs
+
+    name = next(n for n in thumbs.set_archetypes() if thumbs.path_for(n))
+    assert f'src="/preview/{name}.png"' in screens._thumb(name)
+    # nothing rendered for a mined design, so it must still draw something
+    assert 'data-dg-frame="1"' in screens._thumb("no_such_archetype_at_all")
+
+
+def test_the_preview_route_serves_a_png_and_refuses_a_traversal():
+    from fastapi.testclient import TestClient
+
+    from deckguard import thumbs
+    from deckguard.web import app
+
+    client = TestClient(app)
+    name = next(n for n in thumbs.set_archetypes() if thumbs.path_for(n))
+    ok = client.get(f"/preview/{name}.png")
+    assert ok.status_code == 200 and ok.content[:4] == b"\x89PNG"
+    assert client.get("/preview/..%2f..%2fweb.py.png").status_code == 404
+    assert client.get("/preview/nope.png").status_code == 404
+
+
+def test_grouped_sample_content_varies_between_cells():
+    """Four identical cells preview as a rendering fault rather than as
+    a row of four things."""
+    from deckguard.preview import sample_content
+
+    content = sample_content("kone_numbers")
+    for value in content.values():
+        if isinstance(value, list) and len(value) > 1 and isinstance(value[0], dict):
+            rendered = ["|".join(str(v) for v in item.values()) for item in value]
+            assert len(set(rendered)) > 1, rendered
+
+
+def test_a_picture_slot_naming_a_missing_file_is_refilled():
+    """The skill's own sample for `image_section_divider` pointed at a
+    path that no longer exists. The engine drew its sand fallback under
+    the scrim, so the slide came back as a dark smear with the headline
+    invisible on it -- worse than an empty slot, and it read as a
+    rendering bug rather than as a missing file."""
+    import os
+
+    from deckguard.registry import fill_empty_photo_slots
+
+    spec = {"slides": [{"archetype": "image_section_divider",
+                        "image": "/no/such/photo.jpg", "title": "Part two"}]}
+    assert fill_empty_photo_slots(spec) == 1
+    assert os.path.isfile(spec["slides"][0]["image"])
+
+
+def test_a_photo_that_is_there_is_left_alone():
+    from deckguard.registry import _photo_library, fill_empty_photo_slots
+
+    mine = _photo_library()[0]
+    spec = {"slides": [{"archetype": "image_section_divider", "image": mine}]}
+    assert fill_empty_photo_slots(spec) == 0
+    assert spec["slides"][0]["image"] == mine
+
+
+def test_the_quote_slide_sets_its_quote_in_quote_type():
+    """Ported from the master's boxes, every region came through as 16px
+    body: the quotation sat in a 349px pink panel at footnote size and
+    the attribution under it looked exactly the same."""
+    from deckguard.registry import _load_archetypes
+
+    regions = {r["content"]: r for r in _load_archetypes().ARCHETYPES["quote_b"]["regions"]}
+    assert regions["quote"]["role"] == "quote"
+    assert regions["attribution"]["role"] == "attribution"
+    assert "body2" not in regions and "body3" not in regions

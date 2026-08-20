@@ -1491,6 +1491,31 @@ _SPEC_FIXES: dict = {
     # which put it exactly on top of the footer date at 658 -- and the
     # role was `body_muted`, the grey BRAND_MODE bans.
     "resource_links": {"contact": {"y": 566, "role": "body"}},
+    # A section break is a pause, and a pause reads as centred. Both the
+    # numeral and the title sat hard against the top band, which made a
+    # divider look like a content slide someone forgot to fill in. Only
+    # the vertical changes: the 300px numeral is centred on y=360 and the
+    # label and title are centred as a pair beside it. The x positions
+    # are left where they are, because those were measured off a real
+    # deck that uses this layout five times, and the spec's own x:620
+    # disagrees with all five.
+    "divider_numbering": {
+        "number":  {"y": 210},
+        "eyebrow": {"y": 276},
+        "title":   {"y": 304, "h": 150},
+    },
+    "divider_title_only": {"title": {"y": 290, "h": 150}},
+    # A quote slide with no quote type on it. Ported from the master's
+    # boxes, every region on this one came through as 16px `body`, so
+    # the quotation sat in a 349px pink panel at the size of a footnote
+    # and the attribution below it looked identical to it. The keys are
+    # renamed too: `body2`/`body3` tell neither the planner nor the
+    # person editing the slide what belongs there.
+    "quote_b": {
+        "body":  {"role": "quote", "content": "quote"},
+        "body3": {"role": "attribution", "content": "attribution"},
+        "body2": {"content": "context"},
+    },
 }
 
 
@@ -1503,11 +1528,13 @@ def _apply_spec_fixes(registry) -> None:
             fix = fixes.get(region.get("content"))
             if not fix:
                 continue
-            if "y" in fix:
-                x, _y, w, h = region["box"]
-                region["box"] = [x, fix["y"], w, h]
+            x, y, w, h = region["box"]
+            region["box"] = [fix.get("x", x), fix.get("y", y),
+                             fix.get("w", w), fix.get("h", h)]
             if "role" in fix:
                 region["role"] = fix["role"]
+            if "content" in fix:
+                region["content"] = fix["content"]
 
 
 def install(archetypes_module, grades: Iterable[str] = ("A", "B", "C", "D")) -> list[str]:
@@ -1522,10 +1549,10 @@ def install(archetypes_module, grades: Iterable[str] = ("A", "B", "C", "D")) -> 
     _, meta = load_spec()
     by_key = {a.engine_key: a for a in meta.values()}
     _correct_grey_ink(archetypes_module)
-    _apply_spec_fixes(registry)
     for existing in registry.values():
         if isinstance(existing, dict):
             lift_low_rows(existing)
+
 
     added: list[str] = []
     # Archetypes with no master layout behind them, so `build_archetypes`
@@ -1565,6 +1592,11 @@ def install(archetypes_module, grades: Iterable[str] = ("A", "B", "C", "D")) -> 
             invalidate_archetype_caches()
         except Exception:
             pass
+    # Last of all, so it reaches the archetypes generated just above as
+    # well as the incumbents. Run earlier it corrected only the
+    # incumbents: a generated archetype was created afterwards and kept
+    # the very geometry the fix existed to replace.
+    _apply_spec_fixes(registry)
     return sorted(added)
 
 
@@ -2218,8 +2250,8 @@ def recognition_deck(content: dict) -> dict:
     third = []
     if content.get("quote"):
         third.append({"archetype": "quote_b", "title": "In their words",
-                      "body": f"“{content['quote']}”",
-                      "body2": content.get("quote_attribution", "")})
+                      "quote": f"“{content['quote']}”",
+                      "attribution": content.get("quote_attribution", "")})
     if content.get("next"):
         third.append({"archetype": "timeline", "title": sections[2],
                       "items": _as_timeline(content["next"])})

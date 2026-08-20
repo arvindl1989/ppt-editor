@@ -9,8 +9,27 @@ from deckguard import brandmode as bm
 from deckguard.ui import esc
 
 
-def _slide_tiles(audience: str) -> str:
+def _thumb(name: str, content: dict | None = None) -> str:
+    """A real picture of the slide where we have one, a wireframe where
+    we do not.
+
+    The wireframe knows where the boxes are and nothing about what the
+    slide looks like -- at tile size a photo cover, a sand statement and
+    a blue quote all come out as a pale rectangle with grey lines on it.
+    `thumbs` renders the actual slide through LibreOffice offline, and
+    those PNGs are what you pick from.
+    """
+    from deckguard import thumbs
     from deckguard.preview import archetype_preview_html, sample_content
+
+    if thumbs.path_for(name) is not None:
+        return (f'<img src="/preview/{esc(name)}.png" alt="{esc(name)}" '
+                f'loading="lazy" width="520" height="293" class="shot">')
+    return archetype_preview_html(name, content if content is not None
+                                  else sample_content(name))
+
+
+def _slide_tiles(audience: str) -> str:
     from deckguard.registry import _load_archetypes
 
     built = set(_load_archetypes().ARCHETYPES)
@@ -20,15 +39,35 @@ def _slide_tiles(audience: str) -> str:
         if name not in built:
             out.append(f'''<span class="tile off">
   <span class="frame"><span class="stub">Not built yet</span></span>
-  <span class="name">{esc(name)}</span>
+  <span class="name"><span>{esc(name)}</span></span>
   <span class="from">{esc(slide["group"])}</span></span>''')
             continue
         out.append(f'''<label class="tile">
-  <input type="checkbox" name="pick" value="{esc(audience)}:{slide['n']}">
-  <span class="frame">{archetype_preview_html(name, sample_content(name))}</span>
-  <span class="name">{esc(name)}</span>
+  <span class="frame">{_thumb(name)}</span>
+  <span class="name">
+    <input type="checkbox" name="pick" value="{esc(audience)}:{slide['n']}">
+    <span>{esc(name)}</span></span>
   <span class="from">{esc(slide["group"])} &middot; {esc(slide["field"])}</span>
 </label>''')
+    return "".join(out)
+
+
+def _section_chips() -> str:
+    """What the deck should cover, as chips rather than a dropdown.
+
+    A dropdown hides its options behind a click, and the whole value
+    here is seeing the dozen things a deck might need and recognising
+    the four you actually have material for.
+    """
+    out = []
+    for key, entry in bm.DECK_SECTIONS.items():
+        label = esc(entry["label"])
+        hint = esc(entry["hint"])
+        out.append(
+            '<label class="chip" title="' + hint + '">'
+            '<input type="checkbox" name="section" value="' + esc(key) + '">'
+            "<span>" + label + "</span></label>"
+        )
     return "".join(out)
 
 
@@ -67,6 +106,13 @@ sentence about what the deck is for."></textarea>
       <div class="field">
         <span class="label">Deck title</span>
         <input type="text" name="title" placeholder="Taken from the brief if you leave it empty">
+      </div>
+      <div class="field">
+        <span class="label">What should the deck cover?</span>
+        <div class="chips">{_section_chips()}</div>
+        <p class="hint">Optional, and the single biggest thing you can do for the result.
+          The brief says what happened; this says what the deck needs to show — so it picks
+          a layout per section instead of guessing at the shape.</p>
       </div>
     </div>
     <div>

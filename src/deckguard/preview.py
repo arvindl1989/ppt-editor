@@ -425,6 +425,7 @@ _SAMPLE_WORDS = {
     "body": "Volume roughly doubled year on year while resolution held at 91 per cent.",
     "text": "Standardise intake and reporting on ServiceNow.",
     "quote": "A benchmark in easy to work with, easy to work for.",
+    "context": "Said at the April review, after the first full quarter on the new intake.",
     "label": "Frontlines", "value": "12", "number": "01", "item": "What changed",
     "period": "Q2 2026", "caption": "Marketing Hub", "footer": "Marketing Hub · April 2026",
     "scope": "KSEA · KMTA · KANZ · KEI · EEM", "name": "Suresh Kumar",
@@ -434,7 +435,34 @@ _SAMPLE_WORDS = {
 }
 
 
-def _sample_word(key: str) -> str:
+# Repeated slots -- the four cells of a numbers row, the five columns of
+# an icon row -- filled with the same word read as a rendering fault
+# rather than as a layout ("12 FRONTLINES" four times over). These give
+# each cell in a group its own word, so the preview shows a row of four
+# different things, which is what the slide is for.
+_SAMPLE_SERIES = {
+    "number": ["01", "02", "03", "04", "05", "06"],
+    "value": ["12", "91%", "2x", "48", "6", "3"],
+    "label": ["Frontlines", "Resolved", "Volume", "Weeks", "Regions", "Owners"],
+    "heading": ["Standardise intake", "Automate routing", "Publish status",
+                "Review monthly", "Retire the inbox", "Hand over"],
+    "item": ["What changed", "Why now", "Who owns it", "What is next",
+             "How we measure", "Where to ask"],
+    "title": ["What changed", "Why now", "Who owns it", "What is next",
+              "How we measure", "Where to ask"],
+    "period": ["Q1 2026", "Q2 2026", "Q3 2026", "Q4 2026", "Q1 2027", "Q2 2027"],
+    "name": ["Suresh Kumar", "Golda Fernandes", "Rupesh Nair", "Arvind Lal",
+             "Mei Tan", "Jonas Virtanen"],
+    "text": ["Standardise intake on ServiceNow.", "Route by request type.",
+             "Publish live queue status.", "Review the backlog monthly.",
+             "Retire the shared inbox.", "Hand over to the regions."],
+}
+
+
+def _sample_word(key: str, index: int = 0) -> str:
+    for stem, series in _SAMPLE_SERIES.items():
+        if stem in key:
+            return series[index % len(series)]
     for stem, word in _SAMPLE_WORDS.items():
         if stem in key:
             return word
@@ -464,7 +492,8 @@ def sample_content(archetype_name: str) -> dict:
             if match:
                 count = min(int(match.group(1)), 4)
                 fields = [f.strip().split(":")[0] for f in match.group(2).split(",")]
-                out[key] = [{f: _sample_word(f) for f in fields} for _ in range(count)]
+                out[key] = [{f: _sample_word(f, i) for f in fields}
+                            for i in range(count)]
             elif "list of" in raw:
                 out[key] = ["Standardise intake on ServiceNow",
                             "Automate repeat request types",

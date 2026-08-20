@@ -99,6 +99,14 @@ button:disabled {{ opacity: .45; cursor: not-allowed; }}
 .cols {{ display: grid; grid-template-columns: 1fr 1fr; gap: 34px; }}
 @media (max-width: 900px) {{ .cols {{ grid-template-columns: 1fr; }} }}
 
+.chips {{ display: flex; flex-wrap: wrap; gap: 8px; }}
+.chip {{ display: inline-flex; align-items: center; gap: 7px; cursor: pointer;
+  border: 1px solid var(--hairline); padding: 7px 13px; font-size: 14px;
+  user-select: none; }}
+.chip input {{ accent-color: var(--blue); margin: 0; }}
+.chip:has(input:checked) {{ border-color: var(--blue); background: var(--light-blue); }}
+.chip:hover {{ border-color: var(--black); }}
+
 .seg {{ display: flex; gap: 0; border: 1px solid var(--hairline); width: fit-content; }}
 .seg label {{ padding: 9px 18px; cursor: pointer; font-size: 15px; }}
 .seg input {{ position: absolute; opacity: 0; pointer-events: none; }}
@@ -106,15 +114,21 @@ button:disabled {{ opacity: .45; cursor: not-allowed; }}
 
 .grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(226px, 1fr)); gap: 18px; }}
 .tile {{ display: block; cursor: pointer; position: relative; }}
-.tile input {{ position: absolute; top: 8px; left: 8px; z-index: 2;
-  width: 17px; height: 17px; accent-color: var(--blue); }}
+/* The checkbox sits under the picture, not on it. Floated over the
+   top-left corner it covered the very thing you are choosing between --
+   on a real render that corner holds the eyebrow or the headline. */
+.tile input {{ width: 16px; height: 16px; accent-color: var(--blue);
+  margin: 0; flex: none; }}
 .tile .frame {{ display: block; outline: 2px solid transparent; outline-offset: 2px; }}
 .tile:hover .frame {{ outline-color: var(--hairline); }}
 .tile:has(input:checked) .frame {{ outline-color: var(--blue); }}
-.tile .name {{ display: block; margin-top: 8px; font-size: 14px; }}
+.tile .name {{ display: flex; align-items: center; gap: 8px;
+  margin-top: 9px; font-size: 14px; }}
 .tile .from {{ display: block; font-size: 11px; color: var(--black); opacity: .65;
-  text-transform: uppercase; letter-spacing: .05em; margin-top: 2px; }}
+  text-transform: uppercase; letter-spacing: .05em; margin-top: 2px; padding-left: 24px; }}
 .tile.off {{ opacity: .45; cursor: not-allowed; }}
+.tile img.shot {{ display: block; width: 100%; height: auto; aspect-ratio: 1280/720;
+  object-fit: cover; border: 1px solid var(--hairline); background: var(--white); }}
 .tile .stub {{ display: flex; align-items: center; justify-content: center;
   aspect-ratio: 1280/720; border: 1px dashed var(--hairline); font-size: 12px;
   text-transform: uppercase; letter-spacing: .06em; }}

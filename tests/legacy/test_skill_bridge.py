@@ -623,18 +623,26 @@ def test_empty_photo_slots_are_filled_for_a_from_scratch_deck():
     assert len(photos) == 2, "the library is walked, not repeated down the deck"
 
 
-def test_filling_never_overwrites_an_image_the_deck_already_supplied():
+def test_filling_never_overwrites_an_image_the_deck_already_supplied(tmp_path):
     """A transform carrying the source deck's own images always wins --
-    this fallback is only for slots nothing else can fill."""
+    this fallback is only for slots nothing else can fill.
+
+    The image has to exist on disk, which is how a transform hands one
+    over: a slot naming a file that is not there is treated as empty,
+    because the engine's sand fallback under a scrim renders worse than
+    a photograph nobody chose.
+    """
     from deckguard.registry import _archetype_image_slots, fill_empty_photo_slots
 
     slots = _archetype_image_slots()
     single = next(n for n, s in slots.items() if s[0] == "single")
     key = slots[single][1]
 
-    spec = {"title": "t", "slides": [{"archetype": single, "title": "x", key: "/from/the/deck.png"}]}
+    theirs = tmp_path / "from-the-deck.png"
+    theirs.write_bytes(b"\x89PNG\r\n\x1a\n")
+    spec = {"title": "t", "slides": [{"archetype": single, "title": "x", key: str(theirs)}]}
     assert fill_empty_photo_slots(spec) == 0
-    assert spec["slides"][0][key] == "/from/the/deck.png"
+    assert spec["slides"][0][key] == str(theirs)
 
 
 def test_filling_is_deterministic_for_the_same_brief():

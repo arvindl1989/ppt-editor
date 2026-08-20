@@ -128,6 +128,7 @@ async def generate(request: Request, _auth: None = Depends(_require_auth)):
     audience = str(form.get("audience") or "internal").strip()
     title = str(form.get("title") or "").strip()
     picks = [p for p in form.getlist("pick") if p]
+    sections = [s for s in form.getlist("section") if s]
     upload = form.get("deck")
     has_deck = isinstance(upload, _FormUploadFile) and bool(upload.filename)
 
@@ -160,7 +161,8 @@ async def generate(request: Request, _auth: None = Depends(_require_auth)):
 
     try:
         plan = assemble.plan(
-            brief=brief, audience=audience, picks=picks, mined=mined, title=title,
+            brief=brief, audience=audience, picks=picks, mined=mined,
+            title=title, sections=sections,
         )
     except Exception as exc:  # noqa: BLE001
         shutil.rmtree(work, ignore_errors=True)
@@ -213,6 +215,22 @@ def download(token: str, filename: str, _auth: None = Depends(_require_auth)):
         path, filename=filename,
         media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
     )
+
+
+@app.get("/preview/{filename}")
+def preview(filename: str, _auth: None = Depends(_require_auth)):
+    """A rendered thumbnail of an archetype. Committed, not built here."""
+    from deckguard import thumbs
+
+    if not filename.endswith(".png"):
+        raise HTTPException(status_code=404, detail="Not found")
+    path = thumbs.path_for(filename[:-4])
+    if path is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    # These change only when someone regenerates them, and the page
+    # asks for forty at once.
+    return FileResponse(path, media_type="image/png",
+                        headers={"Cache-Control": "public, max-age=86400"})
 
 
 @app.get("/health")

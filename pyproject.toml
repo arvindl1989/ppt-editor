@@ -45,6 +45,9 @@ deckguard = [
     "brand_rules.yaml",
     "assets/*.png",
     "assets/*.pptx",
+    # rendered offline by `python -m deckguard.thumbs`, committed because
+    # the server has neither LibreOffice nor poppler
+    "assets/previews/*.png",
     # the vendored skill + the KONE photo library picture slots fall back
     # to, so a deploy with no ~/.claude/skills still renders them
     "assets/kone_deck_generator/**/*",

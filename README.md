@@ -695,6 +695,22 @@ pip install -e ".[dev]"
 pytest
 ```
 
+### Slide thumbnails
+
+The picker on the home page shows a real render of each slide, not a
+wireframe. Those PNGs live in `src/deckguard/assets/previews/` and are
+committed, because the server has neither LibreOffice nor poppler.
+Regenerate them whenever an archetype's geometry, roles, or sample
+content change:
+
+```bash
+python -m deckguard.thumbs          # needs soffice + pdftoppm
+```
+
+`test_the_set_archetypes_have_rendered_thumbnails` fails if an
+archetype the picker offers has no picture of itself. A missing one is
+not fatal at runtime — the tile falls back to the wireframe.
+
 The test suite (`tests/`) builds every fixture `.pptx` in-memory with
 `python-pptx` (see `tests/helpers.py`) rather than shipping binary
 fixture files, covering: font-name-variant matching, theme-color/tint

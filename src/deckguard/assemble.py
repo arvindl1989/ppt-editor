@@ -33,6 +33,7 @@ def plan(
     picks: Optional[list] = None,
     mined: Optional[dict] = None,
     title: str = "",
+    sections: Optional[list] = None,
 ) -> dict:
     """The deck, as a spec, before anything is drawn."""
     picks = list(picks or [])
@@ -42,7 +43,7 @@ def plan(
     chosen = _chosen_archetypes(picks, audience, mined, built)
     samples = mined.get("samples") or {}
     if brief.strip():
-        slides = _from_brief(brief, audience, chosen)
+        slides = _from_brief(brief, audience, chosen, sections or [])
     elif chosen:
         slides = [_seed(name, samples) for name in chosen]
     else:
@@ -94,7 +95,8 @@ def _mined_names(mined: dict) -> list:
                   key=lambda n: min(order.get(n) or [999]))
 
 
-def _from_brief(brief: str, audience: str, chosen: list) -> list:
+def _from_brief(brief: str, audience: str, chosen: list,
+                sections: Optional[list] = None) -> list:
     """Plan the content. With picks already made, the planner fills
     those; without, it chooses from the audience's set too."""
     from deckguard.planner import call_claude_for_kone_spec
@@ -134,6 +136,19 @@ def _from_brief(brief: str, audience: str, chosen: list) -> list:
             "something beat fifteen that do not.\n\n"
             f"The {audience} menu:\n" + bm.menu(audience)
         )
+        wanted = bm.sections_brief(sections or [], audience)
+        if wanted:
+            # The brief says what happened; this says what the deck has
+            # to cover. Together they narrow the choice from fifty
+            # archetypes to a shortlist per section, which is the whole
+            # point of asking.
+            notes += (
+                "\n\nThe deck MUST cover these, roughly in this order. For "
+                "each one, choose the archetype from its shortlist that best "
+                "fits what the source actually says -- and if the source has "
+                "nothing for a section, drop it rather than invent:\n"
+                + wanted
+            )
     spec, _usage = call_claude_for_kone_spec(brief, notes=notes)
     slides = spec.get("slides") or []
     return slides or [{"archetype": name} for name in chosen]

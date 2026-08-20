@@ -388,6 +388,22 @@ def fill_empty_photo_slots(spec: dict) -> int:
         used += 1
         return photo
 
+    def _empty(value) -> bool:
+        """Unfilled, or filled with a path that is not there.
+
+        A slot naming a file that does not exist is worse than an empty
+        one: the engine draws its sand fallback UNDER the scrim and the
+        caption, so the slide comes back as a dark smear with invisible
+        white text on it -- which is exactly how the skill's own sample
+        for `image_section_divider` rendered, its path having been
+        written against a directory layout that has since moved.
+        """
+        if not value:
+            return True
+        from pathlib import Path
+
+        return not Path(str(value)).is_file()
+
     for slide in spec.get("slides") or []:
         slot = slots.get(slide.get("archetype"))
         if not slot:
@@ -395,13 +411,13 @@ def fill_empty_photo_slots(spec: dict) -> int:
         seed = str(slide.get("title") or slide.get("heading") or slide.get("archetype") or "")
         if slot[0] == "single":
             key = slot[1]
-            if not slide.get(key):
+            if _empty(slide.get(key)):
                 slide[key] = _next_photo(seed)
                 filled += 1
         else:
             _kind, group_key, item_key = slot
             for item in slide.get(group_key) or []:
-                if isinstance(item, dict) and not item.get(item_key):
+                if isinstance(item, dict) and _empty(item.get(item_key)):
                     item[item_key] = _next_photo(seed)
                     filled += 1
     return filled
