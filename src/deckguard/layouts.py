@@ -1483,6 +1483,33 @@ def _correct_grey_ink(archetypes_module) -> list[str]:
     return sorted(corrected)
 
 
+# Corrections to shipped archetypes, taken from the 25+25 handoff. Each
+# names the document that settles it, so re-speccing an archetype can
+# absorb the fix rather than rediscover it.
+_SPEC_FIXES: dict = {
+    # INTERNAL_25 slide 24: "Contact line at top:566". It shipped at 654,
+    # which put it exactly on top of the footer date at 658 -- and the
+    # role was `body_muted`, the grey BRAND_MODE bans.
+    "resource_links": {"contact": {"y": 566, "role": "body"}},
+}
+
+
+def _apply_spec_fixes(registry) -> None:
+    for name, fixes in _SPEC_FIXES.items():
+        spec = registry.get(name)
+        if not spec:
+            continue
+        for region in spec.get("regions") or []:
+            fix = fixes.get(region.get("content"))
+            if not fix:
+                continue
+            if "y" in fix:
+                x, _y, w, h = region["box"]
+                region["box"] = [x, fix["y"], w, h]
+            if "role" in fix:
+                region["role"] = fix["role"]
+
+
 def install(archetypes_module, grades: Iterable[str] = ("A", "B", "C", "D")) -> list[str]:
     """Register the generated archetypes into the engine's registry.
 
@@ -1495,6 +1522,7 @@ def install(archetypes_module, grades: Iterable[str] = ("A", "B", "C", "D")) -> 
     _, meta = load_spec()
     by_key = {a.engine_key: a for a in meta.values()}
     _correct_grey_ink(archetypes_module)
+    _apply_spec_fixes(registry)
     for existing in registry.values():
         if isinstance(existing, dict):
             lift_low_rows(existing)
@@ -2359,12 +2387,21 @@ def stamp_chrome(slide, engine, archetype: str, *, page: int, date: str,
 def _chrome_text(slide, engine, box, value: str, role: str, ink: str) -> None:
     from deckguard import brandmode as bm
 
+    before = len(slide.shapes._spTree)   # shapes are not hashable
     style = bm.resolve(role) or {}
     _draw_text(slide, engine, box, value, {
         "kind": "text", "px": style.get("px", 11),
         "font": style.get("font", bm.KONE_INFO),
         "color": ink, "caps": True, "align": "l",
     })
+    # Named so preflight can hold content to the real floor (629) while
+    # letting chrome sit at 658 where it belongs. Without the name the
+    # check had to be loosened to 680, which let a region overlapping
+    # the footer by three pixels through.
+    for element in list(slide.shapes._spTree)[before:]:
+        shape = next((s for s in slide.shapes if s._element is element), None)
+        if shape is not None:
+            shape.name = f"Chrome {role}"
 
 
 def _slide_is_dark(slide, engine) -> bool:

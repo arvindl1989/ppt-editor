@@ -237,7 +237,9 @@ def _below_the_floor(shape, px) -> bool:
         return False
     if width / px > 1000 and height / px > 300:
         return False                      # full-bleed art, not a text region
-    return (top + height) / px > bm.FOOTER_Y + 22
+    if (getattr(shape, "name", "") or "").startswith(("Chrome", "Hairline")):
+        return False                      # chrome belongs below the floor
+    return (top + height) / px > bm.FLOOR + 1
 
 
 def preflight(deck_path: str) -> dict:
@@ -251,7 +253,14 @@ def preflight(deck_path: str) -> dict:
     px = prs.slide_width / 1280
     allowed = {bm.BLACK, bm.WHITE, bm.BLUE}
 
-    for number, slide in enumerate(prs.slides, start=1):
+    slides = list(prs.slides)
+    for number, slide in enumerate(slides, start=1):
+        # The first and last slides are the master's own retained cover
+        # and Thank you. The tool does not place their content and
+        # cannot move it, so holding them to the floor reports something
+        # nobody can act on -- the same reason the 0x0 placeholders are
+        # skipped.
+        retained = number in (1, len(slides))
         logos = 0
         for shape in slide.shapes:
             name = (getattr(shape, "name", "") or "").lower()
@@ -275,7 +284,7 @@ def preflight(deck_path: str) -> dict:
                                                  "black, white or KONE Blue"))
                     if _is_dash_marker(text):
                         findings.append((number, "a dash standing in for a bullet"))
-            if _below_the_floor(shape, px):
+            if not retained and _below_the_floor(shape, px):
                 bottom = (shape.top + shape.height) / px
                 findings.append((number, f"a region reaching y={bottom:.0f}, past the floor"))
         if logos > 1:

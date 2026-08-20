@@ -366,3 +366,56 @@ def test_the_result_page_shows_how_many_distinct_layouts(client):
         "pick": ["internal:8", "internal:8", "internal:16"]})
     assert "Distinct layouts" in r.text
     assert "Reusing" in r.text, "a repeated content layout should be called out"
+
+
+def test_a_failed_archetype_install_is_recorded_not_only_swallowed():
+    """`layouts.install` is wrapped in a bare except so a missing spec
+    file cannot stop the engine's own archetypes working. That same
+    catch hid a NameError which silently disabled every derived
+    archetype -- the registry just came back smaller and nothing said
+    why."""
+    from deckguard import registry
+
+    registry._load_archetypes()
+    assert registry.INSTALL_ERRORS == [], registry.INSTALL_ERRORS
+
+
+def test_the_contact_line_clears_the_footer(tmp_path):
+    """INTERNAL_25 slide 24 puts it at top:566. It shipped at 654 and
+    landed exactly on the footer date at 658 -- and preflight missed the
+    overlap by three pixels, because the floor check had been loosened
+    to 680 to avoid flagging the footer itself."""
+    from pptx import Presentation
+
+    from deckguard import assemble, brandmode as bm
+
+    out = tmp_path / "rl.pptx"
+    plan = {"title": "T", "date": "1 March 2026", "slides": [{
+        "archetype": "resource_links", "title": "Out of scope",
+        "contact": "EUR and Nordics own these directly.",
+        "tiles": [{"icon": "target", "label": "One"}],
+    }]}
+    checks = assemble.build(plan, str(out))
+    assert not [m for _n, m in checks["findings"] if "floor" in m], checks["findings"]
+
+    prs = Presentation(str(out))
+    px = prs.slide_width / 1280
+    contact = next(
+        sh for sh in list(prs.slides)[1].shapes
+        if getattr(sh, "has_text_frame", False) and "EUR and Nordics" in sh.text_frame.text
+    )
+    assert (contact.top + contact.height) / px <= bm.FLOOR + 1
+    assert not contact.name.startswith("Chrome"), "content must not be named as chrome"
+
+
+def test_chrome_is_named_so_content_can_be_held_to_the_real_floor(tmp_path):
+    from pptx import Presentation
+
+    from deckguard import assemble
+
+    out = tmp_path / "c.pptx"
+    assemble.build({"title": "T", "date": "1 March 2026", "slides": [
+        {"archetype": "title_content", "title": "X", "bullets": ["One"]}]}, str(out))
+    named = [sh.name for slide in Presentation(str(out)).slides for sh in slide.shapes
+             if (sh.name or "").startswith("Chrome")]
+    assert named, "the footer and page number should be named as chrome"

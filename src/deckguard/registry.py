@@ -45,6 +45,9 @@ _creator_module = None      # cached after first successful import
 _archetypes_module = None   # cached after first successful import
 _photo_cache: Optional[list] = None
 
+# Non-fatal install failures, kept so a test can assert there were none.
+INSTALL_ERRORS: list = []
+
 
 def _skill_dir() -> Path:
     """Resolve the skill's directory -- see this module's own docstring
@@ -134,8 +137,12 @@ def _load_archetypes():
         from deckguard import layouts as layouts_mod
 
         layouts_mod.install(_archetypes_module)
-    except Exception:  # noqa: BLE001 -- additive, same as above
-        pass
+    except Exception as exc:  # noqa: BLE001 -- additive, must not be fatal
+        # Recorded rather than only swallowed. This catch is here because
+        # a missing spec file should not stop the engine's own archetypes
+        # working -- but it also hid a NameError that silently disabled
+        # every derived archetype, and nothing anywhere said so.
+        INSTALL_ERRORS.append(f"layouts.install: {type(exc).__name__}: {exc}")
     return _archetypes_module
 
 def _install_gallery(module) -> None:
