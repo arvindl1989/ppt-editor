@@ -94,6 +94,20 @@ RULES
 """
 
 
+def _contract_for(name: str):
+    """The archetype's contract, or None if it is outside the two sets.
+
+    Kept behind a function so the guide degrades to what it always
+    said rather than failing when a mined design has no contract.
+    """
+    try:
+        from deckguard import contracts
+
+        return contracts.for_archetype(name)
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _kone_archetype_guide() -> str:
     """One entry per known archetype: purpose, routing keywords, slots
     (all from catalog.json when present) and a worked content example
@@ -137,6 +151,15 @@ def _kone_archetype_guide() -> str:
                 "Content keys (authoritative -- anything else is discarded): "
                 + "; ".join(keys)
             )
+        # What the slide must HAVE to be worth choosing, as opposed to
+        # what it will accept. The key list says `items (list of up to
+        # 3 x {heading, text})`, which reads as an allowance; a deck
+        # with one item in a three-column grid has two holes in it.
+        contract = _contract_for(name)
+        if contract is not None and contract.needs:
+            lines.append(
+                "Do not choose this unless the source gives you: "
+                + " · ".join(s.describe() for s in contract.needs))
         slot = _archetype_image_slots().get(name)
         if slot is not None:
             lines.append(

@@ -695,6 +695,37 @@ pip install -e ".[dev]"
 pytest
 ```
 
+### Slide contracts
+
+`deckguard/contracts.py` says what each archetype NEEDS, as data — slot
+names, roles, and how many of a repeated thing the layout holds:
+
+```
+three_content — Three equal text columns. Three pillars, three phases.
+    needs: title · items (3 × {heading, text})
+```
+
+The external 25 are parsed from the `contract` column of
+`EXTERNAL_25.md`, which shipped with the handoff and was being discarded;
+the internal 25 are transcribed from the as-built prose in
+`INTERNAL_25.md`, each with the sentence it came from quoted above it.
+
+This is the thing that stops a deck reusing one layout. An archetype
+that advertised only `title` and `body` could not be chosen well, so the
+planner kept returning to the handful with real slots. Now every menu
+entry says what material it needs, and a layout can be ruled *out*.
+
+`contracts.gaps()` is the punch list, generated rather than written
+down: every slot a contract promises that the renderer cannot take, and
+every slot the renderer draws that no contract asks for. It started at
+thirteen archetypes and is held at zero by
+`test_no_contract_promises_a_slot_the_renderer_cannot_take`.
+
+```bash
+python -c "from deckguard import contracts; print(contracts.gaps() or 'none')"
+python -c "from deckguard import contracts; print(contracts.guide('internal'))"
+```
+
 ### Slide thumbnails
 
 The picker on the home page shows a real render of each slide, not a

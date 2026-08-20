@@ -1516,7 +1516,245 @@ _SPEC_FIXES: dict = {
         "body3": {"role": "attribution", "content": "attribution"},
         "body2": {"content": "context"},
     },
+    # The standfirst under a cover's title. `body` told the planner
+    # nothing, so covers came back either empty under the headline or
+    # carrying a paragraph where one line belongs. Both external
+    # contracts call it `context`; so does the internal prose.
+    # `quote_a` is `quote_b` in blue, with the same defect and the same
+    # fix -- except the type has to be white, because black on KONE Blue
+    # is unreadable.
+    "quote_a": {
+        "body":  {"role": "quote_light", "content": "quote"},
+        "body3": {"role": "attribution_light", "content": "attribution"},
+        "body2": {"content": "context"},
+    },
+    "cover_a_cut4":      {"body": {"content": "context"}},
+    "cover_b_cut3":      {"body": {"content": "context"}},
+    "cover_f_fullbleed": {"body": {"content": "context"}},
+    # "two 19px white lines" -- named as the handoff names them.
+    "outro": {"body": {"content": "text1"}, "body2": {"content": "text2"}},
 }
+
+
+# Archetypes the contract says take structured content and the registry
+# only ever offered a paragraph. These are not tweaks to a bound layout,
+# they are the slide redrawn from the as-built prose in `INTERNAL_25.md`,
+# so they replace the incumbent's geometry outright rather than patching
+# a box at a time. The incumbent's background is kept: it is the one
+# thing the prose does not restate.
+#
+# Why this matters more than it looks: an archetype whose only slot is
+# `body` cannot be chosen well. A planner reaching for the timeline
+# found it could put two paragraphs there, and went back to the handful
+# of layouts with real slots. Every entry here is a layout returning to
+# the menu.
+_RESPEC: dict[str, dict] = {
+    # 03 "Mint column, 420px, full height ... 44px title, 16px lead.
+    #     Right column at x:510: five rows, 14px gap, each a sand block
+    #     with 20px 24px padding, 44px blue numeral chip and 24px label."
+    # The fifth row inverting to blue is not expressible per item, so
+    # every row is sand; the mint column and the numerals carry it.
+    "agenda_c_split": {
+        "panels": [{"box": [0, 0, 420, 720], "fill": "AAE1C8"}]
+                  + [{"box": [510, y, 725, 96], "fill": "F3EEE6"}
+                     for y in (91, 201, 311, 421, 531)],
+        "regions": [
+            _text(45, 91, 330, 150, "title", 40),
+            _text(45, 260, 330, 160, "lead", 16),
+        ],
+        "groups": [{
+            "content": "items",
+            "origins": [[510, 91], [510, 201], [510, 311], [510, 421], [510, 531]],
+            "regions": [
+                _text(20, 26, 48, 44, "number", 24, color="1450F5"),
+                _text(84, 30, 610, 44, "label", 22),
+            ],
+        }],
+    },
+    # 12 "40px title in a 340px column. Pink panel at top:250, 24px
+    #     padding, lead plus three bullets. Right: 770x6 blue axis at
+    #     left:465 top:300, four stems below -- 6x40 blue drop, 40px blue
+    #     chip, KONE Information period label, 16px text in a 165px
+    #     column."
+    # The drops are fixed panels rather than per-item shapes, which is
+    # why they are listed out: four events is what the axis was drawn
+    # for, and a fifth has nowhere to hang.
+    "timeline_quarter_axis": {
+        "panels": [
+            {"box": [45, 250, 374, 379], "fill": "FFCDD7"},
+            {"box": [465, 300, 770, 6], "fill": "1450F5"},
+        ] + [{"box": [x, 306, 6, 40], "fill": "1450F5"}
+             for x in (465, 663, 861, 1059)],
+        "regions": [
+            _text(45, 91, 374, 104, "title", 40),
+            _text(69, 274, 326, 60, "lead", 17),
+            _bullets(69, 350, 326, 255, "bullets", 16),
+        ],
+        "groups": [{
+            "content": "events",
+            "origins": [[465, 306], [663, 306], [861, 306], [1059, 306]],
+            "regions": [
+                _text(0, 56, 165, 20, "period", 12,
+                      font="KONE Information", color="1450F5", caps=True),
+                _text(0, 82, 165, 240, "text", 16),
+            ],
+        }],
+    },
+    # "The running order as a numbered list" -- built as two parallel
+    # text boxes, an 83px column of numbers beside a 476px column of
+    # words. Nothing about that is a list: the rows cannot be edited in
+    # PowerPoint's outline view, and a planner had to write the numbers
+    # itself and hope the line breaks lined up. Five real rows instead,
+    # on the same 578px column the layout already declares.
+    "agenda_b_numbered": {
+        "regions": [_text(45, 91, 578, 53, "title", 32)],
+        "groups": [{
+            "content": "items",
+            "origins": [[45, y] for y in (181, 270, 359, 448, 537)],
+            "regions": [
+                _text(0, 0, 83, 44, "number", 24, color="1450F5"),
+                _text(102, 4, 476, 80, "label", 20),
+            ],
+        }],
+    },
+    # 02 "Full-height photo right, 574px wide from x:706. Left: blue
+    #     eyebrow at top:130, 48px statement at top:166, then three rows
+    #     at top:392 -- 44px blue chip with white pictogram, 19px black
+    #     text, 20px gap."
+    # What was registered instead was a banner photo across the top with
+    # a title and one line under it -- a different, weaker slide, and
+    # the reason the "why we're here" opener never carried its three
+    # reasons.
+    "picture_intro": {
+        "regions": [
+            {"role": "picture", "box": [706, 0, 574, 720], "content": "photo"},
+            _text(45, 130, 610, 24, "eyebrow", 12,
+                  font="KONE Information", color="1450F5", caps=True),
+            _text(45, 166, 610, 190, "title", 44),
+        ],
+        "groups": [{
+            "content": "points",
+            "origins": [[45, 392], [45, 456], [45, 520]],
+            "regions": [
+                {"role": "icon", "box": [0, 0, 44, 44]},
+                _text(60, 8, 550, 44, "text", 19),
+            ],
+        }],
+    },
+}
+
+
+# Slots that draw the archetype's OWN footer line, at y:664-680. They
+# predate the chrome layer: `stamp_chrome` now puts the date at 45,658
+# and the page number at 1167,658 on every body slide, so these are a
+# second footer sitting under the first, below the floor, in a slot the
+# planner is invited to fill. Dropped rather than moved -- there is
+# nowhere above the floor for a duplicate to go.
+_DROP_SLOTS: dict[str, tuple] = {
+    "kone_numbers": ("footer",),
+    "credits": ("footer",),
+    "milestone_slide": ("classification",),
+}
+
+
+def _drop_slots(registry) -> None:
+    for name, keys in _DROP_SLOTS.items():
+        spec = registry.get(name)
+        if not isinstance(spec, dict) or not spec.get("regions"):
+            continue
+        spec["regions"] = [r for r in spec["regions"] if r.get("content") not in keys]
+
+
+def hold_to_the_floor(spec: dict, floor: float = 629.0, least: float = 16.0) -> int:
+    """Bring anything hanging below the content floor back above it.
+
+    BRAND_MODE §7 is unconditional -- every region's bottom is <= 629 --
+    and thirteen of the built archetypes broke it, one of them by 83px.
+    They were invisible because nothing built the whole library at once
+    and read the preflight back; the contract work did, and there they
+    were.
+
+    Trim first, because a box that is merely too tall loses nothing by
+    being shortened. Lift only when trimming would leave less than a
+    line of type. Pictures and full-bleed panels are exempt: reaching
+    the bottom edge is what they are for.
+
+    Returns how many boxes moved.
+    """
+    moved = 0
+
+    def _fix(box) -> bool:
+        top, height = box[1], box[3]
+        if top + height <= floor or _is_full_bleed(box):
+            return False
+        if floor - top >= least:
+            box[3] = floor - top
+        else:
+            box[1] = max(0, floor - height)
+        return True
+
+    for region in spec.get("regions") or []:
+        if region.get("role") in _PICTURE_REGION_ROLES or region.get("role") == "image":
+            continue
+        if _fix(region["box"]):
+            moved += 1
+
+    for group in spec.get("groups") or []:
+        origins = group.get("origins") or []
+        if not origins:
+            continue
+        lowest = max(o[1] for o in origins)
+        for region in group.get("regions") or []:
+            if region.get("role") in _PICTURE_REGION_ROLES:
+                continue
+            box = region["box"]
+            bottom = lowest + box[1] + box[3]
+            if bottom <= floor:
+                continue
+            # A group's boxes are shared by every origin, so the trim is
+            # computed against the LOWEST row and applied to all of them.
+            room = floor - lowest - box[1]
+            if room >= least:
+                box[3] = room
+            else:
+                box[1] = max(0, box[1] - (bottom - floor))
+            moved += 1
+    return moved
+
+
+def _add_light_roles(archetypes_module) -> None:
+    """A quote set white, for the quote slide that sits on a blue panel.
+
+    `quote_a` is `quote_b` in blue, and it had the same defect: every
+    region ported as `body`, so the quotation was 16px in a 349px panel
+    and the attribution under it looked identical. `quote_b` could take
+    the black `quote` and `attribution` roles; this one cannot, because
+    black on KONE Blue is unreadable -- so the two roles exist here in
+    white, and nowhere else.
+    """
+    engine = getattr(archetypes_module, "E", None)
+    styles = getattr(engine, "ROLE_STYLE", None)
+    if not styles:
+        return
+    for role, source, white in (("quote_light", "quote", True),
+                                ("attribution_light", "attribution", True)):
+        if role in styles or source not in styles:
+            continue
+        base = list(styles[source])
+        if len(base) >= 3:
+            from pptx.dml.color import RGBColor
+
+            base[2] = RGBColor(0xFF, 0xFF, 0xFF) if white else base[2]
+        styles[role] = tuple(base)
+
+
+def _apply_respecs(registry) -> None:
+    for name, spec in _RESPEC.items():
+        incumbent = registry.get(name)
+        if not isinstance(incumbent, dict):
+            continue
+        keep = {k: v for k, v in incumbent.items() if k == "background"}
+        registry[name] = {**keep, **copy.deepcopy(spec)}
 
 
 def _apply_spec_fixes(registry) -> None:
@@ -1549,6 +1787,7 @@ def install(archetypes_module, grades: Iterable[str] = ("A", "B", "C", "D")) -> 
     _, meta = load_spec()
     by_key = {a.engine_key: a for a in meta.values()}
     _correct_grey_ink(archetypes_module)
+    _add_light_roles(archetypes_module)
     for existing in registry.values():
         if isinstance(existing, dict):
             lift_low_rows(existing)
@@ -1596,7 +1835,16 @@ def install(archetypes_module, grades: Iterable[str] = ("A", "B", "C", "D")) -> 
     # well as the incumbents. Run earlier it corrected only the
     # incumbents: a generated archetype was created afterwards and kept
     # the very geometry the fix existed to replace.
+    _apply_respecs(registry)
     _apply_spec_fixes(registry)
+    _drop_slots(registry)
+    # Last of all and over everything, including the archetypes the two
+    # passes above just rewrote: the floor is the one rule with no
+    # exceptions, so it is enforced after every other hand has been on
+    # the geometry rather than trusted to each of them.
+    for spec in registry.values():
+        if isinstance(spec, dict):
+            hold_to_the_floor(spec)
     return sorted(added)
 
 
@@ -1858,10 +2106,18 @@ def _shape_of(region: dict) -> str:
     if role == "icon":
         return "icon name"
     style = region.get("dg") or {}
-    if style.get("kind") == "bullets":
+    # `role == "bullets"` matters as much as the dg kind: a region bound
+    # from the master carries the role and no dg style, so
+    # `org_functions.functions` -- a real bulleted panel -- was
+    # advertised as `(text)` and got a paragraph.
+    if style.get("kind") == "bullets" or role == "bullets":
         return "list of strings, or {text, sub:[...]}"
     if "stat" in role or "value" in role:
         return "short figure, e.g. 70%"
+    if role == "table":
+        # It was annotated `(text)`, so the one archetype built to hold a
+        # real table was advertised as taking a paragraph -- and got one.
+        return '{headers: [...], rows: [[...], ...]}'
     return "text"
 
 

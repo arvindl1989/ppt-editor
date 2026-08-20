@@ -426,6 +426,8 @@ _SAMPLE_WORDS = {
     "text": "Standardise intake and reporting on ServiceNow.",
     "quote": "A benchmark in easy to work with, easy to work for.",
     "context": "Said at the April review, after the first full quarter on the new intake.",
+    "lead": "Where the Hub is now, and what changes over the next four quarters.",
+    "intro": "Each shift moves the Hub from reactive delivery toward analytics-led service.",
     "label": "Frontlines", "value": "12", "number": "01", "item": "What changed",
     "period": "Q2 2026", "caption": "Marketing Hub", "footer": "Marketing Hub · April 2026",
     "scope": "KSEA · KMTA · KANZ · KEI · EEM", "name": "Suresh Kumar",
@@ -469,6 +471,67 @@ def _sample_word(key: str, index: int = 0) -> str:
     return "Marketing Hub"
 
 
+_SAMPLE_BULLETS = [
+    ["Standardise intake on ServiceNow", "Automate repeat request types",
+     "Publish live queue status"],
+    ["Two systems to keep in step", "No view of the backlog",
+     "Reporting a week behind"],
+    ["Retire the shared inbox", "Hand the regions the dashboard"],
+]
+
+
+def _sample_field(field, index: int):
+    """One cell of a repeated item. A bullets field wants a LIST -- given
+    a string the slide draws one long line where a list belongs."""
+    if field.role == "bullets":
+        return _SAMPLE_BULLETS[index % len(_SAMPLE_BULLETS)]
+    return _sample_word(field.key, index)
+
+
+def _sample_from_contract(archetype_name: str) -> dict:
+    """Sample content built from what the archetype says it needs.
+
+    Better than guessing from key names, because the contract knows how
+    MANY of a thing the layout holds. Filling a five-row agenda with the
+    three the old guess produced left two empty sand blocks in the
+    preview, which is not what the slide looks like.
+    """
+    try:
+        from deckguard import contracts
+
+        contract = contracts.for_archetype(archetype_name)
+    except Exception:  # noqa: BLE001
+        return {}
+    if contract is None:
+        return {}
+    out: dict = {}
+    for slot in contract.slots:
+        if slot.is_picture:
+            continue
+        if slot.is_list:
+            # `icon` is left out on purpose: unnamed, the engine runs its
+            # own pictogram rotation, which is what an unspecified slide
+            # actually looks like. Naming one here would show a preview
+            # no real deck produces.
+            out[slot.key] = [
+                {f.key: _sample_field(f, i) for f in slot.fields if f.key != "icon"}
+                if slot.fields else _sample_word(slot.key, i)
+                for i in range(slot.maximum)
+            ]
+        elif slot.role == "bullets":
+            out[slot.key] = ["Standardise intake on ServiceNow",
+                             "Automate repeat request types",
+                             "Publish live queue status"]
+        elif slot.role == "figure":
+            continue          # the engine draws it; there is nothing to supply
+        else:
+            # `text1`/`text2` are the same stem; without the suffix they
+            # both sample the same sentence and the slide looks doubled.
+            nth = int(slot.key[-1]) - 1 if slot.key[-1].isdigit() else 0
+            out[slot.key] = _sample_word(slot.key, max(nth, 0))
+    return out
+
+
 def sample_content(archetype_name: str) -> dict:
     """Plausible content for an archetype, for preview only.
 
@@ -477,12 +540,32 @@ def sample_content(archetype_name: str) -> dict:
     builder leaves an unfilled slot empty rather than inventing copy.
     """
     try:
-        from deckguard.registry import _derived_content_keys, _load_archetypes
+        from deckguard.registry import (
+            _derived_content_keys, _load_archetypes, _sample_agrees,
+        )
 
         archetypes = _load_archetypes()
         sample = getattr(archetypes, "SAMPLES", {}).get(archetype_name)
-        if isinstance(sample, dict):
+        # `_sample_agrees` matters here as much as it does in the
+        # planning prompt: a sample written before an archetype was
+        # re-specced fills keys the renderer no longer reads, and the
+        # preview shows a slide that cannot happen.
+        if isinstance(sample, dict) and _sample_agrees(archetype_name, sample):
             return dict(sample)
+        from_contract = _sample_from_contract(archetype_name)
+        if from_contract:
+            if isinstance(sample, dict):
+                # A sample that disagrees is usually only PARTLY stale --
+                # `chart_commentary`'s carried a dead `highlight` key and
+                # real chart data. Taking neither whole loses the chart;
+                # taking it whole draws a slot nothing reads. So: the
+                # contract decides which keys exist, the hand-written
+                # sample fills the ones it still knows about.
+                known = {k.split(" (")[0] for k in _derived_content_keys(archetype_name)}
+                for key, value in sample.items():
+                    if key in known:
+                        from_contract[key] = value
+            return from_contract
         out: dict = {}
         for raw in _derived_content_keys(archetype_name):
             key = raw.split(" (")[0]

@@ -95,6 +95,22 @@ def _mined_names(mined: dict) -> list:
                   key=lambda n: min(order.get(n) or [999]))
 
 
+def _menu(audience: str) -> str:
+    """The audience's set, each entry carrying what it needs.
+
+    `brandmode.menu` gave the job and nothing else, so an archetype
+    whose material the brief does not contain looked exactly as
+    choosable as one whose material it does. The contract is the part
+    that lets a layout be ruled OUT.
+    """
+    try:
+        from deckguard import contracts
+
+        return contracts.guide(audience)
+    except Exception:  # noqa: BLE001 -- a menu without contracts still works
+        return bm.menu(audience)
+
+
 def _from_brief(brief: str, audience: str, chosen: list,
                 sections: Optional[list] = None) -> list:
     """Plan the content. With picks already made, the planner fills
@@ -133,8 +149,11 @@ def _from_brief(brief: str, audience: str, chosen: list,
             "  - Open with a cover and put a divider before each section. "
             "Do NOT emit an outro: the master's own Thank you is retained.\n"
             "  - Drop a slide rather than pad it. Eight slides that each say "
-            "something beat fifteen that do not.\n\n"
-            f"The {audience} menu:\n" + bm.menu(audience)
+            "something beat fifteen that do not.\n"
+            "  - Every entry below says what it NEEDS. If the source does "
+            "not give you that material, the answer is a different "
+            "archetype, not the same one half filled.\n\n"
+            f"The {audience} menu:\n" + _menu(audience)
         )
         wanted = bm.sections_brief(sections or [], audience)
         if wanted:
@@ -215,7 +234,7 @@ def build(plan_dict: dict, out_path: str, mined: Optional[dict] = None) -> dict:
     return preflight(out_path)
 
 
-def _is_dash_marker(text: str) -> bool:
+def _is_dash_marker(text: str, rest: str = "") -> bool:
     """Is this run a dash pretending to be a bullet?
 
     Checking `text.strip().startswith("— ")` missed the real case: the
@@ -223,10 +242,16 @@ def _is_dash_marker(text: str) -> bool:
     leaves a bare dash with no trailing space. So the check passed on
     every deck while the violation it was written for went out the
     door.
+
+    `rest` is whatever follows in the same paragraph, and a bare dash
+    needs it: a marker is a dash with something after it. A dash ALONE
+    in its paragraph is a value -- the "not in this tier" cell of a
+    comparison table -- and reading it as a §6 violation made the one
+    archetype built to hold a table always report one.
     """
     stripped = (text or "").strip()
     if stripped in ("-", "—", "–", "*", "•-"):
-        return True
+        return bool(rest.strip())
     return stripped.startswith(("- ", "— ", "– "))
 
 
@@ -252,6 +277,12 @@ def _below_the_floor(shape, px) -> bool:
         return False
     if width / px > 1000 and height / px > 300:
         return False                      # full-bleed art, not a text region
+    if top / px <= 1 and (top + height) / px >= 719:
+        # A colour field running edge to edge top to bottom -- the mint
+        # column on the split agenda, the blue column on a quote. It is
+        # the slide's ground, not something standing on the floor, and
+        # it is meant to reach the bottom edge.
+        return False
     if (getattr(shape, "name", "") or "").startswith(("Chrome", "Hairline")):
         return False                      # chrome belongs below the floor
     return (top + height) / px > bm.FLOOR + 1
@@ -284,8 +315,10 @@ def preflight(deck_path: str) -> dict:
             if not getattr(shape, "has_text_frame", False):
                 continue
             for para in shape.text_frame.paragraphs:
-                for run in para.runs:
+                runs = list(para.runs)
+                for index, run in enumerate(runs):
                     text = run.text or ""
+                    after = "".join(r.text or "" for r in runs[index + 1:])
                     if not text.strip():
                         continue
                     colour = None
@@ -297,7 +330,7 @@ def preflight(deck_path: str) -> dict:
                     if colour and colour.upper() not in allowed:
                         findings.append((number, f"type in #{colour}, which is not "
                                                  "black, white or KONE Blue"))
-                    if _is_dash_marker(text):
+                    if _is_dash_marker(text, after):
                         findings.append((number, "a dash standing in for a bullet"))
             if not retained and _below_the_floor(shape, px):
                 bottom = (shape.top + shape.height) / px
