@@ -515,7 +515,66 @@ def _icon_slots(spec: dict, content: Optional[dict] = None) -> int:
     return n
 
 
-def render(slide, name: str, content: dict, archetypes_module) -> None:
+def _table_from_text(text: str) -> dict:
+    """`a|b|c;d|e|f` as {headers, rows}.
+
+    The shape a caller reaches for when told a slot holds "a table" and
+    nothing more. Rows split on `;`, columns on `|`, first row is the
+    header. Newlines work as row separators too, because that is the
+    other obvious guess.
+    """
+    rows = [r.strip() for r in re.split(r"[;\n]", text) if r.strip()]
+    cells = [[c.strip() for c in row.split("|")] for row in rows]
+    cells = [row[1:] if row and row[0] == "" else row for row in cells]
+    if not cells:
+        return {"headers": [], "rows": []}
+    width = max(len(row) for row in cells)
+    cells = [row + [""] * (width - len(row)) for row in cells]
+    # the header row of a comparison table has an empty first cell -- it
+    # sits over the row labels -- so it comes back one short
+    return {"headers": [""] * (width - len(cells[0])) + cells[0], "rows": cells[1:]}
+
+
+def _coerce_content(spec: dict, content: dict) -> dict:
+    """Put the caller's content into the shape the engine reads.
+
+    Two failures this exists for, both found by handing the renderer
+    copy written against the contract rather than against the code:
+
+    A list in a text region came out as `repr` -- an external cover
+    shipped with `['Maintenance and modernisation', 'Prepared for the
+    property team', ...]` printed under its headline, brackets, quotes
+    and all. The contract types that slot `bullets`; the region is a
+    plain text box. Joining is right and failing the build is not: the
+    words were correct and only the shape was wrong.
+
+    A table written as text crashed the build outright, because the
+    engine calls `.get` on it. `comparison_table` advertises `table` and
+    says nothing about {headers, rows}, so a string is the reasonable
+    guess and it took the whole deck down with an AttributeError.
+    """
+    if not content:
+        return content
+    kinds: dict = {}
+    for region in spec.get("regions") or []:
+        if region.get("content"):
+            kinds[region["content"]] = (
+                (region.get("dg") or {}).get("kind") or region.get("role") or "text")
+    grouped = {g.get("content") for g in spec.get("groups") or []}
+
+    out = dict(content)
+    for key, value in content.items():
+        kind = kinds.get(key)
+        if kind == "table" and isinstance(value, str) and value.strip():
+            out[key] = _table_from_text(value)
+        elif (kind not in (None, "bullets", "table") and key not in grouped
+              and isinstance(value, list)):
+            out[key] = "\n".join(str(v) for v in value if str(v).strip())
+    return out
+
+
+def render(slide, name: str, content: dict, archetypes_module,
+           audience: str = "") -> None:
     """Draw an archetype onto `slide`.
 
     Colour panels are painted first, then the engine draws the text and
@@ -544,6 +603,7 @@ def render(slide, name: str, content: dict, archetypes_module) -> None:
 
     engine = archetypes_module.E
     spec = archetypes_module.ARCHETYPES.get(name, {})
+    content = _coerce_content(spec, content)
 
     if spec.get("chrome"):
         archetypes_module.render(slide, name, content)
@@ -676,7 +736,7 @@ def render(slide, name: str, content: dict, archetypes_module) -> None:
     # painting a full-slide background rectangle, so anything drawn
     # first is buried by it -- both numbered dividers came out as an
     # empty sand rectangle with the number, title and label underneath.
-    field = _field_for(spec, filled)
+    field = _field_for(spec, filled, name, audience)
     if field:
         _paint_field(slide, engine, field[0])
     else:
@@ -717,18 +777,65 @@ BRAND_FIELDS = {
 DEFAULT_FIELD = "blue"
 
 
-def _field_for(spec: dict, content: dict):
+def _field_for(spec: dict, content: dict, name: str = "", audience: str = ""):
     """(fill, ink) when this archetype paints a whole-slide colour field.
 
-    Only archetypes that declare `field` -- dividers -- take one. The
-    caller names a colour per slide; a divider is the one place the
+    Two sources, in this order.
+
+    An archetype that declares `field` -- the dividers -- takes the
+    colour the caller names per slide. A divider is the one place the
     secondary palette is meant to carry a whole slide, and leaving them
     all the same makes a deck monotonous.
+
+    Otherwise the SET decides. `slide-sets.json` gives every slide a
+    field per audience and nothing was reading it, so `hero_stat` came
+    out white where the internal set says light-blue, `divider_title_only`
+    sand where it says light-blue, and -- the one that matters -- the
+    external `kone_numbers` carried a sand band on a customer deck whose
+    policy is white and blue only.
     """
-    if not spec.get("field"):
-        return None
-    name = str(content.get("colour") or content.get("color") or DEFAULT_FIELD).lower()
-    return BRAND_FIELDS.get(name, BRAND_FIELDS[DEFAULT_FIELD])
+    if spec.get("field"):
+        colour = str(content.get("colour") or content.get("color")
+                     or DEFAULT_FIELD).lower()
+        return BRAND_FIELDS.get(colour, BRAND_FIELDS[DEFAULT_FIELD])
+    # A field the SET declares carries no ink override. Only a divider,
+    # which declares its own field, reverses the type on it -- there the
+    # caller picked a colour and every role has to follow. Here the
+    # archetype was drawn for this field already, and forcing its ink
+    # black turned `kone_numbers`' blue figures and blue eyebrow black
+    # the moment the white field started being painted.
+    declared = _set_field(name, audience)
+    if declared == "white":
+        return ("FFFFFF", None)
+    return (BRAND_FIELDS[declared][0], None) if declared in BRAND_FIELDS else None
+
+
+def _set_field(name: str, audience: str) -> str:
+    """What `slide-sets.json` says this slide's field is, in this set.
+
+    `photo` and `secondary` return empty: one is a photograph the
+    archetype places itself, the other is the archetype's own panel, and
+    neither is a flood the renderer should paint.
+    """
+    if not name or not audience:
+        return ""
+    # Locally, because `brandmode` is not imported at module level here.
+    # Written as a bare `bm` first, which raised NameError straight into
+    # the `except` below and returned "" for every slide in both sets --
+    # the fix looked applied, the renders did not change, and nothing
+    # said why. Hence KeyError only: an unknown set name is the one
+    # thing this is allowed to shrug off.
+    from deckguard import brandmode as bm
+
+    try:
+        slides = bm.slides_in(audience)
+    except KeyError:
+        return ""
+    for slide in slides:
+        if slide["archetype"] == name:
+            field = str(slide.get("field") or "").lower()
+            return field if field in {*BRAND_FIELDS, "white"} else ""
+    return ""
 
 
 def _is_unsupplied_figure(region: dict, content: dict, name: str, archetypes_module) -> bool:
@@ -1025,6 +1132,47 @@ def _paint_field(slide, engine, fill: str) -> None:
     spTree = shape._element.getparent()
     spTree.remove(shape._element)
     spTree.insert(2, shape._element)
+    _relay_layout_logo(slide)
+
+
+def _relay_layout_logo(slide) -> bool:
+    """Put the layout's logo back on top of a painted field.
+
+    The logo lives on the LAYOUT, and every shape on a slide draws above
+    every shape on its layout -- so flooding the slide with a colour
+    buries it. The dividers had been shipping without a logo for exactly
+    this reason and it read as the layout's own design; making the set's
+    declared field authoritative would have spread it to the thirty-nine
+    slides that declare white.
+
+    Placed from the vendored asset at the layout logo's own geometry,
+    NOT by copying the layout's element: a picture's `r:embed` points at
+    a relationship owned by the layout part, so a deep copy onto the
+    slide lands as an empty frame -- the same failure as the 54 blank
+    logo frames in `All_Slides.pptx`. White mark on a dark field.
+    """
+    from deckguard.logo import _brand_asset, _is_dark
+
+    if any((sh.name or "") == "Logo" for sh in slide.shapes):
+        return False
+    source = next((sh for sh in slide.slide_layout.shapes
+                   if (sh.name or "") == "Logo"), None)
+    if source is None:
+        return False
+    field = next((sh for sh in slide.shapes if (sh.name or "") == "Colour field"), None)
+    light = False
+    try:
+        if field is not None and field.fill.type is not None:
+            light = _is_dark(str(field.fill.fore_color.rgb))
+    except Exception:  # noqa: BLE001 -- an unreadable fill just means dark type
+        light = False
+    path = _brand_asset("logo", light)
+    if not path:
+        return False
+    picture = slide.shapes.add_picture(
+        path, source.left, source.top, source.width, source.height)
+    picture.name = "Logo"
+    return True
 
 
 def _full_slide_fills(slide, engine):
@@ -2014,7 +2162,8 @@ def build_deck(spec: dict, out_path, archetypes_module=None, report=None) -> str
             dropped = unread_keys(archetypes_module.ARCHETYPES.get(name) or {}, content)
             if dropped:
                 report.setdefault("dropped", {})[position] = (name, dropped)
-        render(slide, name, content, archetypes_module)
+        render(slide, name, content, archetypes_module,
+               audience=str(spec.get("audience") or ""))
         stamp_chrome(
             slide, archetypes_module.E, str(name),
             page=position + 1,          # the retained cover is page 1
@@ -2036,6 +2185,7 @@ def build_deck(spec: dict, out_path, archetypes_module=None, report=None) -> str
     slide_ids.append(outro)
 
     protect_photo_cover(list(prs.slides)[0])
+    strip_master_classification(prs)
 
     prs.save(str(out_path))
     return str(out_path)
@@ -2638,6 +2788,35 @@ def shape_notes(shape: str) -> tuple[Optional[str], Optional[int]]:
 # --------------------------------------------------------------------------
 # chrome, owned by the layout
 # --------------------------------------------------------------------------
+
+
+def strip_master_classification(prs) -> int:
+    """Take the master's own `KONE Internal` stamp off every slide.
+
+    It is a plain Arial 8pt text box at x:1204 y:7 sitting on the slide
+    MASTER, so it is inherited by all fifty layouts and appears on every
+    slide of every deck -- including customer-facing ones, which is the
+    part that matters: every external render carried `KONE Internal` in
+    its top-right corner.
+
+    It is off-brand three ways over. Arial is not an approved face;
+    BRAND_MODE §3 puts classification bottom-left at `45,640` in KONE
+    Information; and an external deck carries no classification at all.
+    `stamp_chrome` already draws it correctly when a deck declares one,
+    so this only has to remove the thing that was never chrome.
+
+    Returns how many shapes were removed.
+    """
+    removed = 0
+    for master in prs.slide_masters:
+        for shape in list(master.shapes):
+            if not getattr(shape, "has_text_frame", False) or shape.is_placeholder:
+                continue
+            text = shape.text_frame.text.strip().lower()
+            if text in ("kone internal", "kone confidential", "internal"):
+                shape._element.getparent().remove(shape._element)
+                removed += 1
+    return removed
 
 
 def stamp_chrome(slide, engine, archetype: str, *, page: int, date: str,

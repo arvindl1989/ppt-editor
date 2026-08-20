@@ -279,8 +279,15 @@ def placeholders_template(data: dict) -> dict:
                 if slot["picture"]:
                     continue
                 if "count" in slot:
+                    # A field typed `bullets` inside a list is still a
+                    # list. Emitting "" for it asked for one clause where
+                    # three lines belong, and six slots came back written
+                    # that way -- `two_content.items[].bullets` and its
+                    # five siblings. The renderer had always accepted an
+                    # array there; only the template said otherwise.
                     slide[slot["key"]] = [
-                        {f["key"]: "" for f in slot["fields"]}
+                        {f["key"]: (["", "", ""] if f.get("role") == "bullets" else "")
+                         for f in slot["fields"]}
                         for _ in range(slot["count"]["max"])
                     ]
                 elif slot["role"] == "bullets":

@@ -1,0 +1,408 @@
+{
+  "_readme": "Placeholder copy for all 45 built slides. Internal is a regional field-services programme moving three branches onto one service desk. External is a maintenance and modernisation proposal for a mixed-use portfolio. Every figure is round and evidently illustrative. Icon names are real names from assets/icon-names.txt; external slots are left empty on purpose, because no external layout names an icon. Slots typed as strings that are semantically lists carry one clause — see NOTES.md, contract problem 1.",
+  "external": {
+    "cover_a_cut4": {
+      "title": "A service plan for the whole portfolio",
+      "context": [
+        "Maintenance and modernisation",
+        "Prepared for the property team",
+        "Illustrative example"
+      ]
+    },
+    "cover_f_fullbleed": {
+      "title": "Keeping every floor within reach",
+      "context": "A maintenance and modernisation proposal"
+    },
+    "agenda_b_numbered": {
+      "title": "What we will cover",
+      "items": [
+        { "number": "01", "label": "Where the portfolio stands" },
+        { "number": "02", "label": "What a service plan includes" },
+        { "number": "03", "label": "How modernisation is phased" },
+        { "number": "04", "label": "What it costs to run" },
+        { "number": "05", "label": "What happens next" }
+      ]
+    },
+    "divider_numbering": {
+      "number": "02",
+      "eyebrow": "SECTION",
+      "title": "What a service plan includes"
+    },
+    "image_section_divider": {
+      "eyebrow": "PART THREE",
+      "title": "How modernisation is phased"
+    },
+    "statement_a": {
+      "title": "Equipment that is looked after holds its value longer than equipment that is repaired."
+    },
+    "title_content": {
+      "eyebrow": "SERVICE PLAN",
+      "title": "What the plan covers",
+      "bullets": [
+        "Planned maintenance visits on a fixed schedule",
+        "Remote monitoring on every connected unit",
+        "Callout response within agreed hours"
+      ]
+    },
+    "title_subtitle_content_a": {
+      "title": "Three things you get from a single provider",
+      "subtitle": "One contract, one schedule and one point of contact across all eight buildings.",
+      "bullets": [
+        "A technician team that knows the portfolio",
+        "One reporting view instead of eight",
+        "One renewal date to plan around"
+      ]
+    },
+    "two_content": {
+      "title": "Where the portfolio stands today",
+      "items": [
+        { "label": "IN GOOD ORDER", "bullets": "Twenty units running on a current maintenance plan" },
+        { "label": "NEEDS ATTENTION", "bullets": "Ten units past their expected service life" }
+      ]
+    },
+    "two_content_narrow_title": {
+      "title": "A plan per building",
+      "body": "Each building gets its own schedule, sized to how much it is used rather than to how old it is.",
+      "bullets": [
+        "Residential towers on a quarterly visit",
+        "The office block on a monthly visit",
+        "Retail levels on call through opening hours"
+      ]
+    },
+    "three_content": {
+      "title": "How the plan is built",
+      "items": [
+        { "heading": "Survey", "text": "Two days on site to record every unit, its age and how much it is used." },
+        { "heading": "Schedule", "text": "Visits sized per building and booked a year ahead." },
+        { "heading": "Review", "text": "One meeting a quarter to agree what changes." }
+      ]
+    },
+    "text_picture_a": {
+      "eyebrow": "PORTFOLIO REVIEW",
+      "title": "What the survey found",
+      "body": "Thirty units across eight buildings, surveyed over two days. Age varies more than condition does.",
+      "items": [
+        { "icon": "", "text": "Twenty units in good working order" },
+        { "icon": "", "text": "Ten units past their expected service life" },
+        { "icon": "", "text": "Four units with parts no longer made" },
+        { "icon": "", "text": "Two units due for full replacement" }
+      ]
+    },
+    "text_picture_g": {
+      "eyebrow": "PEOPLE FLOW",
+      "title": "Movement is the measure",
+      "body": "Ten thousand journeys a day across the portfolio, most of them inside two morning hours.",
+      "items": [
+        { "icon": "", "text": "Ten thousand journeys a day" },
+        { "icon": "", "text": "Two peak hours to plan for" },
+        { "icon": "", "text": "Eight buildings on one plan" },
+        { "icon": "", "text": "Thirty units in service" },
+        { "icon": "", "text": "Callout cover round the clock" },
+        { "icon": "", "text": "One reporting view" }
+      ]
+    },
+    "three_pictures_text": {
+      "items": [
+        { "image": "", "text": "The residential towers on the north side of the site." },
+        { "image": "", "text": "The office block at the centre of the site." },
+        { "image": "", "text": "The retail levels at street level." }
+      ]
+    },
+    "hero_stat": {
+      "eyebrow": "AVAILABILITY",
+      "value": "99%",
+      "caption": "of journeys completed without a stop",
+      "support": "Illustrative figure across thirty units over one year."
+    },
+    "kone_numbers": {
+      "eyebrow": "THE PORTFOLIO",
+      "title": "The plan in numbers",
+      "scope_label": "BUILDINGS",
+      "scope": "Towers · Office · Retail · Car park",
+      "stats": [
+        { "value": "8", "label": "BUILDINGS" },
+        { "value": "30", "label": "UNITS" },
+        { "value": "10k", "label": "JOURNEYS A DAY" },
+        { "value": "4", "label": "VISITS A YEAR" },
+        { "value": "1", "label": "CONTRACT" }
+      ]
+    },
+    "quote_a": {
+      "title": "What the site team says",
+      "quote": "We stopped chasing three suppliers and started planning a year at a time.",
+      "context": "A property manager, one year into a single service plan.",
+      "attribution": "HEAD OF PROPERTY OPERATIONS"
+    },
+    "how_it_works_3step": {
+      "title": "How the plan starts",
+      "steps": [
+        { "number": "01", "text": "We survey every unit and agree the schedule with you." },
+        { "number": "02", "text": "Connected units come online and start reporting." },
+        { "number": "03", "text": "You get one report a month and one review a quarter." }
+      ]
+    },
+    "timeline": {
+      "title": "How modernisation is phased",
+      "items": [
+        { "period": "YEAR ONE", "text": "Survey, connect and stabilise the ten oldest units." },
+        { "period": "YEAR TWO", "text": "Modernise the four units whose parts are no longer made." },
+        { "period": "YEAR THREE", "text": "Replace the two units at the end of their life." },
+        { "period": "YEAR FOUR", "text": "Review the plan against how the site is actually used." }
+      ]
+    },
+    "comparison_table": {
+      "title": "What each level of cover includes",
+      "table": "|Standard|Connected|Full;Planned visits|Two a year|Four a year|Four a year;Remote monitoring|—|Yes|Yes;Callout response|Next day|Same day|Priority;Reporting|Yearly|Quarterly|Monthly"
+    },
+    "outro": {
+      "title": "Thank you",
+      "text1": "Eight buildings, thirty units, one plan.",
+      "text2": "Illustrative example deck — no figure here is KONE data."
+    }
+  },
+  "internal": {
+    "cover_b_cut3": {
+      "title": "One desk for the region",
+      "context": "Programme update · Field services"
+    },
+    "picture_intro": {
+      "eyebrow": "FIELD SERVICES",
+      "title": "Three branches, one queue, one way of working.",
+      "points": [
+        { "icon": "headset", "text": "Every callout arrives at one desk instead of three inboxes." },
+        { "icon": "technicians", "text": "Dispatch goes to whoever is nearest, not to whoever answered." },
+        { "icon": "report", "text": "One weekly report all three branches can read." }
+      ]
+    },
+    "agenda_c_split": {
+      "title": "What we cover today",
+      "lead": "Where the programme stands, what changes this quarter, and what we need from each branch.",
+      "items": [
+        { "number": "01", "label": "Where we are" },
+        { "number": "02", "label": "What changes this quarter" },
+        { "number": "03", "label": "What we need from the branches" },
+        { "number": "04", "label": "How we will measure it" },
+        { "number": "05", "label": "What comes after" }
+      ]
+    },
+    "divider_title_only": {
+      "title": "Where we are"
+    },
+    "divider_numbering": {
+      "number": "02",
+      "eyebrow": "PROGRAMME",
+      "title": "What changes this quarter"
+    },
+    "image_section_divider": {
+      "eyebrow": "PART THREE",
+      "title": "What we need from the branches"
+    },
+    "icon_columns_5": {
+      "eyebrow": "WAYS OF WORKING",
+      "title": "Five things the desk does differently",
+      "intro": "Each one removes a step the branches used to do by hand.",
+      "items": [
+        { "icon": "headset", "text": "One number for every callout, staffed through opening hours." },
+        { "icon": "technicians", "text": "Dispatch by proximity, agreed with each branch every morning." },
+        { "icon": "mobile-device", "text": "Job notes filed on the phone before the technician leaves site." },
+        { "icon": "status-monitor", "text": "A live queue the branches can see for themselves." },
+        { "icon": "report", "text": "One weekly report, the same format for all three branches." }
+      ]
+    },
+    "numbered_icon_row_6": {
+      "title": "The six steps of a callout",
+      "items": [
+        { "number": "01", "icon": "i247-call", "label": "Call arrives" },
+        { "number": "02", "icon": "checklist", "label": "Logged once" },
+        { "number": "03", "icon": "technicians", "label": "Dispatched" },
+        { "number": "04", "icon": "maintenance", "label": "Attended" },
+        { "number": "05", "icon": "mobile-device", "label": "Notes filed" },
+        { "number": "06", "icon": "check", "label": "Closed" }
+      ]
+    },
+    "lifecycle_4stage": {
+      "eyebrow": "SERVICE LIFECYCLE",
+      "title": "What happens between the call and the close",
+      "stages": [
+        { "icon": "i247-call", "heading": "Intake", "bullets": "Logged once, at the desk, in one place." },
+        { "icon": "technicians", "heading": "Dispatch", "bullets": "Nearest available technician, agreed each morning." },
+        { "icon": "maintenance", "heading": "On site", "bullets": "Parts checked against the unit's own history." },
+        { "icon": "report", "heading": "Close", "bullets": "Notes filed the same day and visible to the branch." }
+      ]
+    },
+    "how_it_works_3step": {
+      "title": "How the desk handles a callout",
+      "steps": [
+        { "number": "01", "text": "The call is logged once, by the desk." },
+        { "number": "02", "text": "Dispatch goes to the nearest available technician." },
+        { "number": "03", "text": "Notes are filed the same day and the branch can see them." }
+      ]
+    },
+    "quarterly_plan_4col": {
+      "eyebrow": "PROGRAMME PLAN",
+      "title": "Our plan across the year",
+      "intro": "Four workstreams, sequenced so that no branch changes two things at once.",
+      "columns": [
+        { "text": "Move all three branches onto the one desk." },
+        { "text": "Agree the morning dispatch routine with each branch." },
+        { "text": "Put the live queue in front of the branches." },
+        { "text": "Hand the weekly report to the branches to run." }
+      ],
+      "quarters": [
+        { "label": "Q1", "items": "All three branches on the desk" },
+        { "label": "Q2", "items": "Dispatch routine agreed" },
+        { "label": "Q3", "items": "Live queue in the branches" },
+        { "label": "Q4", "items": "Branches running their own report" }
+      ]
+    },
+    "timeline_quarter_axis": {
+      "title": "The year, quarter by quarter",
+      "lead": "Where the programme is now and what changes at each quarter.",
+      "bullets": [
+        "One desk from January",
+        "Dispatch routine from April",
+        "Branch reporting from October"
+      ],
+      "events": [
+        { "period": "Q1", "text": "All three branches on one desk." },
+        { "period": "Q2", "text": "Morning dispatch routine agreed." },
+        { "period": "Q3", "text": "Live queue visible in the branches." },
+        { "period": "Q4", "text": "Branches run the weekly report." }
+      ]
+    },
+    "matrix_2x2": {
+      "title": "What to take on next",
+      "xlabel": "EFFORT",
+      "ylabel": "IMPACT",
+      "quadrants": [
+        { "heading": "Do now", "items": "Open the live queue to all three branches." },
+        { "heading": "Plan properly", "items": "Move planned maintenance onto the same desk." },
+        { "heading": "Fill in", "items": "Tidy the archived job records." },
+        { "heading": "Reconsider", "items": "Branch-specific report formats." }
+      ]
+    },
+    "milestone_slide": {
+      "eyebrow": "PROGRAMME MILESTONE",
+      "title": "Three branches onto one desk in twelve weeks",
+      "lede": "Delivered with the branch managers, with no interruption to callouts.",
+      "stats": [
+        { "value": "12", "label": "WEEKS" },
+        { "value": "3", "label": "BRANCHES" },
+        { "value": "40", "label": "TECHNICIANS" },
+        { "value": "1", "label": "QUEUE" },
+        { "value": "0", "label": "MISSED CALLOUTS" }
+      ],
+      "scope_label": "IN SCOPE",
+      "scope": "Callouts · Dispatch · Job notes · Weekly report",
+      "next_label": "WHAT'S NEXT",
+      "next": [
+        "Planned maintenance moves onto the desk in Q2",
+        "Branch managers take over the weekly report",
+        "The live queue opens to the branches"
+      ],
+      "credits_label": "THANK YOU",
+      "credits": "The branch managers and the desk team",
+      "done": [
+        { "text": "Desk live in all three branches" },
+        { "text": "Dispatch routine agreed" },
+        { "text": "No callouts missed in the transition" }
+      ]
+    },
+    "org_functions": {
+      "title": "How the desk is staffed",
+      "functions": [
+        "Desk coordinators",
+        "Dispatch planners",
+        "Branch service managers"
+      ],
+      "diagram": ""
+    },
+    "kone_numbers": {
+      "eyebrow": "THE REGION",
+      "title": "The programme in numbers",
+      "scope_label": "BRANCHES",
+      "scope": "North · Central · Harbour",
+      "stats": [
+        { "value": "3", "label": "BRANCHES" },
+        { "value": "40", "label": "TECHNICIANS" },
+        { "value": "1", "label": "QUEUE" },
+        { "value": "12", "label": "WEEKS" },
+        { "value": "4", "label": "REVIEWS A YEAR" }
+      ]
+    },
+    "segment_breakdown": {
+      "title": "Where the work comes from",
+      "highlight_value": "60%",
+      "highlight_caption": "of callouts come from a quarter of the units",
+      "chart": "",
+      "categories": [
+        { "icon": "residence", "heading": "By building type", "items": "Residential is half the work." },
+        { "icon": "elevator", "heading": "By unit", "items": "A quarter of units generate most callouts." },
+        { "icon": "clock", "heading": "By time of day", "items": "Two morning hours carry the peak." }
+      ]
+    },
+    "chart_commentary": {
+      "eyebrow": "CALLOUT VOLUME",
+      "title": "What the first twelve weeks show",
+      "chart": "",
+      "columns": [
+        { "heading": "What improved", "bullets": "Most callouts are now attended the same day." },
+        { "heading": "What to watch", "bullets": "The morning peak still needs two coordinators." }
+      ]
+    },
+    "hero_stat": {
+      "eyebrow": "SAME-DAY RESPONSE",
+      "value": "90%",
+      "caption": "of callouts attended on the day they came in",
+      "support": "Illustrative figure from the first twelve weeks."
+    },
+    "quote_b": {
+      "title": "What the branches say",
+      "context": "A branch manager, twelve weeks in.",
+      "quote": "I stopped ringing round to find out who was going.",
+      "attribution": "BRANCH SERVICE MANAGER"
+    },
+    "credits": {
+      "eyebrow": "THANK YOU",
+      "title": "The people who moved it",
+      "note": "And every technician who worked through the change.",
+      "names": [
+        { "name": "Aino Karppinen" },
+        { "name": "Marek Dvorak" },
+        { "name": "Leena Ahonen" },
+        { "name": "Samir Haddad" },
+        { "name": "Nora Lindgren" },
+        { "name": "Diego Salas" },
+        { "name": "Priya Menon" },
+        { "name": "Tomas Bergqvist" },
+        { "name": "Hanna Voutilainen" },
+        { "name": "Kwame Osei" },
+        { "name": "Elif Demir" },
+        { "name": "Jonas Reuter" }
+      ]
+    },
+    "statement_links": {
+      "statement": "The desk works because all three branches agreed one way of logging a callout.",
+      "columns": [
+        { "heading": "Read", "links": "The programme brief" },
+        { "heading": "Sharepoint", "links": "Field services site" },
+        { "heading": "Dashboards", "links": "The live queue" }
+      ]
+    },
+    "resource_links": {
+      "title": "Where to find things",
+      "tiles": [
+        { "icon": "status-monitor", "label": "The live queue" },
+        { "icon": "report", "label": "Weekly report" },
+        { "icon": "manual", "label": "Dispatch routine" },
+        { "icon": "graduate", "label": "Desk training" }
+      ],
+      "contact": "fieldservices@kone.com"
+    },
+    "outro": {
+      "title": "Thank you",
+      "text1": "One desk, three branches, forty technicians.",
+      "text2": "Questions to the field services desk."
+    }
+  }
+}

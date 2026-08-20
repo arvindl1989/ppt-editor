@@ -488,6 +488,37 @@ def _sample_field(field, index: int):
     return _sample_word(field.key, index)
 
 
+_PLACEHOLDERS: Optional[dict] = None
+
+
+def placeholders() -> dict:
+    """Designed placeholder copy, per audience, per archetype.
+
+    Written by Claude Design against the contracts and checked against
+    them on the way in. It replaces copy I invented, which is the right
+    order: someone choosing between fifty layouts is reading this copy
+    to decide, so it is doing real work.
+
+    Also the reason a shared archetype no longer previews identically in
+    both sets -- `hero_stat` carries a programme's resolution rate
+    internally and a portfolio's availability for a customer.
+    """
+    global _PLACEHOLDERS
+    if _PLACEHOLDERS is None:
+        from pathlib import Path
+
+        path = (Path(__file__).parent / "assets" / "kone-design"
+                / "placeholders.json")
+        try:
+            import json
+
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            _PLACEHOLDERS = {k: v for k, v in raw.items() if not k.startswith("_")}
+        except Exception:  # noqa: BLE001 -- a preview must never break the page
+            _PLACEHOLDERS = {}
+    return _PLACEHOLDERS
+
+
 def _sample_from_contract(archetype_name: str) -> dict:
     """Sample content built from what the archetype says it needs.
 
@@ -532,13 +563,20 @@ def _sample_from_contract(archetype_name: str) -> dict:
     return out
 
 
-def sample_content(archetype_name: str) -> dict:
+def sample_content(archetype_name: str, audience: str = "internal") -> dict:
     """Plausible content for an archetype, for preview only.
 
-    Prefers the skill's own worked example where one exists; otherwise
-    fills each slot from its name. Never used to build a deck -- the
-    builder leaves an unfilled slot empty rather than inventing copy.
+    Designed placeholder copy first, then the skill's own worked example,
+    then the contract, then the slot names. Never used to build a deck --
+    the builder leaves an unfilled slot empty rather than inventing copy.
     """
+    designed = (placeholders().get(audience) or {}).get(archetype_name)
+    if isinstance(designed, dict) and designed:
+        return dict(designed)
+    other = "external" if audience == "internal" else "internal"
+    designed = (placeholders().get(other) or {}).get(archetype_name)
+    if isinstance(designed, dict) and designed:
+        return dict(designed)
     try:
         from deckguard.registry import (
             _derived_content_keys, _load_archetypes, _sample_agrees,

@@ -227,6 +227,12 @@ def build(plan_dict: dict, out_path: str, mined: Optional[dict] = None) -> dict:
     spec = {
         "title": plan_dict.get("title") or "Untitled deck",
         "date": plan_dict.get("date"),
+        # Carried through because the renderer needs it: `slide-sets.json`
+        # declares a field per (archetype, audience), and without the
+        # audience every slide fell back to its layout's own background.
+        # That is how a customer deck kept a sand band on `kone_numbers`
+        # where the external policy is white and blue only.
+        "audience": plan_dict.get("audience") or "",
         "slides": [dict(s) for s in plan_dict.get("slides") or []],
     }
     fill_empty_photo_slots(spec)
@@ -288,6 +294,79 @@ def _below_the_floor(shape, px) -> bool:
     return (top + height) / px > bm.FLOOR + 1
 
 
+def _ink_size(shape, width: float) -> tuple:
+    """Roughly what the text in a shape occupies, in px.
+
+    Same estimate the previews use: a sans glyph advances ~0.52em and a
+    line occupies 1.25x its size. Approximate on purpose -- it only has
+    to tell a one-line eyebrow in a tall box from a paragraph that fills
+    one.
+    """
+    used, widest = 0.0, 0.0
+    for para in shape.text_frame.paragraphs:
+        text = "".join(r.text or "" for r in para.runs).strip()
+        sizes = [r.font.size.pt for r in para.runs if r.font.size]
+        px_size = (max(sizes) if sizes else 12.0) * (1280.0 / 960.0)
+        if not text:
+            used += px_size * 1.25
+            continue
+        run = len(text) * px_size * 0.52
+        lines = max(1, int(run // width) + (1 if run % width else 0)) if width else 1
+        used += lines * px_size * 1.25
+        widest = max(widest, min(run, width))
+    return (widest or width, used or 16.0)
+
+
+def _overlaps(slide, px) -> list:
+    """Pairs of shapes that sit on top of each other.
+
+    Preflight measured one thing about position -- whether a region
+    crossed the floor -- so an icon drawn over its own heading passed
+    every check while being the most visible fault on the slide.
+    `lifecycle_4stage` had eight overlapping pairs and `text_picture_a`
+    nine, and both shipped.
+
+    Only text against text or text against a picture counts. Panels,
+    scrims, colour fields and the logo are meant to sit under things.
+    """
+    ignore = ("Chrome", "Colour field", "Logo", "Hairline", "Scrim", "Panel")
+    boxes = []
+    for shape in slide.shapes:
+        name = getattr(shape, "name", "") or ""
+        if name.startswith(ignore):
+            continue
+        if not getattr(shape, "has_text_frame", False):
+            continue
+        if not shape.text_frame.text.strip():
+            continue
+        try:
+            left, top = shape.left / px, shape.top / px
+            width, height = shape.width / px, shape.height / px
+        except (TypeError, ZeroDivisionError):
+            continue
+        if width <= 0 or height <= 0 or width > 1000 and height > 300:
+            continue
+        # Ink, not box. Boxes are drawn generously -- a divider's eyebrow
+        # sits in a 92px box holding one 12px line -- so comparing boxes
+        # reported the eyebrow as colliding with the title below it on
+        # every numbered divider in the library. What matters is whether
+        # the TEXT lands on other text.
+        ink_w, ink_h = _ink_size(shape, width)
+        boxes.append((left, top, min(width, ink_w), min(height, ink_h),
+                      " ".join(shape.text_frame.text.split())[:28]))
+
+    found = []
+    for index, one in enumerate(boxes):
+        for other in boxes[index + 1:]:
+            across = min(one[0] + one[2], other[0] + other[2]) - max(one[0], other[0])
+            down = min(one[1] + one[3], other[1] + other[3]) - max(one[1], other[1])
+            # 4px of slack: boxes are drawn to touch, and a shared edge
+            # is a layout, not a collision.
+            if across > 4 and down > 4:
+                found.append((one[4], other[4], across, down))
+    return found
+
+
 def preflight(deck_path: str) -> dict:
     """The checks from BRAND_MODE section 10 that can be read back off a
     built file. A deck that fails one is still returned -- the point is
@@ -337,6 +416,11 @@ def preflight(deck_path: str) -> dict:
                 findings.append((number, f"a region reaching y={bottom:.0f}, past the floor"))
         if logos > 1:
             findings.append((number, f"{logos} logos; there must be exactly one"))
+        if not retained:
+            for one, other, across, down in _overlaps(slide, px)[:3]:
+                findings.append((
+                    number,
+                    f"{one!r} and {other!r} overlap by {across:.0f}x{down:.0f}px"))
 
     seen, unique = set(), []
     for item in findings:

@@ -1,0 +1,121 @@
+{
+  "version": 1,
+  "note": "The deviation meter. One axis, four stops. The meter filters WHICH LAYOUTS ARE ELIGIBLE and nothing else. Colour fields, icon policy, type scale and chrome are properties of the archetype and the set, not of the stop, and do not move when the meter moves.",
+  "axis": "layout_geometry",
+  "invariants": [
+    "The meter changes the layout pool only. It never changes a colour, a type size, an icon rule or a chrome rule.",
+    "Tier is a property of the archetype (its geometry). Field colour is a property of the (archetype, audience) pair, read from slide-sets.json.",
+    "An archetype whose declared field is a secondary colour cannot be tier 1 or 2, because tiers 1-2 are external and the external field policy is white plus blue.",
+    "Pools are cumulative: stop N is eligible for every archetype of tier <= N.",
+    "Audience is inferred from the stop: stops 1-2 external, stops 3-4 internal. There is no separate audience switch.",
+    "Every stop must be able to build a complete deck: opening, at least one divider, argument slides, and a close."
+  ],
+  "stops": [
+    {
+      "n": 1,
+      "key": "master",
+      "label": "On template",
+      "help": "The master's own layouts, drawn as the master draws them.",
+      "audience": "external",
+      "tiers": [1],
+      "pool_size": 20,
+      "field_policy": "white; blue as a spot colour; photo on the full-bleed cover and the image divider",
+      "icons": "none — no external layout names an icon"
+    },
+    {
+      "n": 2,
+      "key": "slight",
+      "label": "Slight deviation",
+      "help": "Master geometry plus layouts that re-divide the master's own bands — stat rows, quote panels, step rows, tables.",
+      "audience": "external",
+      "tiers": [1, 2],
+      "pool_size": 30,
+      "field_policy": "as stop 1, plus one full blue field (quote panel) and one blue stat band",
+      "icons": "none required"
+    },
+    {
+      "n": 3,
+      "key": "moderate",
+      "label": "Moderate deviation",
+      "help": "Compositions the master does not contain, built on the master's grid: split panels, quadrants, axes, icon rows, chart-plus-commentary.",
+      "audience": "internal",
+      "tiers": [1, 2, 3],
+      "pool_size": 41,
+      "field_policy": "secondary fields allowed; max two secondary colours per slide; never yellow or mint as a full field; KONE Blue present on every slide",
+      "icons": "named pictograms required on icon_columns_5, numbered_icon_row_6, lifecycle_4stage, segment_breakdown, resource_links, picture_intro"
+    },
+    {
+      "n": 4,
+      "key": "internal",
+      "label": "Internal slide types",
+      "help": "Everything above plus the programme artefacts: the milestone announcement, the org view, the credits grid.",
+      "audience": "internal",
+      "tiers": [1, 2, 3, 4],
+      "pool_size": 44,
+      "field_policy": "as stop 3",
+      "icons": "as stop 3"
+    }
+  ],
+  "tiers": {
+    "1": "Master layout, unmodified geometry. The slide exists in master_ppt.pptx and the archetype draws into its regions.",
+    "2": "Master bands, re-divided. Same top band, same floor, same margins; the content area is split differently (a row of figures, a panel, a table, a step row).",
+    "3": "Off-master composition on the master grid. New panels, quadrants or axes. Reads as KONE because the grid, type and colour rules are untouched.",
+    "4": "Programme artefact. Restructures the slide around information a customer deck never carries: owners, names, dated commitments, internal scope."
+  },
+  "icon_rule": {
+    "statement": "Every internal column, step and row layout carries a named-icon slot resolved against the 609-name sprite. Icons are never rotated and never filled to avoid a hole.",
+    "resolution_order": [
+      "The planner names an icon in the slot.",
+      "If the slot is empty, the keyword map suggests a name from the slot's own text — surfaced to the planner, not written silently.",
+      "If nothing resolves, the slot is omitted and the row reflows. The layout must be legal with zero icons."
+    ],
+    "unknown_name": "Reject the plan for that slot and report the unknown name. Do not fall back to the rotation — a typo currently produces a pictogram nobody chose.",
+    "banned": "The cloud / people / clock / wrench / calendar cycle. Delete the rotation, do not reorder it."
+  },
+  "archetypes": {
+    "cover_a_cut4":             { "tier": 1, "sets": ["external"], "field": { "external": "white" }, "built": true },
+    "cover_b_cut3":             { "tier": 1, "sets": ["internal"], "field": { "internal": "sand" }, "built": true },
+    "cover_f_fullbleed":        { "tier": 1, "sets": ["external"], "field": { "external": "photo" }, "built": true },
+    "agenda_b_numbered":        { "tier": 1, "sets": ["external"], "field": { "external": "white" }, "built": true },
+    "divider_numbering":        { "tier": 1, "sets": ["external", "internal"], "field": { "external": "blue", "internal": "sand" }, "built": true },
+    "divider_title_only":       { "tier": 1, "sets": ["internal"], "field": { "internal": "light-blue" }, "built": true },
+    "image_section_divider":    { "tier": 1, "sets": ["external", "internal"], "field": { "external": "photo", "internal": "photo" }, "built": true },
+    "statement_a":              { "tier": 1, "sets": ["external"], "field": { "external": "white" }, "built": true },
+    "statement_b":              { "tier": 1, "sets": ["external"], "field": { "external": "white" }, "built": false },
+    "title_content":            { "tier": 1, "sets": ["external"], "field": { "external": "white" }, "built": true },
+    "title_subtitle_content_a": { "tier": 1, "sets": ["external"], "field": { "external": "white" }, "built": true },
+    "two_content":              { "tier": 1, "sets": ["external"], "field": { "external": "white" }, "built": true },
+    "two_content_narrow_title": { "tier": 1, "sets": ["external"], "field": { "external": "white" }, "built": true },
+    "three_content":            { "tier": 1, "sets": ["external"], "field": { "external": "white" }, "built": true },
+    "text_picture_a":           { "tier": 1, "sets": ["external"], "field": { "external": "white" }, "icon_slots": 4, "icons_named_in": [], "built": true },
+    "text_picture_b":           { "tier": 1, "sets": ["external"], "field": { "external": "white" }, "built": false },
+    "text_picture_g":           { "tier": 1, "sets": ["external"], "field": { "external": "photo" }, "icon_slots": 6, "icons_named_in": [], "built": true },
+    "three_pictures_text":      { "tier": 1, "sets": ["external"], "field": { "external": "white" }, "built": true },
+    "two_pictures_text_b":      { "tier": 1, "sets": ["external"], "field": { "external": "white" }, "built": false },
+    "outro":                    { "tier": 1, "sets": ["external", "internal"], "field": { "external": "white", "internal": "white" }, "built": true },
+    "picture_intro":            { "tier": 2, "sets": ["internal"], "field": { "internal": "white" }, "icon_slots": 3, "icons_named_in": ["internal"], "built": true },
+    "hero_stat":                { "tier": 2, "sets": ["external", "internal"], "field": { "external": "white", "internal": "light-blue" }, "built": true },
+    "kone_numbers":             { "tier": 2, "sets": ["external", "internal"], "field": { "external": "white", "internal": "sand" }, "built": true },
+    "quote_a":                  { "tier": 2, "sets": ["external"], "field": { "external": "blue" }, "built": true },
+    "quote_b":                  { "tier": 2, "sets": ["internal"], "field": { "internal": "pink" }, "built": true },
+    "quote_e":                  { "tier": 2, "sets": ["internal"], "field": { "internal": "light-blue" }, "built": false },
+    "how_it_works_3step":       { "tier": 2, "sets": ["external", "internal"], "field": { "external": "white", "internal": "white" }, "built": true },
+    "timeline":                 { "tier": 2, "sets": ["external"], "field": { "external": "white" }, "built": true },
+    "comparison_table":         { "tier": 2, "sets": ["external"], "field": { "external": "white" }, "built": true },
+    "value_prop_four_point":    { "tier": 2, "sets": ["external"], "field": { "external": "white" }, "built": false },
+    "agenda_c_split":           { "tier": 3, "sets": ["internal"], "field": { "internal": "mint+sand" }, "built": true },
+    "icon_columns_5":           { "tier": 3, "sets": ["internal"], "field": { "internal": "white" }, "icon_slots": 5, "icons_named_in": ["internal"], "built": true },
+    "numbered_icon_row_6":      { "tier": 3, "sets": ["internal"], "field": { "internal": "white" }, "icon_slots": 6, "icons_named_in": ["internal"], "built": true },
+    "lifecycle_4stage":         { "tier": 3, "sets": ["internal"], "field": { "internal": "white" }, "icon_slots": 4, "icons_named_in": ["internal"], "built": true },
+    "timeline_quarter_axis":    { "tier": 3, "sets": ["internal"], "field": { "internal": "white+pink" }, "built": true },
+    "quarterly_plan_4col":      { "tier": 3, "sets": ["internal"], "field": { "internal": "sand" }, "built": true },
+    "matrix_2x2":               { "tier": 3, "sets": ["internal"], "field": { "internal": "white+sand" }, "built": true },
+    "segment_breakdown":        { "tier": 3, "sets": ["internal"], "field": { "internal": "white" }, "icon_slots": 3, "icons_named_in": ["internal"], "built": true },
+    "chart_commentary":         { "tier": 3, "sets": ["internal"], "field": { "internal": "white" }, "built": true },
+    "statement_links":          { "tier": 3, "sets": ["internal"], "field": { "internal": "sand" }, "built": true },
+    "resource_links":           { "tier": 3, "sets": ["internal"], "field": { "internal": "white" }, "icon_slots": 4, "icons_named_in": ["internal"], "built": true },
+    "milestone_slide":          { "tier": 4, "sets": ["internal"], "field": { "internal": "white+sand" }, "built": true },
+    "org_functions":            { "tier": 4, "sets": ["internal"], "field": { "internal": "white" }, "built": true },
+    "credits":                  { "tier": 4, "sets": ["internal"], "field": { "internal": "white" }, "built": true }
+  }
+}
