@@ -203,6 +203,7 @@ def content_start(*, has_subtitle: bool = False, objects: bool = False) -> int:
 # --------------------------------------------------------------------------
 
 import json
+import re
 from functools import lru_cache
 from pathlib import Path
 
@@ -283,3 +284,51 @@ def wants_footer(archetype: str) -> bool:
 
 def logo_on_left(archetype: str) -> bool:
     return slide_kind(archetype) in ("cover", "divider", "outro")
+
+
+# --------------------------------------------------------------------------
+# what each slide is FOR
+# --------------------------------------------------------------------------
+
+# A planner given a bare list of 25 archetype names cannot choose between
+# `matrix_2x2` and `segment_breakdown` on merit, because a name is not a
+# reason. It falls back to the order it was given, which is why briefs
+# came out using the same first handful every time. These are the job
+# descriptions the handoff already carries: EXTERNAL_25's own `job`
+# column, and the purpose column of README's internal table.
+# re.M matters: without it `^` anchors to the start of the whole
+# document and matches exactly nothing in a table.
+_JOB_ROW = re.compile(
+    r"^\|\s*\d+\s*\|\s*`([A-Z_0-9]+)`\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|", re.M)
+
+
+@lru_cache(maxsize=1)
+def jobs() -> dict:
+    """archetype -> what it is for, per audience."""
+    out: dict = {"external": {}, "internal": {}}
+    external = (handoff_dir() / "EXTERNAL_25.md").read_text()
+    for name, job, _contract in _JOB_ROW.findall(external):
+        out["external"].setdefault(name.lower(), job)
+    # README's internal table is `| n | ARCHETYPE | purpose | treatment |`
+    readme = (handoff_dir() / "README.md").read_text()
+    internal_block = readme.split("## Internal 25", 1)[-1].split("## External 25", 1)[0]
+    for name, purpose, treatment in _JOB_ROW.findall(internal_block):
+        out["internal"].setdefault(name.lower(), f"{purpose}. {treatment}")
+    return out
+
+
+def job_for(archetype: str, audience: str) -> str:
+    table = jobs()
+    name = (archetype or "").lower()
+    return table.get(audience, {}).get(name) or table.get(
+        "external" if audience == "internal" else "internal", {}).get(name, "")
+
+
+def menu(audience: str) -> str:
+    """The audience's set as a menu a planner can choose from, rather
+    than a running order it should march down."""
+    lines = []
+    for slide in slides_in(audience):
+        job = job_for(slide["archetype"], audience)
+        lines.append(f"  {slide['archetype']}" + (f" — {job}" if job else ""))
+    return "\n".join(lines)

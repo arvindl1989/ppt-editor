@@ -294,3 +294,75 @@ def test_planner_translates_a_rate_limit_into_something_actionable():
 
     with pytest.raises(planner.PlanningError, match="rate-limited or overloaded"):
         planner._stream_final_message(_Boom(), model="m", messages=[])
+
+
+# --------------------------------------------------------------------------
+# choosing slides, not marching down the list
+# --------------------------------------------------------------------------
+
+
+def _notes_for(audience="internal"):
+    """The instruction the planner actually receives, captured without
+    calling the model."""
+    from deckguard import assemble, planner
+
+    seen = {}
+
+    def _capture(brief, **kw):
+        seen["notes"] = kw.get("notes")
+        return {"slides": [{"archetype": "title_content", "title": "x"}]}, None
+
+    original = planner.call_claude_for_kone_spec
+    planner.call_claude_for_kone_spec = _capture
+    try:
+        assemble.plan(brief="An email.", audience=audience)
+    finally:
+        planner.call_claude_for_kone_spec = original
+    return seen["notes"]
+
+
+def test_the_planner_is_given_a_menu_not_a_running_order():
+    """"Keep them in the set's order" read as "march down this list from
+    the top", and with bare names there was no other signal to go on. A
+    brief came back using the same first handful every time."""
+    notes = _notes_for("internal")
+    assert "keep them in the set's order" not in notes.lower()
+    assert "MENU, not a running order" in notes
+    assert "Reach across the whole menu" in notes
+
+
+def test_every_archetype_offered_comes_with_its_job():
+    notes = _notes_for("external")
+    from deckguard import brandmode as B
+
+    for slide in B.slides_in("external"):
+        assert f"{slide['archetype']} — " in notes, slide["archetype"]
+
+
+def test_the_planner_is_told_not_to_reuse_a_layout_or_emit_an_outro():
+    notes = _notes_for("internal")
+    assert "ONCE unless the content genuinely repeats" in notes
+    # the master's Thank you is retained, so a planned outro doubles it
+    assert "Do NOT emit an outro" in notes
+
+
+def test_variety_reports_repeats_but_forgives_dividers():
+    """A divider once per section is correct; the same content layout
+    five times is a planner that fell back on position."""
+    from deckguard import assemble
+
+    mix = assemble.variety({"slides": [
+        {"archetype": "divider_numbering"}, {"archetype": "title_content"},
+        {"archetype": "divider_numbering"}, {"archetype": "title_content"},
+        {"archetype": "title_content"}, {"archetype": "hero_stat"},
+    ]})
+    assert mix["total"] == 6 and mix["distinct"] == 3
+    assert mix["repeats"] == [("title_content", 3)], mix["repeats"]
+
+
+def test_the_result_page_shows_how_many_distinct_layouts(client):
+    r = client.post("/generate", data={
+        "audience": "internal", "title": "Probe",
+        "pick": ["internal:8", "internal:8", "internal:16"]})
+    assert "Distinct layouts" in r.text
+    assert "Reusing" in r.text, "a repeated content layout should be called out"

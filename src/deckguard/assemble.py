@@ -107,15 +107,58 @@ def _from_brief(brief: str, audience: str, chosen: list) -> list:
             + "\nDo not add, drop or reorder them."
         )
     else:
-        entries = bm.slides_in(audience)
+        # Two things made briefs come out using the same first handful
+        # every time. "Keep them in the set's order" read as "march down
+        # this list from the top". And the list was bare names -- nothing
+        # said when `matrix_2x2` beats `segment_breakdown`, so there was
+        # no merit to choose on and position was the only signal left.
         notes = (
-            f"This is a KONE {audience} deck. Choose archetypes only from this "
-            "set, and keep them in the set's order:\n"
-            + "\n".join(f"  {s['archetype']}" for s in entries)
+            f"This is a KONE {audience} deck.\n\n"
+            "Below is the menu you may choose from. It is a MENU, not a "
+            "running order: pick the archetypes that suit what the source "
+            "actually says, in whatever order tells the story best.\n\n"
+            "How to choose:\n"
+            "  - Match the slide to the CONTENT. A number that carries the "
+            "whole point wants hero_stat; three or more figures want "
+            "kone_numbers or statement_b; a comparison wants two_content or "
+            "comparison_table; a sequence wants timeline or "
+            "how_it_works_3step; someone's words want a quote.\n"
+            "  - Use an archetype ONCE unless the content genuinely repeats. "
+            "A deck that reuses one layout for five slides reads as a "
+            "template nobody chose.\n"
+            "  - Reach across the whole menu. The interesting archetypes are "
+            "in the middle and at the end, not only at the top.\n"
+            "  - Open with a cover and put a divider before each section. "
+            "Do NOT emit an outro: the master's own Thank you is retained.\n"
+            "  - Drop a slide rather than pad it. Eight slides that each say "
+            "something beat fifteen that do not.\n\n"
+            f"The {audience} menu:\n" + bm.menu(audience)
         )
     spec, _usage = call_claude_for_kone_spec(brief, notes=notes)
     slides = spec.get("slides") or []
     return slides or [{"archetype": name} for name in chosen]
+
+
+def variety(plan_dict: dict) -> dict:
+    """How many distinct archetypes the deck uses, and the worst repeat.
+
+    Reported rather than enforced. A divider repeating once per section
+    is correct; the same content layout five times is a planner that
+    fell back on position instead of choosing. Only the reader can tell
+    those apart, so show the number and let them.
+    """
+    slides = plan_dict.get("slides") or []
+    counts: dict = {}
+    for slide in slides:
+        name = slide.get("archetype", "")
+        counts[name] = counts.get(name, 0) + 1
+    repeated = [(n, c) for n, c in counts.items() if c > 1 and "divider" not in n]
+    repeated.sort(key=lambda pair: -pair[1])
+    return {
+        "distinct": len(counts),
+        "total": len(slides),
+        "repeats": repeated,
+    }
 
 
 def _title_from(brief: str) -> str:

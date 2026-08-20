@@ -157,6 +157,16 @@ def result(token: str, plan: dict, audience: str, mined: dict, checks: dict) -> 
   </div>
 </div>''')
 
+    mix = assemble.variety(plan)
+    repeat_note = ""
+    if mix["repeats"]:
+        worst = ", ".join(f"{esc(n)} &times;{c}" for n, c in mix["repeats"][:3])
+        repeat_note = (
+            f'<div class="note">Reusing {worst}. Dividers repeating is right; '
+            "a content layout repeating usually means the brief did not give it "
+            "enough to work with. Rebuild with more detail, or pick the slides "
+            "yourself below.</div>")
+
     findings = checks.get("findings") or []
     if findings:
         items = "".join(f"<li>Slide {n}: {esc(m)}</li>" for n, m in findings[:12])
@@ -187,8 +197,10 @@ def result(token: str, plan: dict, audience: str, mined: dict, checks: dict) -> 
 
 <div class="stat-row">
   <div><div class="v">{checks.get("slides", 0)}</div><div class="k">Slides</div></div>
+  <div><div class="v">{mix["distinct"]}</div><div class="k">Distinct layouts</div></div>
   <div><div class="v">{len(findings)}</div><div class="k">Preflight findings</div></div>
 </div>
+{repeat_note}
 
 <div class="actions" style="margin-bottom:26px;">
   <a class="btn" href="/download/{esc(token)}/deck.pptx">Download .pptx</a>

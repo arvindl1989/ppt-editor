@@ -138,3 +138,34 @@ def test_chrome_follows_the_kind_of_slide_not_its_name():
         assert not B.logo_on_left(content)
     # a blank takes none of it, and is not a cover either
     assert B.slide_kind("blank") == "bare" and not B.wants_footer("blank")
+
+
+# --------------------------------------------------------------------------
+# what each slide is for
+# --------------------------------------------------------------------------
+
+
+def test_every_slide_in_both_sets_carries_a_job():
+    """A planner given bare archetype names cannot choose between
+    `matrix_2x2` and `segment_breakdown` on merit, because a name is not
+    a reason -- so it falls back to the order it was given, and briefs
+    came out reusing the same first handful."""
+    for audience in B.set_names():
+        lines = B.menu(audience).splitlines()
+        assert len(lines) == 25, audience
+        without = [l for l in lines if " — " not in l]
+        assert not without, (audience, without)
+
+
+def test_a_job_says_what_the_slide_is_for(): 
+    assert "cover" in B.job_for("cover_a_cut4", "external").lower()
+    assert "numbered" in B.job_for("agenda_b_numbered", "external").lower()
+    # an archetype only in the other set still resolves rather than blanking
+    assert B.job_for("matrix_2x2", "internal")
+    assert B.job_for("not_an_archetype", "internal") == ""
+
+
+def test_the_job_table_needs_multiline_matching():
+    """`^` without re.M anchors to the start of the whole document and
+    matches nothing in a markdown table. It silently returned 0 of 50."""
+    assert B._JOB_ROW.flags & __import__("re").M
