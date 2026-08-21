@@ -1,0 +1,31 @@
+{
+  "1_input": {
+    "where": "deckguard/web.py :: generate",
+    "reads": [
+      "brief",
+      "stop (the deviation meter)",
+      "sections",
+      "picks",
+      "an uploaded .pptx"
+    ]
+  },
+  "2_plan": {
+    "where": "deckguard/assemble.py :: plan / _from_brief",
+    "does": "Builds the instruction, filters the menu to the meter's stop, and calls the model once. The model chooses the archetypes AND writes the copy in the same pass.",
+    "known_weakness": "One call does two jobs. Structure gets decided as a side effect of writing copy, which is the mechanical cause of layout repetition."
+  },
+  "3_build": {
+    "where": "deckguard/layouts.py :: build_deck / render",
+    "does": "Prepends the four-pane cut cover, draws each archetype onto its own master layout, stamps chrome, keeps the master's Thank you."
+  },
+  "4_check": {
+    "where": "deckguard/assemble.py :: preflight",
+    "checks": [
+      "type outside black/white/KONE Blue",
+      "a dash standing in for a bullet",
+      "content below the floor at y=629",
+      "overlapping text",
+      "more than one logo"
+    ]
+  }
+}
