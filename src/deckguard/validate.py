@@ -419,8 +419,13 @@ def _font_role(slides) -> list:
                             "font_role",
                             f"KONE Information not in caps: {text[:40]!r}",
                             where=f"slide {number}", slide=number))
-                    if face.startswith("Inter") and len(letters) > 3 \
-                            and text.upper() == text:
+                    # A PHRASE in caps, not a word. Single tokens in
+                    # capitals are acronyms and the deck is full of
+                    # legitimate ones -- DACH, KONE, AME, EUR, UTM, DAM,
+                    # MOD. Requiring two words is what separates
+                    # "WHAT SITS OUTSIDE SCOPE" from "DACH".
+                    if face.startswith("Inter") and text.upper() == text \
+                            and len(text.split()) > 1 and len(letters) > 3:
                         out.append(Finding(
                             "font_role", f"Inter set in caps: {text[:40]!r}",
                             where=f"slide {number}", slide=number))

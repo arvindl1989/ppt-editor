@@ -250,3 +250,90 @@ def test_casing_is_checked_in_both_directions(tmp_path):
     assert any("Comic Sans MS" in n for n in notes), notes
     # Three faults among five runs: the two correct ones are silent.
     assert len(notes) == 3, notes
+
+
+# --------------------------------------------------------------------------
+# the golden decks
+# --------------------------------------------------------------------------
+
+
+def _fixture(name: str) -> str:
+    from pathlib import Path
+
+    return str(Path(__file__).parent / "fixtures" / name)
+
+
+def test_the_before_deck_still_shows_what_the_review_found():
+    """`deck-12-before.pptx` is the deck Claude Design reviewed, kept as
+    the golden fixture their VALIDATION.md asked for.
+
+    It is not scored out of fourteen. Several of their findings are
+    plan-level -- copy that does not fit, wording lifted from the brief,
+    a list flattened into a paragraph -- and gate 1a needs the plan and
+    the brief, neither of which survives into a .pptx. What a file-only
+    gate can see, it sees.
+    """
+    from deckguard import assemble
+
+    path = _fixture("deck-12-before.pptx")
+    found = {f.check for f in V.after_build(path)}
+    preflight = [m for _n, m in assemble.preflight(path)["findings"]]
+
+    assert "chrome" in found, "page 11 on slide 12, and two different dates"
+    assert "notes_present" in found
+    assert any("bold flag" in m for m in preflight), "the Inter SemiBold bold flag"
+
+
+def test_two_of_the_reviews_findings_do_not_hold_against_the_file():
+    """Kept as a test rather than a note, because the temptation is to
+    'fix' them and the file says there is nothing to fix.
+
+    The review reports the cover as "a single unbroken band ... no mask
+    rectangles in the slide XML", and owner names set in blue Inter on
+    slide 10. Neither is true of the deck. Getting this wrong in the
+    other direction would mean rebuilding a cut cover that already
+    works, and asserting a rule that would report every correct
+    `kone_numbers` slide as a fault.
+    """
+    from pptx import Presentation
+    from pptx.enum.shapes import MSO_SHAPE_TYPE
+
+    prs = Presentation(_fixture("deck-12-before.pptx"))
+
+    masks = [sh for sh in prs.slides[0].shapes
+             if sh.shape_type == MSO_SHAPE_TYPE.AUTO_SHAPE]
+    assert len(masks) >= 3, "the cover IS cut; the review says it is not"
+
+    blue_inter = [
+        run.text for slide in prs.slides for shape in slide.shapes
+        if getattr(shape, "has_text_frame", False)
+        for para in shape.text_frame.paragraphs for run in para.runs
+        if (run.font.name or "").startswith("Inter")
+        and run.font.color is not None and run.font.color.type is not None
+        and str(run.font.color.rgb).upper() == "1450F5"
+    ]
+    assert blue_inter, "there is blue Inter, so the claim is testable"
+    assert all(text.strip().isdigit() for text in blue_inter), \
+        "every blue Inter run is a numeral, which the brand sets blue on purpose"
+
+
+def test_the_after_deck_is_clean_apart_from_the_notes():
+    """`deck-16-after.pptx` is output from the tool once the fixes
+    landed. The divider is 300px and 56px, the outro carries no stale
+    chrome, no run has a bold flag, and preflight is silent. The one
+    thing left is speaker notes, which it genuinely has none of."""
+    from deckguard import assemble
+
+    path = _fixture("deck-16-after.pptx")
+    assert not assemble.preflight(path)["findings"]
+    assert {f.check for f in V.after_build(path)} == {"notes_present"}
+
+
+def test_the_acronyms_in_the_after_deck_are_not_reported_as_caps():
+    """`DACH` tripped the Inter-in-caps rule on its first run over real
+    output. The deck is full of legitimate acronyms -- KONE, AME, EUR,
+    UTM, DAM, MOD -- and a rule that fires on them is a rule that gets
+    switched off."""
+    notes = [f.note for f in V.after_build(_fixture("deck-16-after.pptx"))
+             if f.check == "font_role"]
+    assert notes == [], notes

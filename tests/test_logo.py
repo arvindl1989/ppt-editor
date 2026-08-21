@@ -537,3 +537,47 @@ def test_every_layout_in_the_meters_pool_carries_exactly_one_logo(tmp_path):
 
     assert bare == [], f"no logo on: {bare}"
     assert doubled == [], f"more than one logo on: {doubled}"
+
+
+def test_the_cover_mark_follows_the_photograph_rather_than_assuming_it(tmp_path):
+    """The white variant was placed unconditionally, on the reasoning
+    that the first pane is a photograph. A deck then drew a pale
+    building against an overcast sky there: the slot measured 239 of
+    255 and the mark simply was not on the slide.
+
+    A photograph is not a dark background. It is whatever it is.
+    """
+    from io import BytesIO
+
+    from PIL import Image
+    from pptx import Presentation
+    from pptx.util import Emu
+
+    from deckguard import layouts as L
+
+    slot = (45, 45, 81, 31)
+
+    def cover_with(shade: int):
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        buffer = BytesIO()
+        Image.new("RGB", (640, 211), (shade, shade, shade)).save(buffer, "PNG")
+        buffer.seek(0)
+        slide.shapes.add_picture(buffer, Emu(0), Emu(0),
+                                 Emu(1280 * 9525), Emu(422 * 9525))
+        return slide
+
+    assert not L._slot_is_dark(cover_with(230)), "a pale pane needs the dark mark"
+    assert L._slot_is_dark(cover_with(30)), "a dark pane needs the white mark"
+
+
+def test_a_cover_with_no_photograph_keeps_the_white_mark(tmp_path):
+    """Every failure path falls back to the old behaviour. A mark that
+    is sometimes hard to see beats a build that raises."""
+    from pptx import Presentation
+
+    from deckguard import layouts as L
+
+    prs = Presentation()
+    bare = prs.slides.add_slide(prs.slide_layouts[6])
+    assert L._slot_is_dark(bare) is True

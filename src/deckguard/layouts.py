@@ -3630,6 +3630,63 @@ def _card_arrow(slide, engine, spot: dict) -> bool:
     return True
 
 
+def _slot_is_dark(slide, box=(45, 45, 81, 31), threshold: int = 150) -> bool:
+    """Whether the picture under a box is dark enough for a white mark.
+
+    Read off the photograph's own pixels. The alternative -- assuming a
+    photo is dark because photos usually are -- is what put a white KONE
+    mark on a pale building against an overcast sky, where the slot
+    averages 239 of 255 and the logo simply is not there.
+
+    Falls back to True (white, the old behaviour) whenever it cannot
+    tell: no picture, no Pillow, an unreadable blob. A mark that is
+    sometimes hard to see beats a build that fails.
+    """
+    try:
+        from io import BytesIO
+
+        from PIL import Image
+        from pptx.enum.shapes import MSO_SHAPE_TYPE
+    except ImportError:
+        return True
+
+    x, y, w, h = box
+    pictures = [sh for sh in slide.shapes
+                if sh.shape_type == MSO_SHAPE_TYPE.PICTURE
+                and sh.left is not None and sh.width and sh.height]
+    under = [sh for sh in pictures
+             if sh.left / 9525 <= x and sh.top / 9525 <= y
+             and (sh.left + sh.width) / 9525 >= x + w
+             and (sh.top + sh.height) / 9525 >= y + h]
+    if not under:
+        return True
+    # The largest, which is the banner rather than a mark already placed.
+    banner = max(under, key=lambda sh: sh.width * sh.height)
+
+    try:
+        image = Image.open(BytesIO(banner.image.blob)).convert("L")
+    except Exception:  # noqa: BLE001 -- an unreadable picture is not fatal
+        return True
+
+    left, top = banner.left / 9525, banner.top / 9525
+    scale_x = image.width / (banner.width / 9525)
+    scale_y = image.height / (banner.height / 9525)
+    region = (int((x - left) * scale_x), int((y - top) * scale_y),
+              int((x + w - left) * scale_x), int((y + h - top) * scale_y))
+    region = (max(0, region[0]), max(0, region[1]),
+              min(image.width, max(region[0] + 1, region[2])),
+              min(image.height, max(region[1] + 1, region[3])))
+    try:
+        patch = image.crop(region)
+        read = getattr(patch, "get_flattened_data", patch.getdata)
+        pixels = list(read())
+    except Exception:  # noqa: BLE001
+        return True
+    if not pixels:
+        return True
+    return (sum(pixels) / len(pixels)) < threshold
+
+
 def _card(x, y, w, h, accent: str) -> dict:
     """One card of the grid, as the reference draws it.
 
@@ -3732,8 +3789,12 @@ def _cover_marks(slide, engine, cut: dict) -> None:
     The reference cover has both, and a cover with no KONE mark on it is
     not a KONE cover, so they are placed here rather than inherited.
 
-    White logo, because it sits at 45,45 on the first pane and the first
-    pane is a photograph.
+    The variant is chosen by looking at the photograph rather than by
+    assuming one. It used to be white unconditionally -- "it sits on the
+    first pane and the first pane is a photograph" -- which held until a
+    deck drew a pale building against an overcast sky there and the mark
+    disappeared. Measured on that render, the slot averages 239 of 255.
+    A photograph is not a dark background; it is whatever it is.
     """
     from deckguard.logo import _boxes_overlap, _brand_asset
 
@@ -3769,6 +3830,6 @@ def _cover_marks(slide, engine, cut: dict) -> None:
             mark = slide.shapes.add_picture(path, *(engine.X(v) for v in box))
             mark.name = label
 
-    place("Logo", "logo", True, (45, 45, 81, 31))
+    place("Logo", "logo", _slot_is_dark(slide, (45, 45, 81, 31)), (45, 45, 81, 31))
     # Bottom-right, clear of the cut band and of the footer line.
     place("Tagline", "tagline", False, (1102, 633, 133, 45))
