@@ -719,3 +719,34 @@ def test_the_golden_deck_still_shows_the_defect_preflight_was_taught_to_find():
     assert not [m for _n, m in findings if "bold flag" in m]
     assert not [m for _n, m in findings if "Inter set in KONE Blue" in m]
     assert not [m for _n, m in findings if "dash standing in" in m]
+
+
+def test_the_brand_checks_can_be_switched_off_from_the_page(client):
+    """One checkbox, on by default, and it survives an edit.
+
+    On by default because the checks are report-only: the worst they do
+    is tell you something you can ignore, and a fault you cannot see is
+    the state the tool was already in.
+    """
+    home = client.get("/")
+    assert 'name="validate"' in home.text and "checked" in home.text
+
+    on = client.post("/generate", data={
+        "audience": "internal", "pick": ["internal:8"], "validate": "on"})
+    assert "Brand checks" in on.text
+    assert "switched off" not in on.text
+
+    off = client.post("/generate", data={
+        "audience": "internal", "pick": ["internal:8"]})
+    assert "switched off" in off.text
+    # and the deck is still there either way
+    assert _token(off.text) and _token(on.text)
+
+
+def test_switching_the_checks_off_does_not_switch_preflight_off(client):
+    """They are different gates. Preflight reads the built file and has
+    caught its own author twice; the box only governs the assertions
+    added on top of it."""
+    off = client.post("/generate", data={
+        "audience": "internal", "pick": ["internal:8"]})
+    assert "Preflight" in off.text

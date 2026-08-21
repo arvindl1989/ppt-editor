@@ -136,6 +136,9 @@ async def generate(request: Request, _auth: None = Depends(_require_auth)):
         stop = meter.DEFAULT_STOP
     audience = str(form.get("audience") or meter.audience_for_stop(stop)).strip()
     title = str(form.get("title") or "").strip()
+    # Checked by default: the checks are report-only, and a fault you
+    # cannot see is the state the tool was already in.
+    validating = form.get("validate") is not None
     picks = [p for p in form.getlist("pick") if p]
     sections = [s for s in form.getlist("section") if s]
     upload = form.get("deck")
@@ -179,11 +182,14 @@ async def generate(request: Request, _auth: None = Depends(_require_auth)):
             ui.page("Deck builder", screens.home(error=f"Planning failed: {exc}")),
             status_code=400)
 
-    _save_session(token, {"plan": plan, "audience": audience, "mined": mined})
-    return await _build_and_show(token, plan, audience, mined)
+    _save_session(token, {"plan": plan, "audience": audience, "mined": mined,
+                          "brief": brief, "validate": validating})
+    return await _build_and_show(token, plan, audience, mined,
+                                 brief=brief, validating=validating)
 
 
-async def _build_and_show(token: str, plan: dict, audience: str, mined: dict) -> HTMLResponse:
+async def _build_and_show(token: str, plan: dict, audience: str, mined: dict,
+                          *, brief: str = "", validating: bool = True) -> HTMLResponse:
     from deckguard import assemble
 
     out = STORAGE_ROOT / token / "deck.pptx"
@@ -193,7 +199,23 @@ async def _build_and_show(token: str, plan: dict, audience: str, mined: dict) ->
         return HTMLResponse(
             ui.page("Deck builder", screens.home(error=f"Building failed: {exc}")),
             status_code=500)
-    body = screens.result(token, plan, audience, mined, checks)
+
+    # Gate 1, both phases. Run after the build rather than before it so a
+    # failing check never costs the user their deck -- every check ships
+    # at `report`, and the file is returned either way.
+    gate: list = []
+    if validating:
+        from deckguard import validate as V
+
+        try:
+            gate = V.before_build(plan, brief) + V.after_build(str(out))
+        except Exception as exc:  # noqa: BLE001 -- a broken check is not a broken deck
+            gate = []
+            checks.setdefault("findings", []).append(
+                (0, f"validation did not run: {type(exc).__name__}: {exc}"))
+
+    body = screens.result(token, plan, audience, mined, checks, gate=gate,
+                          validating=validating)
     return HTMLResponse(ui.page("Your deck", body))
 
 
@@ -210,7 +232,14 @@ async def rebuild(token: str, request: Request, _auth: None = Depends(_require_a
     plan = assemble.apply_edits(session["plan"], form)
     session["plan"] = plan
     _save_session(token, session)
-    return await _build_and_show(token, plan, session["audience"], session.get("mined") or {})
+    return await _build_and_show(
+        token, plan, session["audience"], session.get("mined") or {},
+        brief=str(session.get("brief") or ""),
+        # The result page carries the checkbox too, so an edit can turn
+        # validation on or off; the session is the default when it does
+        # not, which is what an older form post sends.
+        validating=(form.get("validate") is not None if "validate" in form
+                    else bool(session.get("validate", True))))
 
 
 @app.get("/download/{token}/{filename}")

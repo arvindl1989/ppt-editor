@@ -107,6 +107,12 @@ button:disabled {{ opacity: .45; cursor: not-allowed; }}
 .chip:has(input:checked) {{ border-color: var(--blue); background: var(--light-blue); }}
 .chip:hover {{ border-color: var(--black); }}
 
+/* A plain labelled checkbox, for a setting rather than a choice from a
+   set -- so no chip border, and the label reads as a sentence. */
+.check {{ display: inline-flex; align-items: center; gap: 9px;
+  cursor: pointer; font-size: 15px; }}
+.check input {{ accent-color: var(--blue); margin: 0; width: 16px; height: 16px; }}
+
 .seg {{ display: flex; gap: 0; border: 1px solid var(--hairline); width: fit-content; }}
 .seg label {{ padding: 9px 18px; cursor: pointer; font-size: 15px; }}
 .seg input {{ position: absolute; opacity: 0; pointer-events: none; }}

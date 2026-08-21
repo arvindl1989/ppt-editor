@@ -146,6 +146,13 @@ sentence about what the deck is for."></textarea>
         <span class="label">Your own deck</span>
         <input type="file" name="deck" accept=".pptx">
       </div>
+      <div class="field">
+        <label class="check"><input type="checkbox" name="validate" checked>
+          Check the deck against the brand rules</label>
+        <p class="hint">Reports copy that will not fit, wording lifted
+          straight from the brief, and type off the scale. Never blocks
+          the download.</p>
+      </div>
       <div class="actions">
         <button type="submit">Build the deck</button>
       </div>
@@ -195,7 +202,8 @@ def _slot_field(index: int, key: str, hint: str, value) -> str:
             f'<input type="text" id="{name}" name="{name}" value="{esc(value or "")}"></div>')
 
 
-def result(token: str, plan: dict, audience: str, mined: dict, checks: dict) -> str:
+def result(token: str, plan: dict, audience: str, mined: dict, checks: dict,
+           gate: list = (), validating: bool = True) -> str:
     from deckguard.preview import archetype_preview_html
 
     slides = plan.get("slides") or []
@@ -238,6 +246,38 @@ def result(token: str, plan: dict, audience: str, mined: dict, checks: dict) -> 
         preflight = ('<div class="note">Preflight clean — nothing but black, white and '
                      'KONE Blue, one logo a slide, real bullets, everything above the floor.</div>')
 
+    # Gate 1, grouped by check rather than by slide. A reader wants to
+    # know "is any copy lifted from the brief", not to walk eleven
+    # slides looking for the pattern themselves.
+    if not validating:
+        gate_note = ('<div class="note">Brand checks were switched off for this '
+                     'build. Tick the box to run them.</div>')
+    elif gate:
+        by_check: dict = {}
+        for finding in gate:
+            by_check.setdefault(finding.check, []).append(finding)
+        blocks = []
+        for check, found in sorted(by_check.items(), key=lambda kv: -len(kv[1])):
+            lines = "".join(f"<li>{esc(f.as_line())}</li>" for f in found[:6])
+            extra = (f"<li class='hint'>and {len(found) - 6} more</li>"
+                     if len(found) > 6 else "")
+            blocks.append(f"<p><b>{esc(check)}</b> &middot; {len(found)}</p>"
+                          f"<ul>{lines}{extra}</ul>")
+        # Red only when something is actually configured to stop a
+        # build. Every check ships at `report`, so painting the panel as
+        # an alarm for "no speaker notes" is how a panel gets dismissed
+        # unread -- and then the one that matters is dismissed with it.
+        from deckguard import validate as V
+
+        loud = " bad" if V.worst(gate) != V.REPORT else ""
+        gate_note = (f'<div class="note{loud}"><b>Brand checks found '
+                     f'{len(gate)}</b>{"".join(blocks)}'
+                     '<p class="hint">Reported, not blocked — the deck above is '
+                     'yours either way.</p></div>')
+    else:
+        gate_note = ('<div class="note">Brand checks clean — copy fits its slots, '
+                     'nothing lifted from the brief, type on the scale.</div>')
+
     mined_note = ""
     templates = (mined or {}).get("archetypes") or {}
     if templates:
@@ -259,6 +299,8 @@ def result(token: str, plan: dict, audience: str, mined: dict, checks: dict) -> 
   <div><div class="v">{checks.get("slides", 0)}</div><div class="k">Slides</div></div>
   <div><div class="v">{mix["distinct"]}</div><div class="k">Distinct layouts</div></div>
   <div><div class="v">{len(findings)}</div><div class="k">Preflight findings</div></div>
+  <div><div class="v">{len(gate) if validating else "&mdash;"}</div>
+    <div class="k">Brand checks</div></div>
 </div>
 {repeat_note}
 
@@ -269,8 +311,12 @@ def result(token: str, plan: dict, audience: str, mined: dict, checks: dict) -> 
 
 {mined_note}
 {preflight}
+{gate_note}
 
 <form method="post" action="/rebuild/{esc(token)}">
+  <label class="check" style="margin-bottom:18px;display:block;">
+    <input type="checkbox" name="validate"{" checked" if validating else ""}>
+    Check the deck against the brand rules</label>
   {"".join(rows)}
   <div class="actions" style="margin-top:24px;">
     <button type="submit">Apply changes and rebuild</button>
