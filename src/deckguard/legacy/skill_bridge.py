@@ -820,11 +820,13 @@ def _chunk_slide(title: Optional[str], text_blocks: list) -> tuple:
 
 def _fit_content(signature: dict, title: Optional[str], chunks: list, values: list, image_count: int) -> dict:
     """Pour the slide's own words into this archetype's slots."""
+    from deckguard import brandmode as bm
+
     content: dict = {"archetype": signature["name"]}
     spare = [c for c in chunks]
 
     for role, key in signature["regions"]:
-        if role in ("title", "title_light", "statement", "quote"):
+        if bm.is_headline(role):
             content[key] = title or (spare[0]["heading"] if spare else "")
         elif role in _VALUE_ROLES:
             content[key] = values[0] if values else (spare[0]["heading"] if spare else "")

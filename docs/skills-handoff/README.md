@@ -58,5 +58,5 @@ The problem is underneath all three.
   built and refined but had no tier; they were given one rather than
   dropped.
 
-Net: 83 baked regions to 64, 29% of the library to 24%,
-25 disagreements to 17.
+Net: 83 baked regions to 62, 29% of the library to 23%,
+25 disagreements to 15.

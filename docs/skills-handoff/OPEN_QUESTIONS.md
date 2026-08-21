@@ -2,9 +2,9 @@
 
 ## 1. Do the baked type blocks go, or get blessed?
 
-Answered for one archetype, still open for the rest. 64 regions
-remain, 24% of the library. Removing them makes the brand the
-single authority and changes 17 slides. Keeping them
+Answered for one archetype, still open for the rest. 62 regions
+remain, 23% of the library. Removing them makes the brand the
+single authority and changes 15 slides. Keeping them
 means `BRAND_MODE.md` is advisory for a fifth of the deck, which makes
 the contract layer a half-truth.
 

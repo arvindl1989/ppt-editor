@@ -2,10 +2,10 @@
 
 ## The measurement
 
-    64 regions carry a BAKED type block
-    202 regions resolve through a brand role
-    24% of the library bypasses BRAND_MODE entirely
-    17 of the 64 disagree with the brand for a slot of that name
+    62 regions carry a BAKED type block
+    204 regions resolve through a brand role
+    23% of the library bypasses BRAND_MODE entirely
+    15 of the 62 disagree with the brand for a slot of that name
 
 A region either says
 
@@ -19,7 +19,7 @@ or
 The second form came from porting an HTML archetype gallery: the parser
 read the RENDERED type off each element and wrote it down. That was the
 right thing to do at the time -- it is how the layouts got built at all
--- but it means those 64 regions are immune to the brand. Change
+-- but it means those 62 regions are immune to the brand. Change
 `TYPE_SCALE` and they do not move. Add a role and they cannot use it.
 
 ## Why it showed on the divider first -- and what happened next
@@ -88,9 +88,9 @@ reverses to white, which now works. Worth a designer's ruling.
 
 ## What remains
 
-1. **64 regions still carry a `dg` block.** Same treatment:
+1. **62 regions still carry a `dg` block.** Same treatment:
    name the role, delete the block, look at the render.
-2. **17 disagreements are a migration, not a rewrite.**
+2. **15 disagreements are a migration, not a rewrite.**
    Listed in `type-audit.json` with both values, so each is a decision
    rather than a guess.
 

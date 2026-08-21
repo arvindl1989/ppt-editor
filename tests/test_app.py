@@ -184,6 +184,51 @@ def test_preflight_still_catches_a_real_violation(tmp_path):
     assert any("dash standing in for a bullet" in m for _n, m in findings), findings
 
 
+def test_preflight_catches_blue_inter_and_a_bold_flag_but_not_a_blue_figure(tmp_path):
+    """Two rules from a review of real output, and the exception that
+    makes them safe to assert.
+
+    "Inter is never blue" is how the rule gets quoted, and taken
+    literally it is wrong: BRAND_MODE states it under *headlines and
+    body*, then sets `stat_value` in `#1450F5` on purpose so a figure
+    reads as the number rather than the pair. A blanket assertion would
+    report every correct `kone_numbers` slide as a defect, which is the
+    fastest way to get a check switched off.
+
+    Weight is the other one: it comes from the SemiBold family, never
+    from a bold flag on top of it.
+    """
+    from pptx import Presentation
+    from pptx.dml.color import RGBColor
+    from pptx.util import Emu, Pt
+
+    from deckguard import assemble
+
+    out = tmp_path / "type.pptx"
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+
+    def run(top, text, face, colour, bold=False):
+        box = slide.shapes.add_textbox(Emu(400000), Emu(top), Emu(4000000), Emu(400000))
+        piece = box.text_frame.paragraphs[0].add_run()
+        piece.text = text
+        piece.font.name, piece.font.bold = face, bold
+        piece.font.size = Pt(14)
+        piece.font.color.rgb = RGBColor.from_string(colour)
+
+    run(400000, "Ajith Kumar", "Inter", "1450F5")                       # fault
+    run(1000000, "Workstream heading", "Inter SemiBold", "141414", True)  # fault
+    run(1600000, "70%", "Inter", "1450F5")                              # correct
+    run(2200000, "SCOPE", "KONE Information", "1450F5")                 # correct
+    prs.save(str(out))
+
+    findings = [m for _n, m in assemble.preflight(str(out))["findings"]]
+    assert any("Inter set in KONE Blue" in m and "Ajith" in m for m in findings), findings
+    assert any("bold flag" in m for m in findings), findings
+    assert not any("70%" in m for m in findings), "a blue stat figure is the brand's own"
+    assert not any("SCOPE" in m for m in findings), "KONE Information may be blue"
+
+
 # --------------------------------------------------------------------------
 # the brief path
 # --------------------------------------------------------------------------
@@ -595,7 +640,51 @@ def test_the_quote_slide_sets_its_quote_in_quote_type():
     the attribution under it looked exactly the same."""
     from deckguard.registry import _load_archetypes
 
+    from deckguard import brandmode as bm
+
     regions = {r["content"]: r for r in _load_archetypes().ARCHETYPES["quote_b"]["regions"]}
-    assert regions["quote"]["role"] == "quote"
+    # The role is now SETTLED at install rather than left for a draw-time
+    # lookup that never passed a width -- so this is `quote_lg`, not the
+    # unsized `quote`. Asserted through the brand rather than as a
+    # literal, because the name is a consequence of the panel's width:
+    # 657px is over the 600px threshold, so the quote takes 30px.
+    quote = bm.resolve(regions["quote"]["role"])
+    assert quote and quote["px"] == 30, regions["quote"]["role"]
+    assert regions["quote"]["role"].startswith("quote")
     assert regions["attribution"]["role"] == "attribution"
     assert "body2" not in regions and "body3" not in regions
+
+
+def test_a_cover_title_is_never_cut_mid_word():
+    """A review of real output found the cover of a finished deck
+    reading "...ONE Week MOD deployment with you reg" -- the brief's
+    first line hard-cut at 70 characters and set at 76px.
+
+    A character count is the wrong instrument for a headline. What
+    replaces it is still a heuristic, and only runs when neither the
+    user nor the planner supplied a title, but it never breaks a word.
+    """
+    from deckguard.assemble import TITLE_MAX, _title_from
+
+    lines = [
+        "I would like to share our plan of ONE Week MOD deployment with you "
+        "regarding the September launch",
+        "Subject: ONE Week MOD deployment",
+        "Q3 results, EMEA and APAC, with commentary on the service business",
+        "Short one",
+        "A" * 120 + " tail",
+        "",
+    ]
+    for line in lines:
+        title = _title_from(line)
+        if not title:
+            continue
+        # Every word in the result is a word that was in the source: a
+        # mid-word cut would leave a fragment that is not.
+        source = set(line.split())
+        assert all(word in source for word in title.split()), (line, title)
+        assert title == title.strip()
+
+    long = _title_from(lines[0])
+    assert len(long) <= TITLE_MAX
+    assert not long.endswith((" with", " of", " the", " to"))

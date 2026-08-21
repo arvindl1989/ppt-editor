@@ -1,9 +1,9 @@
 {
   "generated": "2026-08-21",
-  "regions_with_baked_type": 64,
-  "regions_resolved_through_a_role": 202,
-  "percent_bypassing_brand_mode": 24,
-  "disagreements": 17,
+  "regions_with_baked_type": 62,
+  "regions_resolved_through_a_role": 204,
+  "percent_bypassing_brand_mode": 23,
+  "disagreements": 15,
   "rows": [
     {
       "archetype": "agenda_a_table",
@@ -94,22 +94,6 @@
         "px": 12,
         "font": "KONE Information",
         "caps": true
-      },
-      "disagrees": true
-    },
-    {
-      "archetype": "agenda_c_split",
-      "slot": "title",
-      "baked": {
-        "px": 40,
-        "font": "Inter",
-        "caps": false,
-        "color": "141414"
-      },
-      "brand_for_that_slot_name": {
-        "px": 32,
-        "font": "Inter",
-        "caps": false
       },
       "disagrees": true
     },
@@ -676,22 +660,6 @@
       },
       "brand_for_that_slot_name": null,
       "disagrees": false
-    },
-    {
-      "archetype": "timeline_quarter_axis",
-      "slot": "title",
-      "baked": {
-        "px": 40,
-        "font": "Inter",
-        "caps": false,
-        "color": "141414"
-      },
-      "brand_for_that_slot_name": {
-        "px": 32,
-        "font": "Inter",
-        "caps": false
-      },
-      "disagrees": true
     },
     {
       "archetype": "timeline_quarter_axis",

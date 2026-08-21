@@ -202,6 +202,25 @@ def canonical(role: str) -> str:
     return RETIRED_ROLES.get(role, role)
 
 
+# The roles that carry the one line a slide is ABOUT. Callers used to
+# spell this as a literal tuple -- `("title", "title_light", "statement",
+# "quote")` -- and every role added to the scale since has silently
+# fallen out of it: `title_narrow` stopped a matched slide getting its
+# own title, and `divider_title` and `quote_lg` would have followed.
+# Held here so there is one list to keep, next to the scale it describes.
+HEADLINE_ROLES = frozenset({
+    "cover_title", "cover_title_light", "outro_title", "outro_title_light",
+    "divider_title", "divider_title_light", "display", "statement",
+    "title", "title_light", "title_narrow",
+    "quote", "quote_lg", "quote_sm", "quote_light",
+})
+
+
+def is_headline(role: str) -> bool:
+    """Whether a role is the line the slide is about."""
+    return canonical(str(role or "")) in HEADLINE_ROLES
+
+
 def resolve(
     role: str,
     *,

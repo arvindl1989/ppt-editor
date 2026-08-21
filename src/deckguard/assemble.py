@@ -227,12 +227,50 @@ def variety(plan_dict: dict) -> dict:
     }
 
 
+TITLE_MAX = 70
+
+
 def _title_from(brief: str) -> str:
+    """A cover title from the brief's first line, when nothing else
+    supplies one.
+
+    This used to end in `text[:70]`, and a pasted email opening
+    ("I would like to share our plan of ONE Week MOD deployment with you
+    regarding...") came out cut mid-word at 69 characters, set at 76px
+    across the cover of a finished deck.
+
+    A character count is the wrong instrument for a headline. What is
+    left is still a heuristic -- the planner writing three or four
+    deliberate words is the real answer, and this only runs when there
+    is no planner and no title from the user -- but it never breaks a
+    word, and it prefers a clause boundary over a word boundary because
+    the first clause of a sentence is usually the subject of it.
+    """
     line = (brief or "").strip().splitlines()[:1]
     if not line:
         return ""
     text = re.sub(r"^(subject|re|fwd)\s*:\s*", "", line[0], flags=re.I).strip()
-    return text[:70]
+    if len(text) <= TITLE_MAX:
+        return text
+
+    clause = re.split(r"\s+[-–—]\s+|[,;:]\s+", text)[0].strip()
+    if clause and len(clause) <= TITLE_MAX:
+        return clause
+    # No usable clause: accumulate whole words while they fit, then drop
+    # a trailing preposition or article so the title does not end
+    # mid-thought. Accumulating rather than slicing-then-dropping,
+    # because a single over-long word leaves the slice with nothing to
+    # drop and returned the empty string.
+    words: list[str] = []
+    for word in text.split():
+        if words and len(" ".join(words)) + 1 + len(word) > TITLE_MAX:
+            break
+        words.append(word)
+    while len(words) > 1 and words[-1].lower() in (
+            "a", "an", "the", "of", "to", "for", "with", "in", "on", "and",
+            "or", "at", "by", "from", "that", "which", "our", "your"):
+        words.pop()
+    return " ".join(words)
 
 
 def bm_date() -> str:
@@ -399,6 +437,27 @@ def _overlaps(slide, px) -> list:
     return found
 
 
+def _inter_in_blue(face: str, colour, text: str) -> bool:
+    """Inter set in KONE Blue, excluding the figures the brand puts there.
+
+    "Inter is never blue" is the rule as usually quoted, and taken
+    literally it is wrong: BRAND_MODE states it under *Inter -- headlines
+    and body*, and its KONE-numbers section sets `stat_value` and
+    `stat_value_md` in `#1450F5` on purpose, so the figure reads as the
+    number rather than the pair. Asserting the blanket rule would report
+    every correctly-built `kone_numbers` slide as a defect.
+
+    A figure is what is being excluded, so a figure is what is tested
+    for -- digits, with the punctuation a stat carries. Words in blue
+    Inter are the fault: an owner's name, a heading, a sentence.
+    """
+    if not face.startswith("Inter") or not colour:
+        return False
+    if str(colour).upper() != bm.BLUE:
+        return False
+    return not re.fullmatch(r"[\d\s.,:+%×x/–-]+", text.strip() or " ")
+
+
 def preflight(deck_path: str) -> dict:
     """The checks from BRAND_MODE section 10 that can be read back off a
     built file. A deck that fails one is still returned -- the point is
@@ -441,6 +500,15 @@ def preflight(deck_path: str) -> dict:
                     if colour and colour.upper() not in allowed:
                         findings.append((number, f"type in #{colour}, which is not "
                                                  "black, white or KONE Blue"))
+                    face = (run.font.name or "").strip()
+                    if _inter_in_blue(face, colour, text):
+                        findings.append((
+                            number,
+                            f"{face} set in KONE Blue: {text.strip()[:40]!r}"))
+                    if face.startswith("Inter") and run.font.bold:
+                        findings.append((
+                            number,
+                            f"a bold flag on {face}; weight comes from the family"))
                     if _is_dash_marker(text, after):
                         findings.append((number, "a dash standing in for a bullet"))
             if not retained and _below_the_floor(shape, px):

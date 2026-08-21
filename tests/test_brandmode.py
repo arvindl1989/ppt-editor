@@ -169,3 +169,70 @@ def test_the_job_table_needs_multiline_matching():
     """`^` without re.M anchors to the start of the whole document and
     matches nothing in a markdown table. It silently returned 0 of 50."""
     assert B._JOB_ROW.flags & __import__("re").M
+
+
+def test_a_title_in_a_narrow_column_is_settled_at_install():
+    """The width-dependent roles have to be applied where the box is
+    known, and the render path is not that place.
+
+    `resolve()` takes a width and swaps `title` for `title_narrow` at
+    374px. Nothing ever passed one: the engine looks a role up in
+    `ROLE_STYLE`, a plain dict with no notion of a box. So a 40px title
+    sat in a 330px column and wrapped to four lines.
+
+    The trap is that migrating such a region off baked type does not fix
+    it by itself -- it would resolve through the brand and still come
+    back 32px. This is the pass that closes it.
+    """
+    from deckguard import brandmode as bm
+    from deckguard.registry import _load_archetypes
+
+    registry = _load_archetypes().ARCHETYPES
+    for name in ("agenda_c_split", "timeline_quarter_axis"):
+        title = next(r for r in registry[name]["regions"]
+                     if r.get("content") == "title")
+        assert "dg" not in title, f"{name} went back to baked type"
+        assert title["role"] == "title_narrow", (name, title["role"])
+        assert title["box"][2] <= bm.NARROW_TITLE_MAX
+
+    # And nothing wide was dragged along with them.
+    for name, spec in registry.items():
+        if not isinstance(spec, dict):
+            continue
+        for region in spec.get("regions") or []:
+            if region.get("role") == "title_narrow":
+                assert region["box"][2] <= bm.NARROW_TITLE_MAX, name
+
+
+def test_every_headline_sized_role_is_known_to_be_a_headline():
+    """`HEADLINE_ROLES` replaced a literal tuple that had gone stale
+    three roles ago, so the thing worth testing is that it does not go
+    stale again.
+
+    Any Inter role at 30px or more is carrying the line a slide is
+    about; the small stuff is body, labels and captions. If a new
+    display role is added to the scale and not to the set, the matcher
+    silently stops giving that archetype its own title -- which is how
+    `title_narrow` was found.
+    """
+    from deckguard import brandmode as bm
+
+    for role, (font, px, *_rest) in bm.TYPE_SCALE.items():
+        if font == bm.INTER and px >= 30 and "stat" not in role \
+                and role not in ("figure", "section_numeral",
+                                 "section_numeral_light", "hero_value", "price"):
+            assert bm.is_headline(role), f"{role} at {px}px is not in HEADLINE_ROLES"
+
+    # And every name in the set is one something can actually draw. Two
+    # are not scale entries: `quote` is an alias `resolve()` sizes to its
+    # panel, and `quote_light` is registered straight into the engine by
+    # `_add_light_roles`. A name in neither place would silently draw
+    # nothing.
+    from deckguard.registry import _load_archetypes
+
+    engine_roles = set(_load_archetypes().E.ROLE_STYLE)
+    for role in bm.HEADLINE_ROLES:
+        settled = bm.resolve(role)
+        assert settled or role in engine_roles, f"{role} resolves to nothing"
+        if settled:
+            assert settled["px"] >= 24, (role, settled["px"])

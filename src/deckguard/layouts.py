@@ -1892,7 +1892,10 @@ _RESPEC: dict[str, dict] = {
                   + [{"box": [510, y, 725, 96], "fill": "F3EEEA"}
                      for y in (91, 201, 311, 421, 531)],
         "regions": [
-            _text(45, 91, 330, 150, "title", 40),
+            # Migrated off baked type. At 330px wide the brand gives
+            # this `title_narrow` (28px); it was baked at 40 and wrapped
+            # to four lines in the mint column.
+            {"role": "title", "box": [45, 91, 330, 150], "content": "title"},
             _text(45, 260, 330, 160, "lead", 16),
         ],
         "groups": [{
@@ -1919,7 +1922,9 @@ _RESPEC: dict[str, dict] = {
         ] + [{"box": [x, 306, 6, 40], "fill": "1450F5"}
              for x in (465, 663, 861, 1059)],
         "regions": [
-            _text(45, 91, 374, 104, "title", 40),
+            # Migrated off baked type: 374px is exactly the narrow-title
+            # threshold, so the brand sets this at 28px rather than 40.
+            {"role": "title", "box": [45, 91, 374, 104], "content": "title"},
             _text(69, 274, 326, 60, "lead", 17),
             _bullets(69, 350, 326, 255, "bullets", 16),
         ],
@@ -2082,7 +2087,33 @@ def _register_brand_roles(archetypes_module) -> list:
         font, px, _weight, _lead, _track, colour, caps = entry
         styles[role] = (font, px, RGBColor.from_string(colour), caps, False, False)
         added.append(role)
+    _clear_synthetic_weight(styles)
     return sorted(added)
+
+
+def _clear_synthetic_weight(styles: dict) -> int:
+    """Take the bold flag off every Inter role.
+
+    BRAND_MODE is explicit that weight comes from the FAMILY: Inter is
+    400 everywhere except `heading`, which is the one SemiBold role in
+    the system. Four engine roles set the SemiBold family AND `b="1"`,
+    so the renderer synthesises weight on top of a face that already has
+    it -- a smeared double-bold that is not a weight the brand owns.
+
+    `heading`, `on_panel_heading` and `heading_light` lose nothing: they
+    keep the SemiBold family and simply stop being emboldened twice.
+    `label` is plain Inter and does lose weight, correctly -- a bold
+    flag on regular Inter is the same fault in its purer form.
+
+    Returns how many roles were corrected.
+    """
+    fixed = 0
+    for role, entry in list(styles.items()):
+        font, px, colour, caps, bold, fit = entry
+        if bold and str(font).startswith("Inter"):
+            styles[role] = (font, px, colour, caps, False, fit)
+            fixed += 1
+    return fixed
 
 
 def _add_light_roles(archetypes_module) -> None:
@@ -2178,6 +2209,43 @@ def _apply_respecs(registry) -> None:
         registry[name] = {**keep, **copy.deepcopy(spec)}
 
 
+def _resolve_width_roles(registry) -> int:
+    """Settle the four roles that change with their container.
+
+    `brandmode.resolve()` takes a `width` and swaps `title` for
+    `title_narrow` at 374px, `body` for `body_narrow` at 300px, and
+    sizes a quote to its panel. Nothing on the render path ever passed
+    one: the engine looks a role up in `ROLE_STYLE`, which is a plain
+    dict with no notion of a box. So the swap has never fired in a
+    built deck, and a 40px title in a 330px column wrapped to four
+    lines in a third of the slide.
+
+    Migrating those regions off baked type does NOT fix this on its own,
+    which is the trap -- the region would resolve through the brand and
+    still come back 32px. The width is known here, at install, and this
+    is the only place it is known, so this is where it gets applied.
+
+    Returns how many regions were re-roled.
+    """
+    from deckguard import brandmode as bm
+
+    changed = 0
+    for spec in registry.values():
+        if not isinstance(spec, dict):
+            continue
+        groups = [r for g in spec.get("groups") or [] for r in g.get("regions") or []]
+        for region in list(spec.get("regions") or []) + groups:
+            role = region.get("role")
+            if not role or "dg" in region:
+                continue
+            width = (region.get("box") or [0, 0, 0, 0])[2]
+            settled = bm.resolve(role, width=width)
+            if settled and settled["role"] != bm.canonical(role):
+                region["role"] = settled["role"]
+                changed += 1
+    return changed
+
+
 def _apply_spec_fixes(registry) -> None:
     for name, fixes in _SPEC_FIXES.items():
         spec = registry.get(name)
@@ -2271,6 +2339,9 @@ def install(archetypes_module, grades: Iterable[str] = ("A", "B", "C", "D")) -> 
             added.remove(key)
     _apply_respecs(registry)
     _apply_spec_fixes(registry)
+    # After the respecs, which are what set the final box widths, and
+    # before anything reads a role back off the registry.
+    _resolve_width_roles(registry)
     _drop_slots(registry)
     # Before the floor pass, so anything the shift frees at the bottom is
     # available to the layouts rather than trimmed away.
@@ -2480,6 +2551,10 @@ def build_deck(spec: dict, out_path, archetypes_module=None, report=None) -> str
 
     protect_photo_cover(list(prs.slides)[0])
     strip_master_classification(prs)
+    # The retained Thank you is the one slide that never went through
+    # `stamp_chrome`, so it is the one slide still carrying the
+    # template's placeholder footer.
+    strip_inherited_footer(list(prs.slides)[-1])
 
     prs.save(str(out_path))
     return str(out_path)
@@ -3082,6 +3157,41 @@ def shape_notes(shape: str) -> tuple[Optional[str], Optional[int]]:
 # --------------------------------------------------------------------------
 # chrome, owned by the layout
 # --------------------------------------------------------------------------
+
+
+def strip_inherited_footer(slide) -> int:
+    """Take the master's own footer off a slide we keep verbatim.
+
+    The Thank-you slide is retained rather than generated, so it never
+    passes through `stamp_chrome` -- and `stamp_chrome` is the only
+    thing that consults `wants_footer`, which says an outro takes no
+    footer at all. So it kept the master's: a page number reading "11"
+    on slide 12 of a twelve-slide deck, and a date reading 23 July 2026
+    in a deck dated 21 August. Both are placeholder values from the
+    template, and a hard-coded date in output is a bug wherever it
+    comes from.
+
+    Matched by POSITION rather than by text: anything in the footer band
+    on a slide entitled to no footer is inherited chrome. Matching the
+    date by pattern would leave the page number, and matching a literal
+    would break the next time the template is revised.
+
+    Returns how many shapes were removed.
+    """
+    from deckguard import brandmode as bm
+
+    floor = bm.FLOOR * 9525
+    removed = 0
+    for shape in list(slide.shapes):
+        if not getattr(shape, "has_text_frame", False):
+            continue
+        if shape.top is None or shape.top < floor:
+            continue
+        if not shape.text_frame.text.strip():
+            continue
+        shape._element.getparent().remove(shape._element)
+        removed += 1
+    return removed
 
 
 def strip_master_classification(prs) -> int:
