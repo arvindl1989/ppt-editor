@@ -688,3 +688,34 @@ def test_a_cover_title_is_never_cut_mid_word():
     long = _title_from(lines[0])
     assert len(long) <= TITLE_MAX
     assert not long.endswith((" with", " of", " the", " to"))
+
+
+def test_the_golden_deck_still_shows_the_defect_preflight_was_taught_to_find():
+    """`tests/fixtures/deck-13.pptx` is real output, kept as a fixture.
+
+    Claude Design asked for a golden-deck regression test and named the
+    deck it reviewed; that file is not in the repo, so this is the
+    successor deck, and it earns its place differently. It is not a
+    catalogue of the 14 findings -- most of those are fixed, and it
+    demonstrates that: no bold flags, no blue Inter, no footer on the
+    outro, a cover title cut on a word rather than mid-word.
+
+    What it still carries is the one defect found by reviewing it: a
+    paragraph and an icon grid supplied to the same slide and drawn on
+    top of each other. The generator no longer produces that, so this
+    file is the only place the check can still be exercised end to end.
+    """
+    from pathlib import Path
+
+    from deckguard import assemble
+
+    fixture = Path(__file__).parent / "fixtures" / "deck-13.pptx"
+    findings = assemble.preflight(str(fixture))["findings"]
+
+    overlaps = [m for _n, m in findings if "overlap" in m]
+    assert overlaps, "preflight stopped catching the overlap on slide 3"
+
+    # And the findings the fixes closed stay closed, on real output.
+    assert not [m for _n, m in findings if "bold flag" in m]
+    assert not [m for _n, m in findings if "Inter set in KONE Blue" in m]
+    assert not [m for _n, m in findings if "dash standing in" in m]

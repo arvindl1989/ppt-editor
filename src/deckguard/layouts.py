@@ -535,6 +535,56 @@ def _table_from_text(text: str) -> dict:
     return {"headers": [""] * (width - len(cells[0])) + cells[0], "rows": cells[1:]}
 
 
+def alternate_form_conflicts(spec: dict, content: dict) -> list:
+    """Solo regions that a supplied GROUP would be drawn on top of.
+
+    Several archetypes deliberately serve two shapes from one spec:
+    `text_picture_a` draws a paragraph when given `body` and a grid of
+    icon-plus-text cells when given `items`, and the engine skips a
+    region whose key is missing, so one spec covers both. Nothing said
+    what happens when a planner supplies BOTH -- and it does, because
+    each key is advertised separately.
+
+    What happens is that a 402px paragraph is drawn straight through
+    the icon grid: on a real deck, a lead sentence crossing a cloud
+    pictogram and two cell captions, unreadable. Preflight caught it as
+    an overlap, which is the right answer far too late.
+
+    Matched on geometry rather than by naming the archetypes that do
+    this, because the same shape exists in `text_picture_g` and would
+    reappear in the next spec written this way.
+    """
+    clashes = []
+    for group in spec.get("groups") or []:
+        items = content.get(group.get("content"))
+        if not items:
+            continue
+        cells = [
+            [ox + rx, oy + ry, rw, rh]
+            for ox, oy in (group.get("origins") or [])
+            for rx, ry, rw, rh in (r["box"] for r in group.get("regions") or [])
+        ]
+        for region in spec.get("regions") or []:
+            key = region.get("content")
+            if not key or not content.get(key) or region.get("role") in (
+                    "picture", "image_band", "image"):
+                continue
+            x, y, w, h = region["box"]
+            area = max(w * h, 1)
+            covered = sum(
+                max(0, min(x + w, cx + cw) - max(x, cx))
+                * max(0, min(y + h, cy + ch) - max(y, cy))
+                for cx, cy, cw, ch in cells)
+            # A FRACTION, not any intersection at all. The title box on
+            # `text_picture_a` runs 14px into the icon row -- box
+            # against box, with the title's ink stopping well above it
+            # -- and treating that as a clash threw the headline away.
+            # Only a region the grid genuinely sits on top of counts.
+            if covered / area >= 0.25:
+                clashes.append(key)
+    return sorted(set(clashes))
+
+
 def _coerce_content(spec: dict, content: dict) -> dict:
     """Put the caller's content into the shape the engine reads.
 
@@ -604,6 +654,13 @@ def render(slide, name: str, content: dict, archetypes_module,
     engine = archetypes_module.E
     spec = archetypes_module.ARCHETYPES.get(name, {})
     content = _coerce_content(spec, content)
+    # The group wins: it is the more specific of the two forms and it
+    # carries more of the brief. Dropping rather than shrinking, because
+    # there is nowhere for the paragraph to go -- the grid already
+    # starts above where the paragraph begins. `build_deck` reports what
+    # was dropped, so this is not silent.
+    for key in alternate_form_conflicts(spec, content):
+        content = {k: v for k, v in content.items() if k != key}
 
     if spec.get("chrome"):
         archetypes_module.render(slide, name, content)
@@ -2522,9 +2579,17 @@ def build_deck(spec: dict, out_path, archetypes_module=None, report=None) -> str
         slide = prs.slides.add_slide(_layout_for(archetype, by_partname, blank))
         _strip_empty_placeholders(slide)
         if report is not None:
-            dropped = unread_keys(archetypes_module.ARCHETYPES.get(name) or {}, content)
+            arch_spec = archetypes_module.ARCHETYPES.get(name) or {}
+            dropped = unread_keys(arch_spec, content)
+            # Copy the archetype CAN hold, dropped because a supplied
+            # group would have been drawn over it. Different from
+            # `unread_keys`, which is copy the archetype has no slot for
+            # at all, so it is reported under its own name.
+            clashing = alternate_form_conflicts(arch_spec, _coerce_content(arch_spec, content))
             if dropped:
                 report.setdefault("dropped", {})[position] = (name, dropped)
+            if clashing:
+                report.setdefault("crowded_out", {})[position] = (name, clashing)
         render(slide, name, content, archetypes_module,
                audience=str(spec.get("audience") or ""))
         stamp_chrome(

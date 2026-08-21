@@ -1398,3 +1398,54 @@ def test_bullets_are_real_markers_not_a_dash(tmp_path):
                         dashes += 1
     assert dashes == 0, f"{dashes} dash markers still drawn"
     assert markers > 0, "no real list markers were drawn either"
+
+
+def test_a_supplied_grid_is_not_drawn_over_a_supplied_paragraph(tmp_path):
+    """Found on a real deck: `text_picture_a` serves two shapes from one
+    spec -- a paragraph when given `body`, a grid of icon-plus-text
+    cells when given `items` -- and the engine skips a region whose key
+    is missing, so one spec covers both.
+
+    Nothing said what happens when a planner supplies BOTH, and it does,
+    because each key is advertised separately. What happened was a 402px
+    paragraph drawn straight through the icon grid: a lead sentence
+    crossing a cloud pictogram and two cell captions. Preflight caught
+    it as an overlap, which is the right answer far too late.
+
+    The group wins and the paragraph is reported, not silently lost.
+    """
+    from deckguard import assemble
+
+    slide = {
+        "archetype": "text_picture_a",
+        "eyebrow": "Ways of working", "title": "How the work reaches you",
+        "body": "The routing does not change for this deployment. Tickets "
+                "follow the same path they always do.",
+        "items": [{"text": f"Step {n}"} for n in range(1, 5)],
+    }
+    out = tmp_path / "both.pptx"
+    report: dict = {}
+    L.build_deck({"title": "T", "date": "21 August 2026", "audience": "internal",
+                  "slides": [slide]}, str(out), report=report)
+
+    assert report.get("crowded_out"), "the drop has to be reported, not silent"
+    assert report["crowded_out"][2] == ("text_picture_a", ["body"])
+    assert not assemble.preflight(str(out))["findings"]
+
+    # The title box runs 14px into the icon row -- box against box, ink
+    # nowhere near -- and an any-intersection rule threw the headline
+    # away. Only a region the grid genuinely sits on counts.
+    from deckguard.registry import _load_archetypes
+
+    arch = _load_archetypes().ARCHETYPES["text_picture_a"]
+    assert L.alternate_form_conflicts(arch, {"title": "x", "items": [{"text": "y"}]}) == []
+
+
+def test_the_grid_form_alone_is_untouched():
+    """The check must not fire when only one form is supplied -- that is
+    the normal case for every archetype that has two."""
+    from deckguard.registry import _load_archetypes
+
+    arch = _load_archetypes().ARCHETYPES["text_picture_a"]
+    assert L.alternate_form_conflicts(arch, {"items": [{"text": "y"}]}) == []
+    assert L.alternate_form_conflicts(arch, {"body": "just a paragraph"}) == []
