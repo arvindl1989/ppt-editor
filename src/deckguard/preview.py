@@ -68,7 +68,7 @@ def _clip(text: str, limit: int = _MAX_TEXT) -> str:
 
 def _fallback_card(label: str) -> str:
     return (
-        f'<div{_FRAME_ATTR} style="{_FRAME_STYLE.format(bg="#F3EEE6")}display:flex;align-items:center;'
+        f'<div{_FRAME_ATTR} style="{_FRAME_STYLE.format(bg="#F3EEEA")}display:flex;align-items:center;'
         f'justify-content:center;color:#727272;font-size:0.8rem;">{_esc(label)}</div>'
     )
 
@@ -91,7 +91,7 @@ def _box(left_pct, top_pct, w_pct, h_pct, inner: str, extra_style: str = "", lab
     )
 
 
-def _placeholder_box(left_pct, top_pct, w_pct, h_pct, label: str, bg: str = "#F3EEE6", name: str = "") -> str:
+def _placeholder_box(left_pct, top_pct, w_pct, h_pct, label: str, bg: str = "#F3EEEA", name: str = "") -> str:
     # A box too small to hold its own label gets drawn as a plain
     # swatch. The label is preview chrome, not deck content, and a
     # 0.15in chevron with "GROUP" jammed into it is both unreadable and

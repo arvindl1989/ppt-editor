@@ -20,7 +20,10 @@ WHITE = "FFFFFF"
 BLUE = "1450F5"
 
 # Fields. Yellow and mint are blocks inside a layout, never a slide field.
-SAND = "F3EEE6"
+# Two sands were in circulation -- `F3EEE6` here and `F3EEEA` in the
+# layout tables -- and both shipped, on adjacent slides of the same deck.
+# The real KONE deck measures `F3EEEA`, so that is the one.
+SAND = "F3EEEA"
 LIGHT_BLUE = "D2F5FF"
 PINK = "FFCDD7"
 MINT = "AAE1C8"
@@ -52,6 +55,13 @@ TYPE_SCALE: dict[str, tuple] = {
     "cover_title_light": (INTER, 76, 400, 0.98, -0.03, WHITE, False),
     "outro_title_light": (INTER, 120, 400, 0.95, -0.04, WHITE, False),
     "subtitle":          (INTER, 20, 400, 1.4, 0, BLACK, False),
+    # The standfirst under a cover headline. Its own role because the
+    # engine already ships a `subtitle` -- KONE Information 14, caps --
+    # and an engine role wins over a brand one, so a cover's standfirst
+    # came out as a line of small caps where the reference sets 20px
+    # sentence case.
+    "cover_context":     (INTER, 20, 400, 1.4, 0, BLACK, False),
+    "cover_context_light": (INTER, 20, 400, 1.4, 0, WHITE, False),
     "heading":           (INTER, 19, 600, 1.25, 0, BLACK, False),
     "on_panel_heading":  (INTER, 19, 600, 1.25, 0, WHITE, False),
     "body":              (INTER, 16, 400, 1.5, 0, BLACK, False),
@@ -118,6 +128,41 @@ CONTENT_START_OBJECTS = TITLE_BAND_BOTTOM + GAP_OBJECTS  # 264
 SUBTITLE_BAND_BOTTOM = 232
 FLOOR = 629          # nothing but chrome below this
 FOOTER_Y = 658
+
+# The tighter band, measured off a real KONE deck ("Life, upgraded in ONE
+# week"). Its title sits at y=22 in 32px type and its first content row
+# at y=118 -- 109px higher than the rhythm above, which is what lets a
+# twelve-card grid breathe on one slide. The airier band stays as the
+# spec's own numbers; this is what the layouts are shifted onto.
+TIGHT_TITLE_Y = 22
+TIGHT_TITLE_H = 82
+TIGHT_CONTENT_Y = 118
+
+# Cards. The reference sets its grid in white rounded rectangles on
+# sand, each with a soft shadow, a coloured rule under a caps label, and
+# a small arrow glyph in the corner. Radius is 13px measured off a 176px
+# card (PowerPoint stores it as a fraction of the short side, 0.0717).
+CARD_RADIUS_PX = 13
+CARD_SHADOW = {"blur": 18, "distance": 3, "direction": 90.0, "alpha": 0.10}
+CARD_FILL = WHITE
+CARD_RULE_H = 1
+CARD_LABEL_Y = 12          # caps label inside the card, above the rule
+CARD_RULE_Y = 38           # the coloured rule, full card width
+CARD_BODY_Y = 52
+
+# The grid the reference uses: four columns on a 300px pitch, three rows
+# on a 193px pitch, 288x176 cards. A card may span two columns and two
+# rows; nothing else in the grid moves when it does.
+CARD_COL_X = (45, 346, 646, 946)
+CARD_ROW_Y = (118, 311, 505)
+CARD_W = 288
+CARD_H = 176
+
+# Accents a card's rule may take, in the order a grid cycles them. The
+# LABEL is never set in these -- at 12px on white, mint and pale blue are
+# barely legible, and the reference deck shows it. The rule carries the
+# colour; the label stays blue or black.
+CARD_ACCENTS = (BLUE, BLACK, MINT, PINK, LIGHT_BLUE)
 
 # Chrome, owned by the layout. An archetype declares what it needs and
 # draws nothing.

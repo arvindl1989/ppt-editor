@@ -349,6 +349,12 @@ _INTERNAL_SPECS: dict[str, str] = {
     "resource_links": "title:title · tiles[4]:{icon, label:heading} · contact:body",
     # 25 "120px white title, two 19px white lines."
     "outro": "title:display · text1:body · text2:body",
+    # Not one of the 25. Measured off slide 8 of "Life, upgraded in ONE
+    # week" -- the densest slide in that deck and the one it holds
+    # together best. Declared here so the contract layer knows it; adding
+    # it to a SET, and so to the picker and the planner's menu, is a
+    # change to `slide-sets.json` and belongs to whoever owns that file.
+    "card_grid": "title:title · cards[8]:{label:eyebrow, text:body}",
 }
 
 
@@ -397,6 +403,11 @@ def _registry_slots(name: str) -> dict:
     for region in spec.get("regions") or []:
         if region.get("content"):
             out[region["content"]] = (1, frozenset())
+    # A card grid's slots are neither regions nor groups: the cards are
+    # their own structure, drawn after everything else so their shadows
+    # land on top.
+    if spec.get("cards"):
+        out["cards"] = (len(spec["cards"]), frozenset({"label", "text"}))
     for group in spec.get("groups") or []:
         if not group.get("content"):
             continue

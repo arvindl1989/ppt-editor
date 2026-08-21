@@ -382,7 +382,10 @@ def test_the_whole_library_builds_and_preflights_clean(tmp_path):
     # thing that handoff explicitly asked me not to do. Quarantined by
     # name so anything NEW still fails this test.
     blocked = {"lifecycle_4stage", "text_picture_a"}
-    left = [(names[n - 2] if 1 < n <= len(names) + 1 else n, m)
+    # The set starts with a cover, so no cut cover is injected and slide
+    # n is names[n - 1]. It used to be n - 2, when the master's own
+    # cover was retained in front of everything.
+    left = [(names[n - 1] if 0 < n <= len(names) else n, m)
             for n, m in checks["findings"]]
     assert not [(a, m) for a, m in left if a not in blocked], left
 

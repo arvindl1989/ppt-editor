@@ -678,27 +678,45 @@ def test_a_deck_built_from_a_brief_puts_each_archetype_on_its_own_layout(tmp_pat
     assert not [s for s in body.shapes if "Rounded Rectangle" in s.name]
 
 
-def test_the_retained_master_cover_gets_the_scrim_the_master_never_had(tmp_path):
-    """Cover F reverses its title out of a full-bleed photograph and
-    ships no gradient -- the layout assumes a designer picks a
-    photograph with a quiet corner. A deck built from a brief picks one
-    automatically, and a half-year review came back with a white
-    headline lost in a sunlit atrium."""
-    archetypes = _skill_modules()
-    out = tmp_path / "cover.pptx"
-    L.build_deck({"title": "Service business review — first half of the year",
-                  "slides": []}, str(out), archetypes)
+def test_the_deck_opens_on_the_four_pane_cut_not_the_masters_own_cover(tmp_path):
+    """The master retains a full-bleed photograph with a white title on
+    it, and on a sunlit frame the title all but vanished -- decks were
+    opening on a single legible letter. The reference deck opens on the
+    cut, so that is the default now, and its title sits on white where
+    nothing can swallow it.
 
+    This replaces a test that asserted the retained cover got a scrim.
+    That cover is no longer in the file, so the scrim it needed is moot.
+    """
     from pptx import Presentation
 
-    cover = Presentation(str(out)).slides[0]
+    from deckguard import assemble
+
+    # Through `assemble.build`, which is the path the tool takes: the
+    # legacy skill renderer draws its own cut and names the masks
+    # differently, and that is not what ships.
+    out = tmp_path / "cover.pptx"
+    assemble.build({"title": "Service business review", "date": "1 March 2026",
+                    "slides": []}, str(out))
+
+    slides = list(Presentation(str(out)).slides)
+    cover = slides[0]
     names = [s.name for s in cover.shapes]
-    assert "Photo protection" in names
-    # directly above the photograph and below every piece of type
-    assert names.index("Photo protection") == 1
-    title = next(i for i, s in enumerate(cover.shapes)
-                 if getattr(s, "has_text_frame", False) and "Service business" in s.text_frame.text)
-    assert names.index("Photo protection") < title
+    # One picture, masked into panes. The masks are named by whichever
+    # renderer drew them -- the gallery's chrome path calls them
+    # `Rectangle N` -- so the check is that the cut exists, not what it
+    # is called: one banner and at least four rectangles over it.
+    banners = [sh for sh in cover.shapes
+               if sh.shape_type and sh.shape_type.name == "PICTURE"
+               and sh.width > 3000000]
+    assert len(banners) == 1, names
+    covers = [sh for sh in cover.shapes
+              if sh.shape_type and sh.shape_type.name == "AUTO_SHAPE"]
+    assert len(covers) >= 4, names
+    # and the KONE marks land whichever path drew the cut
+    assert "Logo" in names and "Tagline" in names, names
+    # and the master's own cover is gone rather than sitting behind it
+    assert len(slides) == 2, "cut cover plus the retained Thank you"
 
 
 def test_a_chart_slot_nobody_filled_is_dropped_not_invented(tmp_path):
@@ -840,7 +858,10 @@ def test_content_the_archetype_cannot_hold_is_reported_rather_than_dropped(tmp_p
         {"archetype": "agenda_a_table", "title": "Agenda",
          "text1": "one", "text2": "two"},
     ]}, str(tmp_path / "d.pptx"), archetypes, report=report)
-    assert report["dropped"] == {1: ("agenda_a_table", ["text1", "text2"])}
+    # position 2, not 1: every deck now opens on a generated four-pane
+    # cut cover, so the first slide the caller asked for is the second
+    # slide of the file.
+    assert report["dropped"] == {2: ("agenda_a_table", ["text1", "text2"])}
 
 
 def test_the_photo_divider_gets_a_scrim_like_every_other_full_bleed_layout():
@@ -1232,11 +1253,14 @@ def test_every_content_slide_carries_a_date_and_a_page_number(tmp_path):
         footers.append(low)
 
     # deck order: master cover, cover, title_content, divider, three_content, master outro
-    assert any("12 MARCH 2026" in t for _x, t in footers[2]), footers[2]
-    assert any(t == "03" for _x, t in footers[2]), "page number missing"
-    assert any(t == "05" for _x, t in footers[4]), footers[4]
-    assert footers[1] == [], "a cover takes no footer"
-    assert footers[3] == [], "a divider takes no footer"
+    # Indices shifted by one: the master's retained cover is gone and the
+    # spec's own `cover_a_cut4` is slide 0, so the first content slide is
+    # slide 1 and carries page 02.
+    assert any("12 MARCH 2026" in t for _x, t in footers[1]), footers[1]
+    assert any(t == "02" for _x, t in footers[1]), "page number missing"
+    assert any(t == "04" for _x, t in footers[3]), footers[3]
+    assert footers[0] == [], "a cover takes no footer"
+    assert footers[2] == [], "a divider takes no footer"
 
 
 def test_the_page_number_sits_right_and_the_date_left():

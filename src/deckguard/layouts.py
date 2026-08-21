@@ -616,6 +616,14 @@ def render(slide, name: str, content: dict, archetypes_module,
             if scrim.get("content") in (None, "") or content.get(scrim.get("content")):
                 _draw_scrim(slide, engine, scrim["box"], scrim.get("opacity", 78),
                             _reversed_bands(spec, content, scrim["box"]))
+        # A cut cover reached here draws its own masks through the
+        # gallery's chrome renderer, so it never passed `draw_cut_cover`
+        # and never got the KONE marks. Which branch a cover takes
+        # depends on whether the gallery is installed, so the cover was
+        # shipping with a logo or without one depending on load order.
+        cut = _CUT_COVERS.get((name or "").lower())
+        if cut:
+            _cover_marks(slide, engine, cut)
         return
 
     for panel in spec.get("panels", []):
@@ -761,6 +769,10 @@ def render(slide, name: str, content: dict, archetypes_module,
                 rx, ry, rw, rh = region["box"]
                 shifted = {**region, "box": [ox + rx, oy + ry, rw, rh]}
                 _draw(slide, engine, shifted, (item or {}).get(region.get("content")), ink)
+    # Cards last: they carry a shadow, so anything drawn after them
+    # would sit on top of it.
+    if spec.get("cards"):
+        _draw_cards(slide, engine, spec["cards"], filled)
 
 
 # The brand's secondary palette, with the ink each field takes. The
@@ -1676,9 +1688,20 @@ _SPEC_FIXES: dict = {
         "body3": {"role": "attribution_light", "content": "attribution"},
         "body2": {"content": "context"},
     },
-    "cover_a_cut4":      {"body": {"content": "context"}},
-    "cover_b_cut3":      {"body": {"content": "context"}},
-    "cover_f_fullbleed": {"body": {"content": "context"}},
+    # Measured off the reference: the cover title runs 653px wide, not
+    # the 578 the content column gives it, because a cover headline is
+    # allowed to run past the column into the open right-hand side.
+    # The reference sets a cover headline at 76px and its standfirst at
+    # subtitle size. Bound from the master the title resolved to 30px and
+    # the standfirst to 12 -- a cover that read like a content slide.
+    "cover_a_cut4":      {"body": {"content": "context", "role": "cover_context",
+                                   "y": 588, "h": 40},
+                          "title": {"role": "cover_title", "w": 653, "y": 427}},
+    "cover_b_cut3":      {"body": {"content": "context", "role": "cover_context"},
+                          "title": {"role": "cover_title"}},
+    "cover_f_fullbleed": {"body": {"content": "context",
+                                        "role": "cover_context_light"},
+                          "title": {"role": "cover_title_light"}},
     # "two 19px white lines" -- named as the handoff names them.
     "outro": {"body": {"content": "text1"}, "body2": {"content": "text2"}},
 }
@@ -1696,6 +1719,20 @@ _SPEC_FIXES: dict = {
 # found it could put two paragraphs there, and went back to the handful
 # of layouts with real slots. Every entry here is a layout returning to
 # the menu.
+# Slide 8 of "Life, upgraded in ONE week", which is the densest slide in
+# that deck and the one it holds together best: a title at y=22 and a
+# grid of white cards on sand, each with a coloured rule under a caps
+# label. Registered as its own archetype because nothing in the two sets
+# does this, and it is the shape a positioning or framing slide wants.
+_CARD_GRID = {
+    "background": "sand",
+    "regions": [
+        _text(45, 22, 1050, 82, "title", 32),
+    ],
+    "cards": None,          # filled by `card_grid()` at install time
+}
+
+
 _RESPEC: dict[str, dict] = {
     # 03 "Mint column, 420px, full height ... 44px title, 16px lead.
     #     Right column at x:510: five rows, 14px gap, each a sand block
@@ -1704,7 +1741,7 @@ _RESPEC: dict[str, dict] = {
     # every row is sand; the mint column and the numerals carry it.
     "agenda_c_split": {
         "panels": [{"box": [0, 0, 420, 720], "fill": "AAE1C8"}]
-                  + [{"box": [510, y, 725, 96], "fill": "F3EEE6"}
+                  + [{"box": [510, y, 725, 96], "fill": "F3EEEA"}
                      for y in (91, 201, 311, 421, 531)],
         "regions": [
             _text(45, 91, 330, 150, "title", 40),
@@ -1870,6 +1907,36 @@ def hold_to_the_floor(spec: dict, floor: float = 629.0, least: float = 16.0) -> 
     return moved
 
 
+def _register_brand_roles(archetypes_module) -> list:
+    """Teach the engine every role BRAND_MODE defines.
+
+    The engine ships 28 roles; `TYPE_SCALE` defines 42. The fourteen it
+    had never heard of included `cover_title` -- so the moment a cover
+    was told to set its headline at 76px the way the reference does, the
+    build died on a KeyError mid-draw. A role that exists in the brand
+    and not in the renderer is a size nobody can ask for.
+
+    Registered rather than mapped: the engine's own entries win where
+    both define a role, because those were tuned against real renders.
+    """
+    from pptx.dml.color import RGBColor
+
+    from deckguard import brandmode as bm
+
+    engine = getattr(archetypes_module, "E", None)
+    styles = getattr(engine, "ROLE_STYLE", None)
+    if styles is None:
+        return []
+    added = []
+    for role, entry in bm.TYPE_SCALE.items():
+        if role in styles:
+            continue
+        font, px, _weight, _lead, _track, colour, caps = entry
+        styles[role] = (font, px, RGBColor.from_string(colour), caps, False, False)
+        added.append(role)
+    return sorted(added)
+
+
 def _add_light_roles(archetypes_module) -> None:
     """A quote set white, for the quote slide that sits on a blue panel.
 
@@ -1894,6 +1961,64 @@ def _add_light_roles(archetypes_module) -> None:
 
             base[2] = RGBColor(0xFF, 0xFF, 0xFF) if white else base[2]
         styles[role] = tuple(base)
+
+
+def tighten_band(spec: dict, name: str = "") -> int:
+    """Move a content slide's title to the reference's tighter band.
+
+    The KONE 25 prose puts a title at y=91 and content at y=227. The real
+    deck puts the title at y=22 and its first content row at y=118, and
+    that 109px is what lets a twelve-card grid or a three-photo row
+    breathe instead of crowding the floor.
+
+    Only slides that actually sit on the standard band move, and only
+    down-shifted by the same delta, so the internal spacing every layout
+    was measured with is preserved exactly -- the block moves, its parts
+    do not move relative to each other. Covers, dividers and the outro
+    are left alone: their type is placed against the photograph or the
+    field, not against a title band.
+
+    Returns how many boxes moved.
+    """
+    from deckguard import brandmode as bm
+
+    if bm.slide_kind(name) in ("cover", "divider", "outro", "fullslide_picture",
+                               "blank"):
+        return 0
+    title = next((r for r in spec.get("regions") or []
+                  if r.get("content") == "title"), None)
+    if title is None or not (80 <= title["box"][1] <= 100):
+        return 0
+    # An eyebrow sits ABOVE the title, so shifting the block by the
+    # title's delta drove it off the top edge -- "SERVICE PLAN" came out
+    # half-clipped at y=0. The reference agrees: its dense card slide has
+    # no eyebrow and sets the title at y=22, while the slide that DOES
+    # carry an eyebrow puts its title at y=95, which is where these
+    # already are. So a slide with an eyebrow is already on its band.
+    above = [r for r in spec.get("regions") or []
+             if r.get("content") and r["box"][1] < title["box"][1] and r["box"][1] > 10]
+    if above:
+        return 0
+    delta = title["box"][1] - bm.TIGHT_TITLE_Y
+
+    moved = 0
+    for region in spec.get("regions") or []:
+        box = region["box"]
+        if _is_full_bleed(box) or box[1] < 20:
+            continue
+        box[1] = max(0, box[1] - delta)
+        moved += 1
+    for group in spec.get("groups") or []:
+        for origin in group.get("origins") or []:
+            origin[1] = max(0, origin[1] - delta)
+            moved += 1
+    for panel in (spec.get("panels") or []) + (spec.get("rules") or []):
+        box = panel["box"]
+        if _is_full_bleed(box) or box[1] < 20:
+            continue
+        box[1] = max(0, box[1] - delta)
+        moved += 1
+    return moved
 
 
 def _apply_respecs(registry) -> None:
@@ -1935,6 +2060,7 @@ def install(archetypes_module, grades: Iterable[str] = ("A", "B", "C", "D")) -> 
     _, meta = load_spec()
     by_key = {a.engine_key: a for a in meta.values()}
     _correct_grey_ink(archetypes_module)
+    _register_brand_roles(archetypes_module)
     _add_light_roles(archetypes_module)
     for existing in registry.values():
         if isinstance(existing, dict):
@@ -1983,9 +2109,17 @@ def install(archetypes_module, grades: Iterable[str] = ("A", "B", "C", "D")) -> 
     # well as the incumbents. Run earlier it corrected only the
     # incumbents: a generated archetype was created afterwards and kept
     # the very geometry the fix existed to replace.
+    if "card_grid" not in registry:
+        registry["card_grid"] = {**copy.deepcopy(_CARD_GRID), **card_grid(8)}
+        added.append("card_grid")
     _apply_respecs(registry)
     _apply_spec_fixes(registry)
     _drop_slots(registry)
+    # Before the floor pass, so anything the shift frees at the bottom is
+    # available to the layouts rather than trimmed away.
+    for archetype, spec in registry.items():
+        if isinstance(spec, dict):
+            tighten_band(spec, archetype)
     # Last of all and over everything, including the archetypes the two
     # passes above just rewrote: the floor is the one rule with no
     # exceptions, so it is enforced after every other hand has been on
@@ -2152,7 +2286,8 @@ def build_deck(spec: dict, out_path, archetypes_module=None, report=None) -> str
     }
     blank = next(l for l in prs.slide_layouts if l.name.strip().lower() == "blank")
 
-    for position, entry in enumerate(spec.get("slides") or [], start=1):
+    slides = _with_cut_cover(spec)
+    for position, entry in enumerate(slides, start=1):
         name = entry.get("archetype")
         content = {k: v for k, v in entry.items() if k != "archetype"}
         archetype = by_engine_key.get(str(name).lower())
@@ -2166,20 +2301,22 @@ def build_deck(spec: dict, out_path, archetypes_module=None, report=None) -> str
                audience=str(spec.get("audience") or ""))
         stamp_chrome(
             slide, archetypes_module.E, str(name),
-            page=position + 1,          # the retained cover is page 1
+            page=position,              # the generated cut cover is page 1
             date=str(spec.get("date") or content.get("footer") or _deck_date()),
             classification=str(content.get("classification") or spec.get("classification") or ""),
         )
 
     body = [el for el in list(slide_ids) if el not in originals]
-    keep = {id(intro), id(outro), *(id(b) for b in body)}
+    # The master's own cover is dropped: `_with_cut_cover` has put a
+    # generated four-pane cut at the front of `body`, and keeping both
+    # would open every deck on two covers.
+    keep = {id(outro), *(id(b) for b in body)}
     for element in originals:
         if id(element) not in keep:
             prs.part.drop_rel(element.get(qn("r:id")))
             slide_ids.remove(element)
     for element in list(slide_ids):
         slide_ids.remove(element)
-    slide_ids.append(intro)
     for element in body:
         slide_ids.append(element)
     slide_ids.append(outro)
@@ -2934,10 +3071,17 @@ _CUT_COVERS: dict[str, dict] = {
         "band": [267, 0, 968, 430],
         "panes": [[267, 300, 340], [577, 300, 430], [887, 348, 380]],
     },
+    # No longer derived. Measured off "Life, upgraded in ONE week", where
+    # the cut is baked into a transparent PNG: reading its alpha channel
+    # back gives four panes 289px wide on a 330px pitch, 41px gutters,
+    # FULL BLEED from x=0 to x=1280 rather than inside the content
+    # column, all four flush to the top edge with staggered depths.
+    #
+    # The stagger is the thing. Four equal panes read as a filmstrip;
+    # 249/322/421/372 reads as a cut.
     "cover_a_cut4": {
-        "band": [45, 0, 1190, 430],
-        "panes": [[45, 290, 340], [345, 290, 430], [645, 290, 370], [945, 290, 400]],
-        "derived": True,
+        "band": [0, 0, 1280, 422],
+        "panes": [[0, 289, 249], [330, 289, 322], [660, 289, 421], [990, 290, 372]],
     },
 }
 
@@ -3037,4 +3181,240 @@ def draw_cut_cover(slide, engine, name: str, background: str = "FFFFFF") -> int:
         shape.line.fill.background()
         shape.shadow.inherit = False
         drawn += 1
+    _cover_marks(slide, engine, cut)
     return drawn
+
+
+_SHADOW_XML = (
+    '<a:effectLst xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
+    '<a:outerShdw blurRad="{blur}" dist="{dist}" dir="{dir}" rotWithShape="0">'
+    '<a:srgbClr val="000000"><a:alpha val="{alpha}"/></a:srgbClr>'
+    "</a:outerShdw></a:effectLst>"
+)
+
+
+def _soft_shadow(shape) -> None:
+    """The card shadow, which python-pptx cannot add on its own.
+
+    `shape.shadow` can only turn inheritance off; there is no API for
+    setting one. Written as raw DrawingML because the alternative is a
+    flat card, and the shadow is half of what makes the reference's grid
+    read as cards rather than as a table.
+    """
+    from deckguard import brandmode as bm
+
+    spec = bm.CARD_SHADOW
+    shape.shadow.inherit = False
+    spPr = shape._element.spPr
+    for existing in spPr.findall(f"{{{_A}}}effectLst"):
+        spPr.remove(existing)
+    # 9525 EMU per px at the 96dpi the whole geometry is written in.
+    xml = _SHADOW_XML.format(
+        blur=int(spec["blur"] * 9525),
+        dist=int(spec["distance"] * 9525),
+        dir=int(spec["direction"] * 60000),
+        alpha=int(spec["alpha"] * 100000),
+    )
+    from lxml import etree
+
+    spPr.append(etree.fromstring(xml))
+
+
+_A = "http://schemas.openxmlformats.org/drawingml/2006/main"
+
+
+def _draw_cards(slide, engine, cards: list, content: dict) -> int:
+    """Draw a grid of reference-style cards. Returns how many landed."""
+    from pptx.enum.shapes import MSO_SHAPE
+
+    from deckguard import brandmode as bm
+
+    items = content.get("cards") or []
+    drawn = 0
+    for spot, item in zip(cards, items):
+        if not isinstance(item, dict):
+            continue
+        x, y, w, h = spot["box"]
+        card = slide.shapes.add_shape(
+            MSO_SHAPE.ROUNDED_RECTANGLE, engine.X(x), engine.X(y),
+            engine.X(w), engine.X(h))
+        card.name = "Card"
+        card.fill.solid()
+        card.fill.fore_color.rgb = engine._hex(bm.CARD_FILL)
+        card.line.fill.background()
+        try:
+            card.adjustments[0] = bm.CARD_RADIUS_PX / min(w, h)
+        except (IndexError, ValueError):
+            pass
+        _soft_shadow(card)
+
+        rx, ry, rw, rh = spot["rule"]
+        rule = slide.shapes.add_shape(
+            MSO_SHAPE.RECTANGLE, engine.X(rx), engine.X(ry),
+            engine.X(rw), engine.X(max(rh, 1)))
+        rule.name = "Card rule"
+        rule.fill.solid()
+        rule.fill.fore_color.rgb = engine._hex(spot["accent"])
+        rule.line.fill.background()
+        rule.shadow.inherit = False
+
+        _card_arrow(slide, engine, spot)
+        if item.get("label"):
+            _draw_text(slide, engine, spot["label"], item["label"],
+                       {"kind": "text", "px": 12, "font": bm.KONE_INFO,
+                        "color": bm.BLUE, "caps": True, "align": "l"})
+        if item.get("text"):
+            _draw_text(slide, engine, spot["body"], item["text"],
+                       {"kind": "text", "px": 15, "font": bm.INTER,
+                        "color": bm.BLACK, "caps": False, "align": "l"})
+        drawn += 1
+    return drawn
+
+
+def _card_arrow(slide, engine, spot: dict) -> bool:
+    """The small arrow the reference puts at the head of every card.
+
+    It recurs across the deck -- a down-right arrow in the card headers,
+    a right arrow before a highlighted line -- and it is the one motif
+    that makes a run of these slides read as one deck. Drawn in the
+    card's own accent colour.
+    """
+    from deckguard import brandmode as bm
+
+    box = spot.get("arrow")
+    if not box:
+        return False
+    # The glyph, not a pictogram: at 17px a sprite icon is mush, and the
+    # reference's own mark is a plain arrow.
+    #
+    # Blue, not the card's accent. Colouring it mint or pale pink is
+    # exactly the mistake the labels were moved off -- it is TYPE, and
+    # BRAND_MODE allows three inks. Preflight caught it here, which is
+    # the check doing its job on its own author.
+    _draw_text(slide, engine, box, "\u2198", {
+        "kind": "text", "px": 15, "font": bm.INTER,
+        "color": bm.BLUE, "caps": False, "align": "l",
+    })
+    return True
+
+
+def _card(x, y, w, h, accent: str) -> dict:
+    """One card of the grid, as the reference draws it.
+
+    White rounded rectangle on sand with a soft shadow, a caps label
+    inside the top, a full-width rule under the label in the card's
+    accent colour, and body copy beneath.
+
+    The label is NOT set in the accent. The reference does that -- mint
+    on white at 12px, pale blue on white -- and those two cards are the
+    only ones on the slide you cannot read. The rule carries the colour
+    coding; the label stays blue.
+    """
+    from deckguard import brandmode as bm
+
+    return {
+        "box": [x, y, w, h],
+        "accent": accent,
+        "label": [x + 40, y + bm.CARD_LABEL_Y, w - 54, 22],
+        "rule": [x, y + bm.CARD_RULE_Y, w, bm.CARD_RULE_H],
+        "body": [x + 14, y + bm.CARD_BODY_Y, w - 28, h - bm.CARD_BODY_Y - 14],
+        "arrow": [x + 14, y + bm.CARD_LABEL_Y - 1, 18, 17],
+    }
+
+
+def card_grid(cells: int = 8) -> dict:
+    """The reference's twelve-cell grid, as an archetype spec.
+
+    Four columns on a 300px pitch, three rows on a 193px pitch, 288x176
+    cards. Measured off "Recognize the need and importance of
+    modernizing elevators", which is the densest slide in the reference
+    deck and the one it holds together best.
+    """
+    from deckguard import brandmode as bm
+
+    columns = len(bm.CARD_COL_X)
+    rows = max(1, -(-cells // columns))
+    # Centre the rows actually used in the content band rather than
+    # hanging them off the top. Eight cards in a three-row grid left the
+    # bottom third of the slide empty and the block read as unfinished.
+    gap = bm.CARD_ROW_Y[1] - bm.CARD_ROW_Y[0] - bm.CARD_H
+    band = bm.FLOOR - bm.TIGHT_CONTENT_Y
+    # The reference runs its third row of cards to y=681, past the floor.
+    # A twelve-cell grid therefore shortens its cards to fit rather than
+    # hanging them over the footer -- the floor is the one rule with no
+    # exceptions, and 159px still holds three lines of 15px body.
+    height = min(bm.CARD_H, (band - (rows - 1) * gap) // rows)
+    used = rows * height + (rows - 1) * gap
+    top = bm.TIGHT_CONTENT_Y + max(0, (band - used) // 2)
+
+    cards = []
+    for index in range(cells):
+        x = bm.CARD_COL_X[index % columns]
+        y = top + (index // columns) * (height + gap)
+        cards.append(_card(x, y, bm.CARD_W, height,
+                           bm.CARD_ACCENTS[index % len(bm.CARD_ACCENTS)]))
+    return {"cards": cards}
+
+
+DEFAULT_COVER = "cover_a_cut4"
+
+
+def _with_cut_cover(spec: dict) -> list:
+    """Put the four-pane cut cover at the front of every deck.
+
+    What the master retains as slide 1 is a full-bleed photograph with a
+    white title on it, and on a sunlit frame the title all but vanishes
+    -- the tool's own decks were opening with a single legible letter.
+    The reference deck opens on the cut instead, and that is the cover
+    the brand is known for, so it is the default rather than something
+    to be picked.
+
+    A deck that already opens on a cover keeps the one it has.
+    """
+    slides = [dict(s) for s in (spec.get("slides") or [])]
+    first = str((slides[0] if slides else {}).get("archetype") or "").lower()
+    if first.startswith("cover"):
+        return slides
+    cover = {"archetype": DEFAULT_COVER, "title": spec.get("title") or ""}
+    context = spec.get("context") or spec.get("subtitle")
+    if context:
+        cover["context"] = context
+    # Photo slots are filled in `assemble.build`, which runs before this
+    # cover exists, so it fills its own or opens on a sand rectangle.
+    try:
+        from deckguard.registry import fill_empty_photo_slots
+
+        fill_empty_photo_slots({"slides": [cover]})
+    except Exception:  # noqa: BLE001 -- no library is not a build failure
+        pass
+    return [cover] + slides
+
+
+def _cover_marks(slide, engine, cut: dict) -> None:
+    """The logo and the tagline, drawn on the cut cover itself.
+
+    Both live on the master's Cover A layout and neither reaches the
+    page: the logo is an EMPTY picture placeholder -- the same defect as
+    the 54 blank logo frames -- and the tagline, though it carries a real
+    black PNG at 1102,633, does not render through layout inheritance.
+    The reference cover has both, and a cover with no KONE mark on it is
+    not a KONE cover, so they are placed here rather than inherited.
+
+    White logo, because it sits at 45,45 on the first pane and the first
+    pane is a photograph.
+    """
+    from deckguard.logo import _brand_asset
+
+    if any((sh.name or "") in ("Logo", "Tagline") for sh in slide.shapes):
+        return
+    logo = _brand_asset("logo", light=True)
+    if logo:
+        mark = slide.shapes.add_picture(
+            logo, engine.X(45), engine.X(45), engine.X(81), engine.X(31))
+        mark.name = "Logo"
+    tagline = _brand_asset("tagline", light=False)
+    if tagline:
+        # Bottom-right, clear of the cut band and of the footer line.
+        mark = slide.shapes.add_picture(
+            tagline, engine.X(1102), engine.X(633), engine.X(133), engine.X(45))
+        mark.name = "Tagline"

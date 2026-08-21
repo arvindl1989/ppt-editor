@@ -112,12 +112,17 @@ def render(out_dir: Path | None = None) -> list[Path]:
                 check=True, capture_output=True, timeout=900,
             )
             pages = sorted(work.glob("page-*.png"))
-            # build_deck keeps the master's cover as page 1 and its
-            # "Thank you" last, so body slide i is page i + 1.
+            # The deck keeps a "Thank you" at the end, and prepends a cut
+            # cover only when the spec does not already open on one. Both
+            # sets DO open on a cover, so the offset is currently zero --
+            # but it was 1 while the master's own cover was retained, and
+            # hard-coding it put every internal thumbnail one slide out.
+            # Derived instead, so it cannot go stale again.
+            offset = max(0, len(pages) - 1 - len(wanted))
             for index, name in enumerate(wanted):
-                if index + 1 >= len(pages):
+                if index + offset >= len(pages):
                     break
-                shutil.copyfile(pages[index + 1], target / f"{name}.png")
+                shutil.copyfile(pages[index + offset], target / f"{name}.png")
                 written.append(target / f"{name}.png")
     return written
 

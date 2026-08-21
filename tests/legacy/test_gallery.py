@@ -229,20 +229,26 @@ def test_chrome_assets_keep_their_transparency(tmp_path):
 def test_the_cut_cover_is_one_swappable_picture_not_four_baked_panes(tmp_path):
     """Asked for as "a template where when we add a picture it adds that
     chopped effect, instead of it being chopped into four sections
-    already" -- one picture plus a mask, so Change Picture still works."""
+    already" -- one picture plus a mask, so Change Picture still works.
+
+    Driven through `assemble.build` rather than the parked transform.
+    That transform drops the cover archetype entirely, so this was
+    measuring the master's OWN retained cover photograph and would have
+    passed however the cut was drawn.
+    """
     from pptx import Presentation
 
-    try:
-        deck = _built_deck(tmp_path, [("cover_a_cut4", {"title": "T", "context": "C"})])
-    except Exception as exc:  # noqa: BLE001
-        pytest.skip(f"deck build unavailable: {exc}")
+    from deckguard import assemble
 
-    cover = Presentation(str(deck)).slides[0]
+    out = tmp_path / "cut.pptx"
+    assemble.build({"title": "T", "date": "1 March 2026", "slides": [
+        {"archetype": "cover_a_cut4", "title": "T", "context": "C"}]}, str(out))
+
+    cover = Presentation(str(out)).slides[0]
     photos = [sh for sh in cover.shapes
               if getattr(sh, "shape_type", None) and sh.shape_type.name == "PICTURE"
               and sh.width > 3000000]  # the banner, not the logo or tagline
     assert len(photos) == 1, "the banner must be a single picture"
-    # ...and the stagger comes from mask rectangles over it
     masks = [sh for sh in cover.shapes
              if getattr(sh, "shape_type", None) and sh.shape_type.name == "AUTO_SHAPE"]
     assert len(masks) >= 4, "the cut is drawn by covering what the mask hides"
@@ -252,30 +258,35 @@ def test_the_cut_cover_is_one_swappable_picture_not_four_baked_panes(tmp_path):
 def test_every_slide_gets_the_footer_its_archetype_calls_for(tmp_path):
     """A whole deck came out with no dates and no page numbers: the
     parser treated both as author content and dropped them, when they
-    are chrome stamped per slide. The rules differ by slide type."""
+    are chrome stamped per slide. The rules differ by slide type.
+
+    Also moved off the parked transform, which no longer produces a
+    cover at all.
+    """
     from pptx import Presentation
 
-    try:
-        deck = _built_deck(tmp_path, [
-            ("cover_a_cut4", {"title": "T", "context": "C"}),
-            ("divider_d", {"title": "A section"}),
-            ("three_picture_cards", {"title": "Cards", "cards": [{"heading": "A", "bullets": ["x"]}]}),
-            ("end_logo", {}),
-        ])
-    except Exception as exc:  # noqa: BLE001
-        pytest.skip(f"deck build unavailable: {exc}")
+    from deckguard import assemble
+
+    out = tmp_path / "chrome.pptx"
+    assemble.build({"title": "T", "date": "1 March 2026", "slides": [
+        {"archetype": "cover_a_cut4", "title": "T", "context": "C"},
+        {"archetype": "divider_numbering", "number": "01", "title": "A section"},
+        {"archetype": "three_content", "title": "Cards",
+         "items": [{"heading": "A", "text": "x"}]},
+    ]}, str(out))
+
+    prs = Presentation(str(out))
+    px = prs.slide_width / 1280
 
     def footer_text(slide):
         return " | ".join(
             sh.text_frame.text.strip() for sh in slide.shapes
             if getattr(sh, "has_text_frame", False) and sh.text_frame.text.strip()
+            and sh.top / px > 640
         )
 
-    slides = list(Presentation(str(deck)).slides)
-    cover, divider, cards, closer = slides
-
-    assert "20" in footer_text(cover), "covers carry a date"
-    assert "01" not in footer_text(cover).split(), "covers carry no page number"
-    assert "02" in footer_text(divider), "DIVIDER_D puts number and date together"
-    assert "03" in footer_text(cards), "content slides carry a page number"
-    assert footer_text(closer) == "", "END_LOGO carries nothing at all"
+    cover, divider, content = list(prs.slides)[:3]
+    assert footer_text(cover) == "", "a cover takes no footer"
+    assert footer_text(divider) == "", "a divider takes no footer"
+    assert "1 MARCH 2026" in footer_text(content), "content carries a date"
+    assert "03" in footer_text(content), "content carries a page number"

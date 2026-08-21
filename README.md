@@ -695,6 +695,41 @@ pip install -e ".[dev]"
 pytest
 ```
 
+### What a KONE deck looks like
+
+Measured off a finished KONE deck ("Life, upgraded in ONE week") rather
+than described, because a real deck settles arguments a spec cannot.
+
+**The cover is the four-pane cut, and it is the default.** Every deck
+opens on it unless the spec already names a cover. The panes are 289px
+wide on a 330px pitch, full bleed, all flush to the top edge with
+staggered depths — the stagger is what makes it read as a cut rather
+than a filmstrip. Those numbers came out of the reference's own alpha
+channel: it bakes the cut into a transparent PNG, so reading the
+transparency back gives the geometry exactly.
+
+Before this, decks opened on the master's retained cover — a full-bleed
+photograph with a white title on it, which on a sunlit frame rendered as
+a single legible letter.
+
+**Cards are rounded, with a shadow.** The one place the square-corner
+rule is relaxed, and deliberately: it is the defining feature of the
+reference's densest slide. `card_grid` is that slide — four columns on a
+300px pitch, a coloured rule under a caps label, an arrow glyph, white
+on sand.
+
+The reference sets those caps labels *in* the accent colour — mint on
+white, pale blue on white — and they are the only two cards on the slide
+you cannot read. Here the rule carries the colour coding and the label
+stays blue. Preflight enforces it, and caught the arrow glyph being
+coloured the same way after the labels had been fixed.
+
+**The tight band, where a slide has no eyebrow.** Title at y=22, content
+from y=118 — 109px more room than the handoff's rhythm. A slide that
+carries an eyebrow keeps the old band, because the eyebrow sits above
+the title and the reference agrees: its slide with an eyebrow puts the
+title at y=95.
+
 ### Slide contracts
 
 `deckguard/contracts.py` says what each archetype NEEDS, as data — slot
