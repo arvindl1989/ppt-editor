@@ -243,9 +243,26 @@ def test_every_canonical_archetype_is_renderable():
     missing = sorted(
         a.name for a in meta.values()
         if a.engine_key not in archetypes.ARCHETYPES
+        and a.engine_key not in L._UNREACHABLE
         and not any(x in archetypes.ARCHETYPES for x in a.aliases)
     )
     assert missing == [], f"no geometry for: {missing}"
+
+
+def test_the_excluded_archetypes_really_are_unreachable():
+    """`_UNREACHABLE` is the one place the library gets smaller, so it
+    has to keep earning it. An archetype the meter lists, or a set
+    names, can be chosen -- excluding it would silently delete a layout
+    someone can ask for, which is the opposite of the intended trade."""
+    from deckguard import brandmode as bm
+    from deckguard import meter
+
+    declared = set(meter.spec().get("archetypes") or {})
+    in_sets = {s["archetype"] for audience in ("external", "internal")
+               for s in bm.slides_in(audience)}
+    for name in L._UNREACHABLE:
+        assert name not in declared, f"{name} is in meter.json -- a plan can pick it"
+        assert name not in in_sets, f"{name} is in slide-sets.json -- pickable by hand"
 
 
 def test_the_pictogram_set_is_rasterised():
@@ -643,6 +660,11 @@ def _skill_modules():
         pytest.skip("archetype engine not available")
     from deckguard.legacy import gallery
 
+    # NOTE: this installs the LEGACY gallery, which `registry` does not
+    # use -- runtime merges its own `_install_gallery`. `ARCHETYPES` is a
+    # module global shared by every test in the session, so from here on
+    # other tests measure a registry the app never builds. Anything
+    # asserting on the shipped library has to be robust to that.
     L.install(archetypes)
     gallery.install(archetypes)
     return archetypes

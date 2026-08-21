@@ -79,13 +79,22 @@ def test_every_disagreement_carries_both_values(audit):
 
 
 def test_the_divider_is_the_worked_example_it_claims_to_be(handoff):
-    """DIVIDER.md names three slots and asserts all three are baked."""
+    """The divider was the handoff's worked example of a BAKED slide and
+    is now the worked example of a migrated one. It is the first
+    archetype off the old system, so nothing here may carry a `dg`
+    block, and every slot must name a role the brand actually defines --
+    a role that resolves to None draws nothing at all."""
+    from deckguard import brandmode as bm
+
     evidence = handoff.divider_evidence()
     slots = {r["slot"]: r for r in evidence["renders_as"] if r["slot"]}
     for name in ("number", "eyebrow", "title"):
         assert name in slots, f"the divider no longer has a {name} slot"
-    assert all(s["type"] for s in slots.values()), \
-        "the divider slots resolve through the brand now -- rewrite DIVIDER.md"
+    assert not any(s["type"] for s in slots.values()), \
+        "a divider slot went back to baked type"
+    for name, region in slots.items():
+        assert bm.resolve(region["role"]), \
+            f"{name} names {region['role']!r}, which the brand does not define"
 
 
 def test_the_pipeline_points_at_functions_that_exist(handoff):

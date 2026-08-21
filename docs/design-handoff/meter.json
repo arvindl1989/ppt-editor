@@ -17,7 +17,9 @@
       "label": "On template",
       "help": "The master's own layouts, drawn as the master draws them.",
       "audience": "external",
-      "tiers": [1],
+      "tiers": [
+        1
+      ],
       "pool_size": 20,
       "field_policy": "white; blue as a spot colour; photo on the full-bleed cover and the image divider",
       "icons": "none — no external layout names an icon"
@@ -28,8 +30,11 @@
       "label": "Slight deviation",
       "help": "Master geometry plus layouts that re-divide the master's own bands — stat rows, quote panels, step rows, tables.",
       "audience": "external",
-      "tiers": [1, 2],
-      "pool_size": 30,
+      "tiers": [
+        1,
+        2
+      ],
+      "pool_size": 31,
       "field_policy": "as stop 1, plus one full blue field (quote panel) and one blue stat band",
       "icons": "none required"
     },
@@ -39,8 +44,12 @@
       "label": "Moderate deviation",
       "help": "Compositions the master does not contain, built on the master's grid: split panels, quadrants, axes, icon rows, chart-plus-commentary.",
       "audience": "internal",
-      "tiers": [1, 2, 3],
-      "pool_size": 41,
+      "tiers": [
+        1,
+        2,
+        3
+      ],
+      "pool_size": 43,
       "field_policy": "secondary fields allowed; max two secondary colours per slide; never yellow or mint as a full field; KONE Blue present on every slide",
       "icons": "named pictograms required on icon_columns_5, numbered_icon_row_6, lifecycle_4stage, segment_breakdown, resource_links, picture_intro"
     },
@@ -50,8 +59,13 @@
       "label": "Internal slide types",
       "help": "Everything above plus the programme artefacts: the milestone announcement, the org view, the credits grid.",
       "audience": "internal",
-      "tiers": [1, 2, 3, 4],
-      "pool_size": 44,
+      "tiers": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "pool_size": 46,
       "field_policy": "as stop 3",
       "icons": "as stop 3"
     }
@@ -73,49 +87,507 @@
     "banned": "The cloud / people / clock / wrench / calendar cycle. Delete the rotation, do not reorder it."
   },
   "archetypes": {
-    "cover_a_cut4":             { "tier": 1, "sets": ["external"], "field": { "external": "white" }, "built": true },
-    "cover_b_cut3":             { "tier": 1, "sets": ["internal"], "field": { "internal": "sand" }, "built": true },
-    "cover_f_fullbleed":        { "tier": 1, "sets": ["external"], "field": { "external": "photo" }, "built": true },
-    "agenda_b_numbered":        { "tier": 1, "sets": ["external"], "field": { "external": "white" }, "built": true },
-    "divider_numbering":        { "tier": 1, "sets": ["external", "internal"], "field": { "external": "blue", "internal": "sand" }, "built": true },
-    "divider_title_only":       { "tier": 1, "sets": ["internal"], "field": { "internal": "light-blue" }, "built": true },
-    "image_section_divider":    { "tier": 1, "sets": ["external", "internal"], "field": { "external": "photo", "internal": "photo" }, "built": true },
-    "statement_a":              { "tier": 1, "sets": ["external"], "field": { "external": "white" }, "built": true },
-    "statement_b":              { "tier": 1, "sets": ["external"], "field": { "external": "white" }, "built": false },
-    "title_content":            { "tier": 1, "sets": ["external"], "field": { "external": "white" }, "built": true },
-    "title_subtitle_content_a": { "tier": 1, "sets": ["external"], "field": { "external": "white" }, "built": true },
-    "two_content":              { "tier": 1, "sets": ["external"], "field": { "external": "white" }, "built": true },
-    "two_content_narrow_title": { "tier": 1, "sets": ["external"], "field": { "external": "white" }, "built": true },
-    "three_content":            { "tier": 1, "sets": ["external"], "field": { "external": "white" }, "built": true },
-    "text_picture_a":           { "tier": 1, "sets": ["external"], "field": { "external": "white" }, "icon_slots": 4, "icons_named_in": [], "built": true },
-    "text_picture_b":           { "tier": 1, "sets": ["external"], "field": { "external": "white" }, "built": false },
-    "text_picture_g":           { "tier": 1, "sets": ["external"], "field": { "external": "photo" }, "icon_slots": 6, "icons_named_in": [], "built": true },
-    "three_pictures_text":      { "tier": 1, "sets": ["external"], "field": { "external": "white" }, "built": true },
-    "two_pictures_text_b":      { "tier": 1, "sets": ["external"], "field": { "external": "white" }, "built": false },
-    "outro":                    { "tier": 1, "sets": ["external", "internal"], "field": { "external": "white", "internal": "white" }, "built": true },
-    "picture_intro":            { "tier": 2, "sets": ["internal"], "field": { "internal": "white" }, "icon_slots": 3, "icons_named_in": ["internal"], "built": true },
-    "hero_stat":                { "tier": 2, "sets": ["external", "internal"], "field": { "external": "white", "internal": "light-blue" }, "built": true },
-    "kone_numbers":             { "tier": 2, "sets": ["external", "internal"], "field": { "external": "white", "internal": "sand" }, "built": true },
-    "quote_a":                  { "tier": 2, "sets": ["external"], "field": { "external": "blue" }, "built": true },
-    "quote_b":                  { "tier": 2, "sets": ["internal"], "field": { "internal": "pink" }, "built": true },
-    "quote_e":                  { "tier": 2, "sets": ["internal"], "field": { "internal": "light-blue" }, "built": false },
-    "how_it_works_3step":       { "tier": 2, "sets": ["external", "internal"], "field": { "external": "white", "internal": "white" }, "built": true },
-    "timeline":                 { "tier": 2, "sets": ["external"], "field": { "external": "white" }, "built": true },
-    "comparison_table":         { "tier": 2, "sets": ["external"], "field": { "external": "white" }, "built": true },
-    "value_prop_four_point":    { "tier": 2, "sets": ["external"], "field": { "external": "white" }, "built": false },
-    "agenda_c_split":           { "tier": 3, "sets": ["internal"], "field": { "internal": "mint+sand" }, "built": true },
-    "icon_columns_5":           { "tier": 3, "sets": ["internal"], "field": { "internal": "white" }, "icon_slots": 5, "icons_named_in": ["internal"], "built": true },
-    "numbered_icon_row_6":      { "tier": 3, "sets": ["internal"], "field": { "internal": "white" }, "icon_slots": 6, "icons_named_in": ["internal"], "built": true },
-    "lifecycle_4stage":         { "tier": 3, "sets": ["internal"], "field": { "internal": "white" }, "icon_slots": 4, "icons_named_in": ["internal"], "built": true },
-    "timeline_quarter_axis":    { "tier": 3, "sets": ["internal"], "field": { "internal": "white+pink" }, "built": true },
-    "quarterly_plan_4col":      { "tier": 3, "sets": ["internal"], "field": { "internal": "sand" }, "built": true },
-    "matrix_2x2":               { "tier": 3, "sets": ["internal"], "field": { "internal": "white+sand" }, "built": true },
-    "segment_breakdown":        { "tier": 3, "sets": ["internal"], "field": { "internal": "white" }, "icon_slots": 3, "icons_named_in": ["internal"], "built": true },
-    "chart_commentary":         { "tier": 3, "sets": ["internal"], "field": { "internal": "white" }, "built": true },
-    "statement_links":          { "tier": 3, "sets": ["internal"], "field": { "internal": "sand" }, "built": true },
-    "resource_links":           { "tier": 3, "sets": ["internal"], "field": { "internal": "white" }, "icon_slots": 4, "icons_named_in": ["internal"], "built": true },
-    "milestone_slide":          { "tier": 4, "sets": ["internal"], "field": { "internal": "white+sand" }, "built": true },
-    "org_functions":            { "tier": 4, "sets": ["internal"], "field": { "internal": "white" }, "built": true },
-    "credits":                  { "tier": 4, "sets": ["internal"], "field": { "internal": "white" }, "built": true }
+    "cover_a_cut4": {
+      "tier": 1,
+      "sets": [
+        "external"
+      ],
+      "field": {
+        "external": "white"
+      },
+      "built": true
+    },
+    "cover_b_cut3": {
+      "tier": 1,
+      "sets": [
+        "internal"
+      ],
+      "field": {
+        "internal": "sand"
+      },
+      "built": true
+    },
+    "cover_f_fullbleed": {
+      "tier": 1,
+      "sets": [
+        "external"
+      ],
+      "field": {
+        "external": "photo"
+      },
+      "built": true
+    },
+    "agenda_b_numbered": {
+      "tier": 1,
+      "sets": [
+        "external"
+      ],
+      "field": {
+        "external": "white"
+      },
+      "built": true
+    },
+    "divider_numbering": {
+      "tier": 1,
+      "sets": [
+        "external",
+        "internal"
+      ],
+      "field": {
+        "external": "blue",
+        "internal": "sand"
+      },
+      "built": true
+    },
+    "divider_title_only": {
+      "tier": 1,
+      "sets": [
+        "internal"
+      ],
+      "field": {
+        "internal": "light-blue"
+      },
+      "built": true
+    },
+    "image_section_divider": {
+      "tier": 1,
+      "sets": [
+        "external",
+        "internal"
+      ],
+      "field": {
+        "external": "photo",
+        "internal": "photo"
+      },
+      "built": true
+    },
+    "statement_a": {
+      "tier": 1,
+      "sets": [
+        "external"
+      ],
+      "field": {
+        "external": "white"
+      },
+      "built": true
+    },
+    "statement_b": {
+      "tier": 1,
+      "sets": [
+        "external"
+      ],
+      "field": {
+        "external": "white"
+      },
+      "built": false
+    },
+    "title_content": {
+      "tier": 1,
+      "sets": [
+        "external"
+      ],
+      "field": {
+        "external": "white"
+      },
+      "built": true
+    },
+    "title_subtitle_content_a": {
+      "tier": 1,
+      "sets": [
+        "external"
+      ],
+      "field": {
+        "external": "white"
+      },
+      "built": true
+    },
+    "two_content": {
+      "tier": 1,
+      "sets": [
+        "external"
+      ],
+      "field": {
+        "external": "white"
+      },
+      "built": true
+    },
+    "two_content_narrow_title": {
+      "tier": 1,
+      "sets": [
+        "external"
+      ],
+      "field": {
+        "external": "white"
+      },
+      "built": true
+    },
+    "three_content": {
+      "tier": 1,
+      "sets": [
+        "external"
+      ],
+      "field": {
+        "external": "white"
+      },
+      "built": true
+    },
+    "text_picture_a": {
+      "tier": 1,
+      "sets": [
+        "external"
+      ],
+      "field": {
+        "external": "white"
+      },
+      "icon_slots": 4,
+      "icons_named_in": [],
+      "built": true
+    },
+    "text_picture_b": {
+      "tier": 1,
+      "sets": [
+        "external"
+      ],
+      "field": {
+        "external": "white"
+      },
+      "built": false
+    },
+    "text_picture_g": {
+      "tier": 1,
+      "sets": [
+        "external"
+      ],
+      "field": {
+        "external": "photo"
+      },
+      "icon_slots": 6,
+      "icons_named_in": [],
+      "built": true
+    },
+    "three_pictures_text": {
+      "tier": 1,
+      "sets": [
+        "external"
+      ],
+      "field": {
+        "external": "white"
+      },
+      "built": true
+    },
+    "two_pictures_text_b": {
+      "tier": 1,
+      "sets": [
+        "external"
+      ],
+      "field": {
+        "external": "white"
+      },
+      "built": false
+    },
+    "outro": {
+      "tier": 1,
+      "sets": [
+        "external",
+        "internal"
+      ],
+      "field": {
+        "external": "white",
+        "internal": "white"
+      },
+      "built": true
+    },
+    "picture_intro": {
+      "tier": 2,
+      "sets": [
+        "internal"
+      ],
+      "field": {
+        "internal": "white"
+      },
+      "icon_slots": 3,
+      "icons_named_in": [
+        "internal"
+      ],
+      "built": true
+    },
+    "hero_stat": {
+      "tier": 2,
+      "sets": [
+        "external",
+        "internal"
+      ],
+      "field": {
+        "external": "white",
+        "internal": "light-blue"
+      },
+      "built": true
+    },
+    "kone_numbers": {
+      "tier": 2,
+      "sets": [
+        "external",
+        "internal"
+      ],
+      "field": {
+        "external": "white",
+        "internal": "sand"
+      },
+      "built": true
+    },
+    "quote_a": {
+      "tier": 2,
+      "sets": [
+        "external"
+      ],
+      "field": {
+        "external": "blue"
+      },
+      "built": true
+    },
+    "quote_b": {
+      "tier": 2,
+      "sets": [
+        "internal"
+      ],
+      "field": {
+        "internal": "pink"
+      },
+      "built": true
+    },
+    "quote_e": {
+      "tier": 2,
+      "sets": [
+        "internal"
+      ],
+      "field": {
+        "internal": "light-blue"
+      },
+      "built": false
+    },
+    "how_it_works_3step": {
+      "tier": 2,
+      "sets": [
+        "external",
+        "internal"
+      ],
+      "field": {
+        "external": "white",
+        "internal": "white"
+      },
+      "built": true
+    },
+    "timeline": {
+      "tier": 2,
+      "sets": [
+        "external"
+      ],
+      "field": {
+        "external": "white"
+      },
+      "built": true
+    },
+    "comparison_table": {
+      "tier": 2,
+      "sets": [
+        "external"
+      ],
+      "field": {
+        "external": "white"
+      },
+      "built": true
+    },
+    "value_prop_four_point": {
+      "tier": 2,
+      "sets": [
+        "external"
+      ],
+      "field": {
+        "external": "white"
+      },
+      "built": false
+    },
+    "agenda_c_split": {
+      "tier": 3,
+      "sets": [
+        "internal"
+      ],
+      "field": {
+        "internal": "mint+sand"
+      },
+      "built": true
+    },
+    "icon_columns_5": {
+      "tier": 3,
+      "sets": [
+        "internal"
+      ],
+      "field": {
+        "internal": "white"
+      },
+      "icon_slots": 5,
+      "icons_named_in": [
+        "internal"
+      ],
+      "built": true
+    },
+    "numbered_icon_row_6": {
+      "tier": 3,
+      "sets": [
+        "internal"
+      ],
+      "field": {
+        "internal": "white"
+      },
+      "icon_slots": 6,
+      "icons_named_in": [
+        "internal"
+      ],
+      "built": true
+    },
+    "lifecycle_4stage": {
+      "tier": 3,
+      "sets": [
+        "internal"
+      ],
+      "field": {
+        "internal": "white"
+      },
+      "icon_slots": 4,
+      "icons_named_in": [
+        "internal"
+      ],
+      "built": true
+    },
+    "timeline_quarter_axis": {
+      "tier": 3,
+      "sets": [
+        "internal"
+      ],
+      "field": {
+        "internal": "white+pink"
+      },
+      "built": true
+    },
+    "quarterly_plan_4col": {
+      "tier": 3,
+      "sets": [
+        "internal"
+      ],
+      "field": {
+        "internal": "sand"
+      },
+      "built": true
+    },
+    "matrix_2x2": {
+      "tier": 3,
+      "sets": [
+        "internal"
+      ],
+      "field": {
+        "internal": "white+sand"
+      },
+      "built": true
+    },
+    "segment_breakdown": {
+      "tier": 3,
+      "sets": [
+        "internal"
+      ],
+      "field": {
+        "internal": "white"
+      },
+      "icon_slots": 3,
+      "icons_named_in": [
+        "internal"
+      ],
+      "built": true
+    },
+    "chart_commentary": {
+      "tier": 3,
+      "sets": [
+        "internal"
+      ],
+      "field": {
+        "internal": "white"
+      },
+      "built": true
+    },
+    "statement_links": {
+      "tier": 3,
+      "sets": [
+        "internal"
+      ],
+      "field": {
+        "internal": "sand"
+      },
+      "built": true
+    },
+    "resource_links": {
+      "tier": 3,
+      "sets": [
+        "internal"
+      ],
+      "field": {
+        "internal": "white"
+      },
+      "icon_slots": 4,
+      "icons_named_in": [
+        "internal"
+      ],
+      "built": true
+    },
+    "milestone_slide": {
+      "tier": 4,
+      "sets": [
+        "internal"
+      ],
+      "field": {
+        "internal": "white+sand"
+      },
+      "built": true
+    },
+    "org_functions": {
+      "tier": 4,
+      "sets": [
+        "internal"
+      ],
+      "field": {
+        "internal": "white"
+      },
+      "built": true
+    },
+    "credits": {
+      "tier": 4,
+      "sets": [
+        "internal"
+      ],
+      "field": {
+        "internal": "white"
+      },
+      "built": true
+    },
+    "card_grid": {
+      "tier": 3,
+      "sets": [
+        "internal"
+      ],
+      "field": {
+        "internal": "sand"
+      },
+      "built": true,
+      "note": "Slide 8 of the reference deck: eight labelled cards, 4x2, each with a rule and an arrow. Tier 3 because a card grid is an off-master composition, and internal because its field is sand -- a secondary colour, which tiers 1-2 cannot carry."
+    },
+    "agenda_a_table": {
+      "tier": 2,
+      "sets": [
+        "external"
+      ],
+      "field": {
+        "external": "white"
+      },
+      "built": true,
+      "note": "Agenda with a full-height photograph down the right third and real disc bullets. Tier 2: the master's own top band and floor, with the content area divided differently. White field, so it is external-safe."
+    }
   }
 }

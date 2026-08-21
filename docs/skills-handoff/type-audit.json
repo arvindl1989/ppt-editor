@@ -1,9 +1,9 @@
 {
   "generated": "2026-08-21",
-  "regions_with_baked_type": 83,
-  "regions_resolved_through_a_role": 200,
-  "percent_bypassing_brand_mode": 29,
-  "disagreements": 25,
+  "regions_with_baked_type": 64,
+  "regions_resolved_through_a_role": 202,
+  "percent_bypassing_brand_mode": 24,
+  "disagreements": 17,
   "rows": [
     {
       "archetype": "agenda_a_table",
@@ -228,54 +228,6 @@
       },
       "brand_for_that_slot_name": null,
       "disagrees": false
-    },
-    {
-      "archetype": "divider_numbering",
-      "slot": "number",
-      "baked": {
-        "px": 190,
-        "font": "Inter",
-        "caps": false,
-        "color": "141414"
-      },
-      "brand_for_that_slot_name": {
-        "px": 28,
-        "font": "Inter",
-        "caps": false
-      },
-      "disagrees": true
-    },
-    {
-      "archetype": "divider_numbering",
-      "slot": "eyebrow",
-      "baked": {
-        "px": 13,
-        "font": "Inter",
-        "caps": false,
-        "color": "141414"
-      },
-      "brand_for_that_slot_name": {
-        "px": 12,
-        "font": "KONE Information",
-        "caps": true
-      },
-      "disagrees": true
-    },
-    {
-      "archetype": "divider_numbering",
-      "slot": "title",
-      "baked": {
-        "px": 46,
-        "font": "Inter",
-        "caps": false,
-        "color": "141414"
-      },
-      "brand_for_that_slot_name": {
-        "px": 32,
-        "font": "Inter",
-        "caps": false
-      },
-      "disagrees": true
     },
     {
       "archetype": "kone_numbers",
@@ -682,66 +634,6 @@
       "disagrees": false
     },
     {
-      "archetype": "text_picture_h",
-      "slot": "eyebrow",
-      "baked": {
-        "px": 14,
-        "font": "KONE Information",
-        "caps": true,
-        "color": "FFFFFF"
-      },
-      "brand_for_that_slot_name": {
-        "px": 12,
-        "font": "KONE Information",
-        "caps": true
-      },
-      "disagrees": false
-    },
-    {
-      "archetype": "text_picture_h",
-      "slot": "title",
-      "baked": {
-        "px": 40,
-        "font": "Inter",
-        "caps": false,
-        "color": "FFFFFF"
-      },
-      "brand_for_that_slot_name": {
-        "px": 32,
-        "font": "Inter",
-        "caps": false
-      },
-      "disagrees": true
-    },
-    {
-      "archetype": "text_picture_h",
-      "slot": "body",
-      "baked": {
-        "px": 16,
-        "font": "Inter",
-        "caps": false,
-        "color": "141414"
-      },
-      "brand_for_that_slot_name": {
-        "px": 16,
-        "font": "Inter",
-        "caps": false
-      },
-      "disagrees": false
-    },
-    {
-      "archetype": "text_picture_h",
-      "slot": "items.text",
-      "baked": {
-        "px": 15,
-        "font": "Inter",
-        "caps": false,
-        "color": "141414"
-      },
-      "brand_for_that_slot_name": null,
-      "disagrees": false
-    },
-    {
       "archetype": "three_content",
       "slot": "title",
       "baked": {
@@ -775,50 +667,6 @@
     },
     {
       "archetype": "three_content",
-      "slot": "items.text",
-      "baked": {
-        "px": 16,
-        "font": "Inter",
-        "caps": false,
-        "color": "141414"
-      },
-      "brand_for_that_slot_name": null,
-      "disagrees": false
-    },
-    {
-      "archetype": "three_content_b",
-      "slot": "title",
-      "baked": {
-        "px": 32,
-        "font": "Inter",
-        "caps": false,
-        "color": "141414"
-      },
-      "brand_for_that_slot_name": {
-        "px": 32,
-        "font": "Inter",
-        "caps": false
-      },
-      "disagrees": false
-    },
-    {
-      "archetype": "three_content_b",
-      "slot": "items.heading",
-      "baked": {
-        "px": 20,
-        "font": "Inter",
-        "caps": false,
-        "color": "141414"
-      },
-      "brand_for_that_slot_name": {
-        "px": 19,
-        "font": "Inter",
-        "caps": false
-      },
-      "disagrees": false
-    },
-    {
-      "archetype": "three_content_b",
       "slot": "items.text",
       "baked": {
         "px": 16,
@@ -946,54 +794,6 @@
       "disagrees": true
     },
     {
-      "archetype": "title_content_b",
-      "slot": "eyebrow",
-      "baked": {
-        "px": 12,
-        "font": "KONE Information",
-        "caps": true,
-        "color": "1450F5"
-      },
-      "brand_for_that_slot_name": {
-        "px": 12,
-        "font": "KONE Information",
-        "caps": true
-      },
-      "disagrees": false
-    },
-    {
-      "archetype": "title_content_b",
-      "slot": "title",
-      "baked": {
-        "px": 34,
-        "font": "Inter",
-        "caps": false,
-        "color": "141414"
-      },
-      "brand_for_that_slot_name": {
-        "px": 32,
-        "font": "Inter",
-        "caps": false
-      },
-      "disagrees": false
-    },
-    {
-      "archetype": "title_content_b",
-      "slot": "bullets",
-      "baked": {
-        "px": 19,
-        "font": null,
-        "caps": null,
-        "color": null
-      },
-      "brand_for_that_slot_name": {
-        "px": 19,
-        "font": "Inter",
-        "caps": false
-      },
-      "disagrees": true
-    },
-    {
       "archetype": "title_subtitle_content_a",
       "slot": "title",
       "baked": {
@@ -1090,54 +890,6 @@
       "disagrees": true
     },
     {
-      "archetype": "two_content_b",
-      "slot": "title",
-      "baked": {
-        "px": 34,
-        "font": "Inter",
-        "caps": false,
-        "color": "141414"
-      },
-      "brand_for_that_slot_name": {
-        "px": 32,
-        "font": "Inter",
-        "caps": false
-      },
-      "disagrees": false
-    },
-    {
-      "archetype": "two_content_b",
-      "slot": "items.label",
-      "baked": {
-        "px": 12,
-        "font": "KONE Information",
-        "caps": true,
-        "color": "1450F5"
-      },
-      "brand_for_that_slot_name": {
-        "px": 12,
-        "font": "KONE Information",
-        "caps": true
-      },
-      "disagrees": false
-    },
-    {
-      "archetype": "two_content_b",
-      "slot": "items.bullets",
-      "baked": {
-        "px": 17,
-        "font": null,
-        "caps": null,
-        "color": null
-      },
-      "brand_for_that_slot_name": {
-        "px": 19,
-        "font": "Inter",
-        "caps": false
-      },
-      "disagrees": true
-    },
-    {
       "archetype": "two_content_narrow_title",
       "slot": "title",
       "baked": {
@@ -1171,54 +923,6 @@
     },
     {
       "archetype": "two_content_narrow_title",
-      "slot": "bullets",
-      "baked": {
-        "px": 18,
-        "font": null,
-        "caps": null,
-        "color": null
-      },
-      "brand_for_that_slot_name": {
-        "px": 19,
-        "font": "Inter",
-        "caps": false
-      },
-      "disagrees": true
-    },
-    {
-      "archetype": "two_content_narrow_title_b",
-      "slot": "title",
-      "baked": {
-        "px": 28,
-        "font": "Inter",
-        "caps": false,
-        "color": "141414"
-      },
-      "brand_for_that_slot_name": {
-        "px": 32,
-        "font": "Inter",
-        "caps": false
-      },
-      "disagrees": true
-    },
-    {
-      "archetype": "two_content_narrow_title_b",
-      "slot": "body",
-      "baked": {
-        "px": 16,
-        "font": "Inter",
-        "caps": false,
-        "color": "141414"
-      },
-      "brand_for_that_slot_name": {
-        "px": 16,
-        "font": "Inter",
-        "caps": false
-      },
-      "disagrees": false
-    },
-    {
-      "archetype": "two_content_narrow_title_b",
       "slot": "bullets",
       "baked": {
         "px": 18,

@@ -481,3 +481,59 @@ def test_a_full_bleed_photo_is_not_mistaken_for_a_logo():
 
     a_mark_in_the_slot = (46 * 9525, 46 * 9525, 80 * 9525, 30 * 9525)
     assert _boxes_overlap(a_mark_in_the_slot, logo_slot) is True
+
+
+def test_every_layout_in_the_meters_pool_carries_exactly_one_logo(tmp_path):
+    """The brand's flattest rule -- "exactly one per slide" -- held for
+    most of the library by accident rather than by construction, and
+    three ways of losing the mark had gone unnoticed because the two
+    slides that hit them were unreachable until now.
+
+    A layout carries the logo either as a real picture or as an empty
+    placeholder inherited from the master; the placeholder renders as
+    nothing, which is why `agenda_a_table` had none. And every slide
+    shape draws above every layout shape, so a background flood
+    (`card_grid` under its sand), a full-bleed photograph or a scrim
+    buries it. Preflight cannot catch any of these -- it only looks for
+    MORE than one.
+
+    Counted by GEOMETRY, not by shape name. There are two logo-drawing
+    paths -- the layout relay and the gallery's chrome renderer -- and
+    they name their shapes differently, so a name-based count reads a
+    perfectly good chrome logo as missing.
+    """
+    from pptx import Presentation
+
+    from deckguard import assemble, meter
+    from deckguard.logo import _boxes_overlap
+
+    pool = meter.built_pool_for_stop(4)
+    assert len(pool) > 30, "the pool collapsed; this test would pass vacuously"
+    out = tmp_path / "all.pptx"
+    assemble.build({"title": "Logo audit", "date": "21 August 2026",
+                    "audience": "internal",
+                    "slides": [{"archetype": n} for n in pool]}, str(out))
+
+    px = 9525
+    slots = ((45 * px, 45 * px, 81 * px, 31 * px),        # left, on covers
+             (1154 * px, 45 * px, 81 * px, 31 * px))      # right, otherwise
+
+    def marks(shapes):
+        return [s for s in shapes
+                if s.left is not None
+                and any(_boxes_overlap((s.left, s.top, s.width, s.height), slot)
+                        for slot in slots)]
+
+    bare, doubled = [], []
+    for index, slide in enumerate(Presentation(str(out)).slides, start=1):
+        on_slide = marks(slide.shapes)
+        # The layout's own mark shows only when the slide has not put one
+        # of its own in the same place.
+        count = len(on_slide) or len(marks(slide.slide_layout.shapes))
+        if count == 0:
+            bare.append((index, slide.slide_layout.name))
+        elif count > 1:
+            doubled.append((index, slide.slide_layout.name))
+
+    assert bare == [], f"no logo on: {bare}"
+    assert doubled == [], f"more than one logo on: {doubled}"

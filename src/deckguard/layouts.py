@@ -664,6 +664,20 @@ def render(slide, name: str, content: dict, archetypes_module,
         for g in spec.get("groups", [])
     ]
 
+    # A field that reverses its type has to reverse the ROLE-based
+    # regions too. The `dg` path below takes an `ink` override, and for
+    # as long as every divider region was baked that was the whole
+    # story. The moment one migrated to a brand role the numeral and
+    # title came out black on KONE Blue, and the eyebrow -- blue by role
+    # -- vanished into the field entirely. The brand already knows each
+    # role's light twin; this is the only place that was not asking.
+    if (_field_for(spec, filled, name, audience) or (None, None))[1] == "FFFFFF":
+        engine_spec["regions"] = [_on_dark(r) for r in engine_spec["regions"]]
+        engine_spec["groups"] = [
+            {**g, "regions": [_on_dark(r) for r in g["regions"]]}
+            for g in engine_spec["groups"]
+        ]
+
     # Icons are drawn here as native shapes, so they are withheld from
     # the engine along with the `dg` regions -- otherwise it draws its
     # blue placeholder chip in the same box.
@@ -774,6 +788,12 @@ def render(slide, name: str, content: dict, archetypes_module,
     if spec.get("cards"):
         _draw_cards(slide, engine, spec["cards"], filled)
 
+    # Truly last. The mark has to survive everything above it, and the
+    # thing that buries it is not always the background: a scrim and a
+    # full-bleed photograph are both drawn after the painters, so a logo
+    # relayed any earlier gets covered again by the next step.
+    _keep_the_logo_on_top(slide)
+
 
 # The brand's secondary palette, with the ink each field takes. The
 # rule is the brand's own: a blue field takes white type, a secondary
@@ -787,6 +807,19 @@ BRAND_FIELDS = {
     "sand": ("F3EEEA", "141414"),
 }
 DEFAULT_FIELD = "blue"
+
+
+def _on_dark(region: dict) -> dict:
+    """The same region with its role swapped for the light twin.
+
+    Only roles the brand HAS a twin for change; a picture or panel
+    region falls through untouched.
+    """
+    from deckguard import brandmode as bm
+
+    role = region.get("role")
+    light = bm._ON_DARK.get(bm.canonical(role) if role else "")
+    return {**region, "role": light} if light else region
 
 
 def _field_for(spec: dict, content: dict, name: str = "", audience: str = ""):
@@ -1147,6 +1180,72 @@ def _paint_field(slide, engine, fill: str) -> None:
     _relay_layout_logo(slide)
 
 
+def _keep_the_logo_on_top(slide) -> None:
+    """Guarantee exactly one visible mark, after everything is drawn.
+
+    Two moves, in this order. If the slide has no mark of its own and
+    the layout's will not show -- an empty placeholder, or something
+    covering it -- one is stamped from the vendored asset. Then whatever
+    mark the slide has is lifted to the front of the z-order.
+
+    Lifting rather than re-stamping is the point: a second picture would
+    read as "more than one logo" to preflight and be a real defect on a
+    slide where the first one is merely hidden.
+    """
+    if _logo_needs_relaying(slide):
+        _relay_layout_logo(slide)
+    mark = next((sh for sh in slide.shapes
+                 if (sh.name or "").startswith("Logo")), None)
+    if mark is None:
+        return
+    element = mark._element
+    parent = element.getparent()
+    parent.remove(element)
+    parent.append(element)
+
+
+def _logo_needs_relaying(slide) -> bool:
+    """Whether the layout's mark will fail to show on this slide.
+
+    Two ways to lose it, and enumerating the archetypes that hit them
+    was how they stayed lost:
+
+    **The frame is empty.** A layout carries the mark either as a real
+    picture or as a placeholder inherited from the master. An unfilled
+    placeholder renders as nothing, so `agenda_a_table` had no logo on
+    a white field that had buried nothing.
+
+    **Something covers it.** Every slide shape draws above every layout
+    shape, so anything spanning the logo's box hides it -- an
+    archetype's own background flood (`card_grid` under its sand), a
+    full-bleed photograph, a scrim. Tested by geometry rather than by
+    naming the shapes that do it, because the list was never complete.
+    """
+    from pptx.enum.shapes import MSO_SHAPE_TYPE
+
+    source = next((sh for sh in slide.slide_layout.shapes
+                   if (sh.name or "").startswith("Logo")), None)
+    if source is None:
+        return False
+    if source.shape_type != MSO_SHAPE_TYPE.PICTURE:
+        return True
+
+    left, top = source.left, source.top
+    right, bottom = left + source.width, top + source.height
+    for shape in slide.shapes:
+        if (shape.name or "").startswith("Logo"):
+            continue
+        try:
+            covers = (shape.left <= left and shape.top <= top
+                      and shape.left + shape.width >= right
+                      and shape.top + shape.height >= bottom)
+        except TypeError:  # a shape with no explicit geometry
+            continue
+        if covers:
+            return True
+    return False
+
+
 def _relay_layout_logo(slide) -> bool:
     """Put the layout's logo back on top of a painted field.
 
@@ -1167,8 +1266,13 @@ def _relay_layout_logo(slide) -> bool:
 
     if any((sh.name or "") == "Logo" for sh in slide.shapes):
         return False
+    # Prefix, not equality: half the master's layouts carry the mark as
+    # `Logo Placeholder 9` rather than `Logo`, and those are exactly the
+    # ones that need this most -- an unfilled placeholder renders as
+    # nothing at all, so `agenda_a_table` shipped with no logo on a
+    # white field that had buried nothing.
     source = next((sh for sh in slide.slide_layout.shapes
-                   if (sh.name or "") == "Logo"), None)
+                   if (sh.name or "").startswith("Logo")), None)
     if source is None:
         return False
     field = next((sh for sh in slide.shapes if (sh.name or "") == "Colour field"), None)
@@ -1469,10 +1573,15 @@ _REFINEMENTS: dict[str, dict] = {
     # secondary palette is meant to carry a whole slide. `colour` in
     # the content picks one, and the ink follows the brand rule --
     # blue field takes white type, a secondary field takes black.
+    # The first archetype migrated off baked type. Each slot names a
+    # brand role and carries no `dg`, so the brand decides how it looks
+    # and changing TYPE_SCALE moves it. `number` is the case that proves
+    # the slot name cannot be the role: `number` is a 28px blue figure
+    # in `numbered_icon_row_6`, and a 300px section numeral here.
     "divider_numbering": {"field": True, "regions": [
-        _text(45, 91, 374, 300, "number", 190),
-        _text(453, 91, 578, 120, "eyebrow", 13),
-        _text(453, 130, 578, 400, "title", 46),
+        {"role": "section_numeral", "box": [45, 91, 374, 300], "content": "number"},
+        {"role": "eyebrow", "box": [453, 91, 578, 120], "content": "eyebrow"},
+        {"role": "divider_title", "box": [453, 130, 578, 400], "content": "title"},
     ]},
 
     # The next two come from REAL decks rather than the HTML reference,
@@ -1659,10 +1768,21 @@ _SPEC_FIXES: dict = {
     # are left where they are, because those were measured off a real
     # deck that uses this layout five times, and the spec's own x:620
     # disagrees with all five.
+    # These y values are set against the real 300px numeral and 56px
+    # title, and were tuned by measuring the ink on the render rather
+    # than by arithmetic -- a 300px box does not put 300px of ink on the
+    # page, and the offset differs per size.
+    # These y values are set against the real 300px numeral and 56px
+    # title and were tuned by measuring ink on the render, not by
+    # arithmetic: a 300px box does not put 300px of ink on the page and
+    # the offset differs per size. The title column is widened to 760 --
+    # the content column runs to x:1235 and 578px forced almost every
+    # section title onto two lines, which is also what made the pair
+    # impossible to centre predictably.
     "divider_numbering": {
-        "number":  {"y": 210},
-        "eyebrow": {"y": 276},
-        "title":   {"y": 304, "h": 150},
+        "number":  {"y": 182, "h": 340},
+        "eyebrow": {"y": 317},
+        "title":   {"y": 343, "w": 760, "h": 160},
     },
     "divider_title_only": {"title": {"y": 290, "h": 150}},
     # A quote slide with no quote type on it. Ported from the master's
@@ -1724,6 +1844,34 @@ _SPEC_FIXES: dict = {
 # grid of white cards on sand, each with a coloured rule under a caps
 # label. Registered as its own archetype because nothing in the two sets
 # does this, and it is the shape a positioning or framing slide wants.
+# Built from ARCHETYPES.md, absent from `meter.json`, absent from
+# `slide-sets.json`. `pool_for_stop()` can therefore never return them
+# and no plan or manual pick can select them -- they were pure weight on
+# the library, and they carried 20 of the 83 baked type regions and 6 of
+# the 25 brand disagreements. Not installing them takes a quarter of the
+# type migration off the table with no possible change to any output.
+#
+# Excluded rather than deleted: `ARCHETYPES.md` is a vendored KONE
+# artefact and stays as received. Four of the six are `_b` variants of
+# archetypes that are already built. To bring one back, name it in
+# `meter.json` with a tier and remove it here.
+#
+# Two archetypes were on the same unreachable list and are deliberately
+# NOT here, because absence from the meter was an oversight rather than
+# a decision: `card_grid` is slide 8 of the reference deck, asked for by
+# name, and `agenda_a_table` is a built, refined agenda with a photo and
+# real bullets. Both were given a tier in `meter.json` instead. What is
+# left below is duplication: four `_b` twins of archetypes that are
+# already built, and a `text_picture` variant.
+_UNREACHABLE = frozenset({
+    "text_picture_h",
+    "three_content_b",
+    "title_content_b",
+    "two_content_b",
+    "two_content_narrow_title_b",
+})
+
+
 _CARD_GRID = {
     "background": "sand",
     "regions": [
@@ -2112,6 +2260,15 @@ def install(archetypes_module, grades: Iterable[str] = ("A", "B", "C", "D")) -> 
     if "card_grid" not in registry:
         registry["card_grid"] = {**copy.deepcopy(_CARD_GRID), **card_grid(8)}
         added.append("card_grid")
+
+    # One sweep rather than a filter per source: these arrive from three
+    # different places -- `build_archetypes` off ARCHETYPES.md, the HTML
+    # gallery, and `_REFINEMENTS` -- and filtering each one separately
+    # left `agenda_a_table` installed by whichever path was not patched.
+    for key in _UNREACHABLE:
+        registry.pop(key, None)
+        if key in added:
+            added.remove(key)
     _apply_respecs(registry)
     _apply_spec_fixes(registry)
     _drop_slots(registry)
@@ -3403,18 +3560,40 @@ def _cover_marks(slide, engine, cut: dict) -> None:
     White logo, because it sits at 45,45 on the first pane and the first
     pane is a photograph.
     """
-    from deckguard.logo import _brand_asset
+    from deckguard.logo import _boxes_overlap, _brand_asset
 
-    if any((sh.name or "") in ("Logo", "Tagline") for sh in slide.shapes):
-        return
-    logo = _brand_asset("logo", light=True)
-    if logo:
-        mark = slide.shapes.add_picture(
-            logo, engine.X(45), engine.X(45), engine.X(81), engine.X(31))
-        mark.name = "Logo"
-    tagline = _brand_asset("tagline", light=False)
-    if tagline:
-        # Bottom-right, clear of the cut band and of the footer line.
-        mark = slide.shapes.add_picture(
-            tagline, engine.X(1102), engine.X(633), engine.X(133), engine.X(45))
-        mark.name = "Tagline"
+    px = 9525
+
+    def place(label: str, asset: str, light: bool, box) -> None:
+        """Ensure exactly one mark in this slot, named.
+
+        Each mark is settled independently. One early return covering
+        both used to mean that a logo arriving from anywhere else made
+        the tagline skip its turn, so the cover kept an anonymous
+        `Picture 11` that nothing downstream could recognise.
+
+        Existing marks are ADOPTED rather than skipped: the picture is
+        already right, it is only unnamed, and everything that later
+        protects a mark from being moved, recoloured or counted looks it
+        up by name. Geometry as well as name, because the gallery's
+        chrome renderer draws the same asset under its own name.
+        """
+        if any((sh.name or "") == label for sh in slide.shapes):
+            return
+        slot = tuple(v * px for v in box)
+        standing = next(
+            (sh for sh in slide.shapes
+             if sh.left is not None
+             and _boxes_overlap((sh.left, sh.top, sh.width, sh.height), slot)),
+            None)
+        if standing is not None:
+            standing.name = label
+            return
+        path = _brand_asset(asset, light)
+        if path:
+            mark = slide.shapes.add_picture(path, *(engine.X(v) for v in box))
+            mark.name = label
+
+    place("Logo", "logo", True, (45, 45, 81, 31))
+    # Bottom-right, clear of the cut band and of the footer line.
+    place("Tagline", "tagline", False, (1102, 633, 133, 45))

@@ -92,7 +92,25 @@ TYPE_SCALE: dict[str, tuple] = {
     "stat_value":        (INTER, 64, 400, 1.0, -0.02, BLUE, False),
     "stat_value_md":     (INTER, 44, 400, 1.0, -0.02, BLUE, False),
     "number":            (INTER, 28, 400, 1.0, -0.01, BLUE, False),
+    # `figure` is the name BRAND_MODE's table gives this, but it cannot
+    # be used as a REGION role: `kone_engine` reads `role == "figure"`
+    # as an image and draws a picture box, so a divider spec'd that way
+    # renders the numeral as an empty placeholder. Region roles and type
+    # roles share one namespace at draw time and this is the one word
+    # they disagree about. `figure` stays as an alias for anything
+    # already asking for it by that name.
+    "section_numeral":       (INTER, 300, 400, 0.8, -0.04, BLACK, False),
+    "section_numeral_light": (INTER, 300, 400, 0.8, -0.04, WHITE, False),
     "figure":            (INTER, 300, 400, 0.8, -0.04, BLACK, False),
+
+    # A divider's title is not a slide title. BRAND_MODE's table says
+    # "every slide title is 32 -- no exceptions", and that rule is about
+    # CONTENT slides: both divider entries in the set specs ask for 56
+    # (`DIVIDER_NUMBERING` and `IMAGE_SECTION_DIVIDER`), independently,
+    # which is two witnesses for a distinct role rather than an
+    # exception to `title`. Naming it is what keeps the 32 rule intact.
+    "divider_title":       (INTER, 56, 400, 1.0, -0.025, BLACK, False),
+    "divider_title_light": (INTER, 56, 400, 1.0, -0.025, WHITE, False),
 }
 
 # Role names that encode a rendering rather than an intent. `gal_i64_141414`
@@ -229,6 +247,8 @@ _ON_DARK = {
     "body": "on_panel_body",
     "body_narrow": "on_panel_body",
     "eyebrow": "eyebrow_light",
+    "section_numeral": "section_numeral_light",
+    "divider_title": "divider_title_light",
 }
 
 
