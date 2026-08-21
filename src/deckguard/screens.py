@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import os
 
+import json
+
 from deckguard import assemble
 from deckguard import brandmode as bm
+from deckguard import meter
 from deckguard.ui import esc
 
 
@@ -29,13 +32,23 @@ def _thumb(name: str, content: dict | None = None) -> str:
                                   else sample_content(name))
 
 
-def _slide_tiles(audience: str) -> str:
+def _slide_tiles(stop: int) -> str:
+    """The layouts eligible at one stop of the meter.
+
+    Not greyed-out tiles for the stops above: showing someone a layout
+    they cannot use invites them to argue with the control they just
+    set. The meter moved, so the shelf changed.
+    """
     from deckguard.registry import _load_archetypes
 
     built = set(_load_archetypes().ARCHETYPES)
+    audience = meter.audience_for_stop(stop)
+    eligible = meter.pool_for_stop(stop)
     out = []
     for slide in bm.slides_in(audience):
         name = slide["archetype"]
+        if eligible and name not in eligible:
+            continue
         if name not in built:
             out.append(f'''<span class="tile off">
   <span class="frame"><span class="stub">Not built yet</span></span>
@@ -71,67 +84,67 @@ def _section_chips() -> str:
     return "".join(out)
 
 
+def _meter_control() -> str:
+    """Four stops, the segmented control the page already has."""
+    out = []
+    for entry in meter.stops():
+        n = entry.get("n")
+        checked = " checked" if n == meter.DEFAULT_STOP else ""
+        out.append(
+            '<label title="' + esc(entry.get("help", "")) + '">'
+            f'<input type="radio" name="stop" value="{n}"{checked} '
+            f'onchange="showStop({n})"> ' + esc(entry.get("label", "")) + "</label>")
+    return '<div class="seg meter">' + "".join(out) + "</div>"
+
+
 def home(error: str = "") -> str:
     note = f'<p class="note bad">{esc(error)}</p>' if error else ""
-    ai = bool(os.environ.get("ANTHROPIC_API_KEY"))
-    ai_hint = (
-        "Paste a brief or an announcement email and it drafts the slides for you."
-        if ai else
-        "No API key on this server, so briefs are not planned — pick slides below instead. "
-        "Everything else works without one."
-    )
+    # Said once, and only when it is true. The page used to explain the
+    # brief, the sections, the audience and the upload in four
+    # paragraphs nobody reads twice.
+    ai_note = "" if os.environ.get("ANTHROPIC_API_KEY") else (
+        '<p class="hint">No API key here — pick slides below instead.</p>')
     open_note = "" if os.environ.get("DECKGUARD_WEB_PASSWORD") else (
-        '<p class="hint">No password is set on this server.</p>')
+        '<p class="hint">No password set.</p>')
+    meter_json = json.dumps(
+        {e["n"]: meter.summary(e["n"]) for e in meter.stops()})
 
     panels = "".join(
-        f'<div class="set" data-audience="{a}" style="display:none">'
-        f'<div class="grid">{_slide_tiles(a)}</div></div>'
-        for a in bm.set_names())
+        f'<div class="set" data-stop="{n}" style="display:none">'
+        f'<div class="grid">{_slide_tiles(n)}</div></div>'
+        for n in range(1, len(meter.stops()) + 1))
 
     return f"""{note}
 <div class="rule"></div>
 <h2 class="section">Build a KONE deck</h2>
-<p class="lede">Give it a brief, pick the slides yourself, or attach a deck and use its own
-  designs as templates. Any combination. It builds straight away and you edit afterwards.</p>
 
 <form method="post" action="/generate" enctype="multipart/form-data">
+  <div class="field">
+    <span class="label">How far from the template</span>
+    {_meter_control()}
+    <p class="hint" id="meter-note">{esc(meter.summary(meter.DEFAULT_STOP))}</p>
+  </div>
   <div class="cols">
     <div>
       <div class="field">
         <span class="label">Brief, or an email to turn into slides</span>
         <textarea name="brief" rows="9" placeholder="Paste the announcement, the notes, or a
 sentence about what the deck is for."></textarea>
-        <p class="hint">{ai_hint}</p>
+        {ai_note}
       </div>
       <div class="field">
         <span class="label">Deck title</span>
-        <input type="text" name="title" placeholder="Taken from the brief if you leave it empty">
-      </div>
-      <div class="field">
-        <span class="label">What should the deck cover?</span>
-        <div class="chips">{_section_chips()}</div>
-        <p class="hint">Optional, and the single biggest thing you can do for the result.
-          The brief says what happened; this says what the deck needs to show — so it picks
-          a layout per section instead of guessing at the shape.</p>
+        <input type="text" name="title" placeholder="Taken from the brief">
       </div>
     </div>
     <div>
       <div class="field">
-        <span class="label">Audience</span>
-        <div class="seg">
-          <label><input type="radio" name="audience" value="internal" checked
-            onchange="showSet('internal')"> Internal</label>
-          <label><input type="radio" name="audience" value="external"
-            onchange="showSet('external')"> External</label>
-        </div>
-        <p class="hint">Internal allows the secondary colours and the icon-led layouts.
-          External is blue, white, black and photography only.</p>
+        <span class="label">What the deck should cover</span>
+        <div class="chips">{_section_chips()}</div>
       </div>
       <div class="field">
-        <span class="label">Your own deck (optional)</span>
+        <span class="label">Your own deck</span>
         <input type="file" name="deck" accept=".pptx">
-        <p class="hint">Its slide designs are read out as templates you can build from.
-          Nothing in it is changed.</p>
       </div>
       <div class="actions">
         <button type="submit">Build the deck</button>
@@ -141,21 +154,22 @@ sentence about what the deck is for."></textarea>
   </div>
 
   <div class="hair"></div>
-  <span class="label">Or pick slides — optional</span>
-  <p class="hint" style="margin-bottom:16px;">Leave these alone and the brief decides.
-    Pick some and it uses exactly those, in this order.</p>
+  <span class="label">Or pick slides</span>
   {panels}
 </form>
 
 <script>
-function showSet(a) {{
+var METER = {meter_json};
+function showStop(n) {{
   document.querySelectorAll('.set').forEach(function (p) {{
-    var on = p.dataset.audience === a;
+    var on = p.dataset.stop === String(n);
     p.style.display = on ? 'block' : 'none';
     if (!on) p.querySelectorAll('input[name=pick]').forEach(function (c) {{ c.checked = false; }});
   }});
+  var note = document.getElementById('meter-note');
+  if (note && METER[n]) note.textContent = METER[n];
 }}
-showSet('internal');
+showStop({meter.DEFAULT_STOP});
 </script>"""
 
 

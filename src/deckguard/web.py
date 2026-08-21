@@ -125,7 +125,16 @@ async def generate(request: Request, _auth: None = Depends(_require_auth)):
     _cleanup()
     form = await request.form()
     brief = str(form.get("brief") or "").strip()
-    audience = str(form.get("audience") or "internal").strip()
+    # The meter is the only audience control: stops 1-2 build a
+    # customer-safe deck, 3-4 an internal one. An `audience` field is
+    # still accepted so an older form post keeps working.
+    from deckguard import meter
+
+    try:
+        stop = int(form.get("stop") or meter.DEFAULT_STOP)
+    except (TypeError, ValueError):
+        stop = meter.DEFAULT_STOP
+    audience = str(form.get("audience") or meter.audience_for_stop(stop)).strip()
     title = str(form.get("title") or "").strip()
     picks = [p for p in form.getlist("pick") if p]
     sections = [s for s in form.getlist("section") if s]
@@ -162,7 +171,7 @@ async def generate(request: Request, _auth: None = Depends(_require_auth)):
     try:
         plan = assemble.plan(
             brief=brief, audience=audience, picks=picks, mined=mined,
-            title=title, sections=sections,
+            title=title, sections=sections, stop=stop,
         )
     except Exception as exc:  # noqa: BLE001
         shutil.rmtree(work, ignore_errors=True)

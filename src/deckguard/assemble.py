@@ -34,6 +34,7 @@ def plan(
     mined: Optional[dict] = None,
     title: str = "",
     sections: Optional[list] = None,
+    stop: Optional[int] = None,
 ) -> dict:
     """The deck, as a spec, before anything is drawn."""
     picks = list(picks or [])
@@ -43,7 +44,7 @@ def plan(
     chosen = _chosen_archetypes(picks, audience, mined, built)
     samples = mined.get("samples") or {}
     if brief.strip():
-        slides = _from_brief(brief, audience, chosen, sections or [])
+        slides = _from_brief(brief, audience, chosen, sections or [], stop)
     elif chosen:
         slides = [_seed(name, samples) for name in chosen]
     else:
@@ -95,24 +96,47 @@ def _mined_names(mined: dict) -> list:
                   key=lambda n: min(order.get(n) or [999]))
 
 
-def _menu(audience: str) -> str:
+def _menu(audience: str, stop: Optional[int] = None) -> str:
     """The audience's set, each entry carrying what it needs.
 
     `brandmode.menu` gave the job and nothing else, so an archetype
     whose material the brief does not contain looked exactly as
     choosable as one whose material it does. The contract is the part
     that lets a layout be ruled OUT.
+
+    Filtered to the meter's stop when one is given. The filter IS the
+    enforcement -- a model cannot choose a layout it was never shown --
+    so nothing downstream re-validates the choice.
     """
     try:
         from deckguard import contracts
 
-        return contracts.guide(audience)
+        guide = contracts.guide(audience)
     except Exception:  # noqa: BLE001 -- a menu without contracts still works
         return bm.menu(audience)
+    if not stop:
+        return guide
+    try:
+        from deckguard import meter
+
+        pool = meter.pool_for_stop(stop)
+    except Exception:  # noqa: BLE001 -- no meter means the whole set
+        return guide
+    if not pool:
+        return guide
+    # Entries are two lines each: "  name — job." then "      needs: ...".
+    kept, keep = [], False
+    for line in guide.split("\n"):
+        if line.startswith("  ") and not line.startswith("      "):
+            keep = line.strip().split(" ")[0] in pool
+        if keep:
+            kept.append(line)
+    return "\n".join(kept)
 
 
 def _from_brief(brief: str, audience: str, chosen: list,
-                sections: Optional[list] = None) -> list:
+                sections: Optional[list] = None,
+                stop: Optional[int] = None) -> list:
     """Plan the content. With picks already made, the planner fills
     those; without, it chooses from the audience's set too."""
     from deckguard.planner import call_claude_for_kone_spec
@@ -153,8 +177,16 @@ def _from_brief(brief: str, audience: str, chosen: list,
             "  - Every entry below says what it NEEDS. If the source does "
             "not give you that material, the answer is a different "
             "archetype, not the same one half filled.\n\n"
-            f"The {audience} menu:\n" + _menu(audience)
+            f"The {audience} menu:\n" + _menu(audience, stop)
         )
+        if stop:
+            from deckguard import meter
+
+            where = meter.stop(stop)
+            notes = (f"This deck is being built at stop {stop} "
+                     f"({where.get('label', '').lower()}, {audience} audience). "
+                     "The menu below is already filtered to that stop -- it is "
+                     "context, not a rule to obey.\n\n") + notes
         wanted = bm.sections_brief(sections or [], audience)
         if wanted:
             # The brief says what happened; this says what the deck has

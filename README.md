@@ -695,6 +695,30 @@ pip install -e ".[dev]"
 pytest
 ```
 
+### The deviation meter
+
+One control, four stops, one axis — Claude Design's design, and the
+argument for it is the part worth keeping: an audience switch plus a
+freedom slider is two controls for one decision, and the corners of that
+matrix are decks nobody should be able to make. Collapsing them means
+the illegal combinations cannot be expressed.
+
+    1  On template          the master's own layouts            external
+    2  Slight deviation     master bands, re-divided            external
+    3  Moderate deviation   off-master composition on the grid  internal
+    4  Internal slide types plus the programme artefacts        internal
+
+**The meter changes which layouts are eligible and nothing else.** It
+does not loosen colour, type, icons or chrome as it moves right — those
+are properties of the archetype and the set, not of the stop. Pools are
+cumulative and audience is inferred, so there is no second switch.
+
+The filter is the whole enforcement: the planner's menu is cut to the
+stop's pool, so a model cannot choose a layout it was never shown and
+nothing downstream has to re-validate. Tiers live in
+`docs/design-handoff/meter.json`, which is the artefact a designer
+edits — not in Python.
+
 ### What a KONE deck looks like
 
 Measured off a finished KONE deck ("Life, upgraded in ONE week") rather

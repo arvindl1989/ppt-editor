@@ -111,6 +111,12 @@ button:disabled {{ opacity: .45; cursor: not-allowed; }}
 .seg label {{ padding: 9px 18px; cursor: pointer; font-size: 15px; }}
 .seg input {{ position: absolute; opacity: 0; pointer-events: none; }}
 .seg label:has(input:checked) {{ background: var(--blue); color: #fff; }}
+/* The meter reads left to right, so its stops carry a scale: a hairline
+   between them and a tick under the one in force. */
+.seg.meter {{ width: 100%; }}
+.seg.meter label {{ flex: 1; text-align: center; font-size: 14px; padding: 9px 10px;
+  border-left: 1px solid var(--hairline); }}
+.seg.meter label:first-child {{ border-left: 0; }}
 
 .grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(226px, 1fr)); gap: 18px; }}
 .tile {{ display: block; cursor: pointer; position: relative; }}

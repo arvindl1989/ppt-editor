@@ -7,6 +7,8 @@ puts them, and a card grid that reads like slide 8 without repeating its
 two accessibility mistakes.
 """
 
+import re
+
 from deckguard import brandmode as bm
 from deckguard import layouts as L
 
@@ -216,3 +218,156 @@ def test_there_is_exactly_one_sand():
     # value in the comment that records why it changed.
     stale = [p.name for p in root.glob("*.py") if '"F3EEE6"' in p.read_text()]
     assert not stale, stale
+
+
+# --------------------------------------------------------------------------
+# the deviation meter
+# --------------------------------------------------------------------------
+
+
+def test_the_meter_is_read_from_the_designers_file_not_hard_coded():
+    from deckguard import meter
+
+    assert meter.METER_FILE.name == "meter.json"
+    assert len(meter.stops()) == 4
+    assert [s["n"] for s in meter.stops()] == [1, 2, 3, 4]
+
+
+def test_pools_are_cumulative():
+    """Stop 4 contains stop 1. A layout does not become ineligible by
+    moving the control to the right."""
+    from deckguard import meter
+
+    pools = [meter.pool_for_stop(n) for n in (1, 2, 3, 4)]
+    for smaller, larger in zip(pools, pools[1:]):
+        assert smaller < larger, "each stop must contain the one before it"
+
+
+def test_audience_is_inferred_from_the_stop_and_there_is_no_second_switch():
+    from deckguard import meter, screens
+
+    assert meter.audience_for_stop(1) == "external"
+    assert meter.audience_for_stop(2) == "external"
+    assert meter.audience_for_stop(3) == "internal"
+    assert meter.audience_for_stop(4) == "internal"
+
+    page = screens.home()
+    assert 'name="stop"' in page
+    assert 'name="audience"' not in page, "the meter IS the audience control"
+
+
+def test_stops_one_and_two_offer_no_secondary_colour_field():
+    """Tiers 1-2 are external and the external field policy is white
+    plus blue. An archetype whose declared field is a secondary colour
+    cannot sit there -- which is why `agenda_c_split` is tier 3 despite
+    its geometry being a modest deviation."""
+    from deckguard import meter
+    from deckguard.registry import _load_archetypes
+
+    built = set(_load_archetypes().ARCHETYPES)
+    allowed = {"white", "photo", "blue", ""}
+    for stop in (1, 2):
+        audience = meter.audience_for_stop(stop)
+        for name in meter.pool_for_stop(stop) & built:
+            field = next((s["field"] for s in bm.slides_in(audience)
+                          if s["archetype"] == name), "")
+            assert field in allowed, f"stop {stop}: {name} declares {field}"
+
+
+def test_the_menu_the_planner_sees_is_filtered_to_the_stop():
+    """The filter IS the enforcement -- a model cannot choose a layout it
+    was never shown, so nothing downstream re-validates the choice."""
+    from deckguard import assemble, meter
+
+    for stop in (1, 4):
+        menu = assemble._menu(meter.audience_for_stop(stop), stop)
+        names = [line.strip().split(" ")[0] for line in menu.split("\n")
+                 if line.startswith("  ") and not line.startswith("      ")]
+        assert names, stop
+        assert set(names) <= meter.pool_for_stop(stop), stop
+
+    wide = assemble._menu("internal", 4)
+    narrow = assemble._menu("external", 1)
+    assert len(wide.split("\n")) > len(narrow.split("\n"))
+
+
+def test_the_picker_shows_only_the_current_stop():
+    """Not greyed-out tiles for the stops above: showing someone a
+    layout they cannot use invites them to argue with the control they
+    just set."""
+    from deckguard import meter, screens
+
+    for stop in (1, 4):
+        tiles = screens._slide_tiles(stop)
+        offered = set(re.findall(r'<span>([a-z_0-9]+)</span>', tiles))
+        assert offered, stop
+        assert offered <= meter.pool_for_stop(stop), stop
+
+
+def test_a_stop_out_of_range_is_clamped_rather_than_crashing():
+    from deckguard import meter
+
+    assert meter.stop(0)["n"] == 1
+    assert meter.stop(99)["n"] == 4
+    assert meter.audience_for_stop(0) == "external"
+
+
+def test_the_summary_says_what_the_stop_costs():
+    from deckguard import meter
+
+    assert "customer-safe" in meter.summary(1)
+    assert "internal only" in meter.summary(4)
+    # stop 1 is short three layouts until the unbuilt five are drawn
+    assert "not built yet" in meter.summary(1)
+
+
+def test_the_page_posts_a_stop_and_the_app_reads_it():
+    from fastapi.testclient import TestClient
+
+    from deckguard.web import app
+
+    client = TestClient(app)
+    r = client.post("/generate", data={"stop": "1", "pick": ["external:7"]})
+    assert r.status_code == 200
+    # stop 1 is external, so an external slide was accepted
+    assert "title_content" in r.text
+
+
+def test_the_page_stopped_explaining_itself():
+    """Four paragraphs of hint copy nobody reads twice. The meter says
+    its own consequence in one line instead."""
+    import re as _re
+
+    from deckguard import screens
+
+    page = screens.home()
+    prose = " ".join(_re.sub(r"<[^>]+>", " ", b) for b in
+                     _re.findall(r'<p class="(?:hint|lede)"[^>]*>(.*?)</p>', page, _re.S))
+    assert len(_re.findall(r"[A-Za-z][A-Za-z',.-]*", prose)) < 40
+
+
+def test_the_meter_ships_inside_the_package():
+    """It lived in `docs/` first, which is outside the package -- a pip
+    install would not have shipped it and the meter would have come up
+    with no stops on the deploy while working perfectly here."""
+    from deckguard import meter
+
+    assert "site-packages" in str(meter.METER_FILE) or "src/deckguard" in str(meter.METER_FILE)
+    assert meter.METER_FILE.is_file()
+    assert meter.stops(), "no stops means no meter"
+
+
+def test_the_packaged_meter_matches_the_one_design_sent():
+    """Two copies drift. The packaged one is read; the one in `docs/` is
+    the handoff as received, and this says when they disagree."""
+    import json
+    import pathlib
+
+    from deckguard import meter
+
+    received = (pathlib.Path(__file__).resolve().parent.parent
+                / "docs" / "design-handoff" / "meter.json")
+    if not received.is_file():
+        return
+    assert json.loads(received.read_text()) == json.loads(
+        meter.METER_FILE.read_text()), "copy docs/design-handoff/meter.json into assets"
